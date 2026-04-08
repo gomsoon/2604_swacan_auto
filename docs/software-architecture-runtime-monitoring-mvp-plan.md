@@ -336,34 +336,72 @@
 ### 13.5 관측 가능성
 - backend 자체의 로그, 세션, 처리 상태를 관리자 콘솔에서 확인할 수 있어야 한다.
 
-## 14. 추가 검토가 필요한 항목
+## 14. MVP Decision Summary
 
-### 14.1 메타모델 변경 관리
-- 메타모델과 notation의 수정 시 기존 view와 runtime binding에 미치는 영향을 어떻게 관리할지 정책이 필요하다.
-- 초안 수준에서는 `draft/published/deprecated` 버전 관리 개념 도입을 권장한다.
+### 14.1 Metamodel Change Management
+- Metamodel and notation use `draft`, `published`, and `deprecated` states.
+- Published items are immutable. Any change must be introduced through a new draft version and then published.
+- Each architecture model and view must explicitly reference its `metamodel_version_id`.
+- Automatic destructive migration is out of scope for the MVP.
 
-### 14.2 시각화 규칙 엔진
-- 속성값 변화에 따른 색상, 텍스트, 배지, 강조 효과의 정의 방식과 우선순위 정책이 필요하다.
-- MVP에서는 기본 rule set부터 시작하는 것이 적절하다.
+### 14.2 Visualization Rule Policy
+- MVP visualization rules use a declarative rule table rather than script execution.
+- A rule contains `target type`, `property`, `operator`, `compare value`, `priority`, and `effect type`.
+- MVP effect types are limited to `color`, `badge`, `text override`, and `visibility/emphasis`.
+- Rules are evaluated in the backend and the frontend only renders the evaluated result.
+- Custom code execution and complex nested expressions are out of scope for the MVP.
 
-### 14.3 다중 사용자 편집 정책
-- 동시 편집 충돌 처리 전략이 아직 상세화되지 않았다.
-- MVP에서는 optimistic locking 또는 view 단위 편집 잠금 정책을 권장한다.
+### 14.3 Multi-user Editing Policy
+- Simultaneous monitoring access is allowed.
+- Editing is restricted by a view-level lock. Only one user can edit a view at a time and others remain read-only.
+- Save operations must include revision or optimistic concurrency checks.
+- Locks are maintained by heartbeat and released automatically on session end or timeout.
+- Fine-grained collaborative merge editing is out of scope for the MVP.
 
-### 14.4 로그 저장 범위
-- backend 운영 로그를 DB에 저장할지, 파일 기반으로 관리하고 메타정보만 DB에 둘지 결정이 필요하다.
+### 14.4 Logging Policy
+- Full application logs are managed through files or stdout/stderr.
+- The database stores only structured operational logs and audit logs needed for the admin console.
+- MVP DB log targets are limited to `warning/error`, authentication failures, agent communication failures, metamodel changes, and important user actions.
+- The admin console provides filtered access to these structured logs.
+- Full centralized log analytics is out of scope for the MVP.
 
-### 14.5 시간 동기화와 이벤트 순서
-- agent와 backend 간 시간 차이, 중복 전송, 지연 전송 처리 규칙을 상세화할 필요가 있다.
+### 14.5 Time Sync and Event Ordering Policy
+- Event ordering is guaranteed per agent, not as a single global absolute order.
+- Each event or snapshot must contain `agent_id`, `boot_id`, `seq`, `occurred_at`, and `received_at`.
+- Deduplication and ordering use `(agent_id, boot_id, seq)`.
+- Latest state is maintained by snapshot/upsert logic rather than full event replay.
+- Late-arriving events remain in the event log, but current state calculation prioritizes the latest snapshot.
 
-## 15. 종합 판단
+## 15. Further Review Items
+
+### 15.1 Metamodel Version Migration
+- The full product still needs a policy for moving existing views and bindings to newer metamodel versions.
+- Compatibility checks, impact analysis, and semi-automatic migration support should be reviewed later.
+
+### 15.2 Visualization Rule Scope and Precedence
+- Future versions may need precedence across type defaults, model-specific rules, and view-level overrides.
+- Conflict resolution for multiple rules affecting the same property still needs a detailed policy.
+
+### 15.3 Runtime Binding Re-match and Stale State
+- A detailed policy is still needed for deciding when a changed PID/host match means restart, replacement, or disappearance.
+- Stale timeout and partial-loss handling for grouped runtime instances also need later review.
+
+### 15.4 Log Retention and External Integration
+- Log retention period, rotation/deletion policy, and external log system integration should be defined later.
+- It should also be reviewed whether PostgreSQL adoption changes the DB logging scope.
+
+### 15.5 Advanced Time Synchronization
+- Later stages should review host clock drift monitoring, NTP status reflection, and cross-agent event correlation policy.
+- The UI policy for late-event display and ordering also remains a later design topic.
+
+## 16. Summary
 
 - 본 시스템은 단순 아키텍처 드로잉 도구가 아니라, 메타모델 기반 아키텍처 정보 관리와 런타임 관측을 결합한 플랫폼으로 정의하는 것이 적절하다.
 - MVP 범위는 충분히 현실적이며, Linux 비침습형 agent와 SQLite 기반 backend로 시작해도 제품의 핵심 가치를 검증할 수 있다.
 - 특히 `containment`, `notation registry`, `logical component vs runtime instances`, `group abstraction`, `관리자 콘솔`은 초기 설계에 반드시 반영해야 할 핵심 개념이다.
 - 이후 요구사항 추출 단계에서는 본 문서를 기준으로 `사용자 기능`, `관리 기능`, `실시간 처리`, `데이터 모델`, `운영 및 보안`으로 나누어 상세 요구사항을 도출하는 것이 바람직하다.
 
-## 16. 다음 단계 제안
+## 17. Next Steps
 
 - 본 문서를 기준으로 기능 요구사항을 사용자 스토리 또는 시스템 요구사항 형태로 분해한다.
 - SQLite 기준의 개념 ERD와 테이블 초안을 작성한다.
