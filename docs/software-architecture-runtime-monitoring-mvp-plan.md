@@ -64,6 +64,7 @@
 - `Physical Server -> Virtual Machine -> Process -> Thread` 또는 `Physical Server -> Process -> Thread`와 같은 포함 관계를 메타모델에 정의하고 이를 canvas와 backend 검증에 모두 반영한다.
 - 잘못된 포함 구조는 저장할 수 없어야 한다.
 
+- A non-invasive `MonitoringAgent` is treated as a separate process-like element inside a `PhysicalServer` or `VirtualMachine`, and observes process or group elements through the `monitors` association.
 ### 4.5 Group Abstraction
 - 실제 runtime은 multi-server, multi-process, multi-thread 구조를 가지므로, canvas의 객체는 개별 실행 인스턴스가 아니라 논리 실행 단위 또는 실행 그룹을 표현할 수 있어야 한다.
 - 하나의 `Server`, `Process`, `Thread` 객체가 여러 runtime instance를 대표할 수 있어야 한다.
@@ -105,12 +106,14 @@
 - 실시간 이벤트 수신 및 전파
 - 관리자용 운영 상태 및 로그 제공
 
+- MonitoringAgent definition, runtime state, and monitor associations
 ### 6.3 Agent
 - Linux OS 상에서 단독 실행되는 비침습형 daemon
 - host와 process 수준의 자원 정보를 수집
 - backend 미연결 시 로컬 SQLite outbox에 임시 저장
 - 연결 복구 시 순차 재전송
 
+- It runs as a separate process inside the monitored execution node and can be represented in the canvas as a `MonitoringAgent` element.
 ## 7. 메타모델 및 공통 정보 모델 구조
 
 ### 7.1 메타모델 방향
@@ -126,6 +129,7 @@
 - `ExecutionThread`
 - `CommunicationLink`
 
+- `MonitoringAgent`
 ### 7.3 관계 유형
 - `contains`
 - `communicates_with`
@@ -133,16 +137,19 @@
 - `hosts`
 - `runs_on`
 
+- `monitors`
 ### 7.4 속성 정의 방식
 - 각 의미 타입은 property definition을 가진다.
 - 속성은 이름, 데이터 타입, 단위, 기본값, 필수 여부, 런타임 수집 가능 여부를 가진다.
 - 속성은 모델 속성과 런타임 속성으로 구분한다.
 
+- `MonitoringAgent` can expose properties such as `agent_id`, `agent_version`, `status`, `last_heartbeat_at`, `backend_connection_status`, `queue_depth`, and `last_ack_seq`.
 ### 7.5 Notation 정의 방식
 - notation은 의미 타입에 매핑되는 표현 규칙이다.
 - notation은 도형 종류, 기본 크기, 선 스타일, 라벨 위치, 포트 위치, palette 노출 여부, 시각 표현 스키마를 가진다.
 - 새로운 notation이 DBMS에 추가되면 frontend palette는 이를 조회하여 자동으로 반영해야 한다.
 
+- `MonitoringAgent` may use a process-like notation, but should still be visually distinguished from a normal `SoftwareProcess` by color, badge, or label treatment.
 ## 8. Backend 상세 기획
 
 ### 8.1 Backend의 역할 정의
@@ -163,6 +170,8 @@
 - user session
 - audit log
 
+- monitoring agent definition
+- monitoring agent state
 ### 8.3 Notation Registry
 - backend는 notation registry를 제공해야 한다.
 - 각 notation은 고유 식별자와 사람이 읽을 수 있는 안정적인 code 값을 함께 가져야 한다.
@@ -177,6 +186,8 @@
 - 저장 전 validation 단계에서 containment 위반 여부를 검사해야 한다.
 - drag and drop, 복사, 붙여넣기, 이동, 삭제 후에도 containment 규칙이 유지되어야 한다.
 
+- `PhysicalServer` and `VirtualMachine` can contain a `MonitoringAgent`.
+- `MonitoringAgent` does not contain `SoftwareProcess` or `ExecutionThread` as children; it connects to them through the `monitors` association.
 ### 8.5 Group Abstraction과 Aggregation
 - backend는 모델 객체 1개가 runtime instance 여러 개를 대표할 수 있도록 지원해야 한다.
 - 이를 위해 각 요소에 `instance_mode`를 둔다.
@@ -190,6 +201,7 @@
 - binding은 `target_id`, selector, OS 정보, agent 식별자, 현재 매칭된 PID/host 목록 등을 포함한다.
 - 논리 객체는 사람이 이해하는 안정적인 target 단위로 관리하고, PID/TID는 런타임 식별자로만 사용한다.
 
+- The backend should manage the relationship between a `MonitoringAgent`, its execution node, and its monitored targets, together with the agent runtime state.
 ### 8.7 실시간 상태 및 이벤트 처리
 - latest state와 event log는 분리 관리한다.
 - latest state는 monitoring view의 즉시 렌더링에 사용한다.
@@ -226,12 +238,14 @@
 - 요소 좌표, 크기, 계층, 라벨, edge routing 정보를 저장한다.
 - 완성된 view는 복제하여 새로운 view로 쉽게 생성할 수 있어야 한다.
 
+- The editor canvas should provide `MonitoringAgent` as a separate palette element and allow placement inside a `PhysicalServer` or `VirtualMachine`.
 ### 9.2 Monitoring View
 - architecture model 위에 latest runtime state를 overlay 형태로 표현한다.
 - 색상, 텍스트, 배지, 강조 효과는 속성값과 시각화 규칙에 따라 동적으로 변경한다.
 - group abstraction이 적용된 요소는 `xN` 형태의 배지 또는 겹침 표기 등으로 표현할 수 있어야 한다.
 - monitoring view 하단에는 이벤트 패널을 제공한다.
 
+- The monitoring view should visualize internal agent state such as heartbeat, backend connection status, and queue depth.
 ### 9.3 실시간 통신 방식
 - WebSocket 기반 이벤트 수신을 기본으로 한다.
 - 주기적 snapshot 조회를 병행하여 데이터 유실, 연결 장애, frontend/backend 불일치 상태를 복구한다.
@@ -248,11 +262,13 @@
 - 대상 소프트웨어 내부에 삽입하지 않는다.
 - `/proc`, `/sys` 등 OS가 제공하는 정보를 활용해 host 및 process 상태를 수집한다.
 
+- The agent itself runs as a separate process, so the canvas should be able to represent it as `MonitoringAgent` and the backend should accept its self-state as runtime data.
 ### 10.2 수집 범위
 - Host: hostname, uptime, cpu, memory, disk, network, agent health
 - Process: pid, ppid, name, exe path, cmdline, state, uptime, cpu, memory, thread_count, fd_count, io bytes
 - Thread: MVP에서는 개별 thread 상세보다 `thread_count` 중심으로 제한한다.
 
+- Agent Self State: agent pid, start time, heartbeat time, backend connection status, outbox queue depth, last_sent_seq, last_ack_seq
 ### 10.3 대상 Process 지정 방식
 - 관리 대상은 `target_id` 기준으로 정의한다.
 - selector는 `command line regex`, `executable path`, `process name`, `pid` 등을 지원한다.
@@ -306,6 +322,7 @@
 - latest state와 event log 저장
 - 관리자 콘솔 기본 기능
 
+- `MonitoringAgent` modeling and status visualization
 ### 12.2 제한 범위
 - 개별 thread 상세 분석
 - 침습형 agent 또는 application 내부 SDK
