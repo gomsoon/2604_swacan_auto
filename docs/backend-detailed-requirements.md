@@ -227,6 +227,12 @@
 - [필수] 로그는 최소한 `timestamp`, `severity`, `component`, `message`, `related object id` 로 필터링 가능해야 한다.
 - [필수] 관리자는 agent 연결 문제, 저장 실패, 인증 실패, 메타모델 변경, 주요 사용자 작업 로그를 확인할 수 있어야 한다.
 
+### 10.4 Debug payload 조회
+
+- [필수] backend 가 debug mode 로 구동 중일 때, 관리자 또는 개발자는 저장된 통신 payload 로그를 조회할 수 있어야 한다.
+- [필수] debug payload 로그는 최소한 시간 범위, 채널, 방향, endpoint 또는 topic, agent_id, user_id, session_id, trace_id 로 필터링 가능해야 한다.
+- [필수] debug payload 로그 조회는 운영 로그 조회와 분리된 기능으로 제공해야 한다.
+
 ## 11. 데이터 저장 전략 요구사항
 
 ### 11.1 SQLite 사용 전략
@@ -243,12 +249,25 @@
 - [필수] 모든 이벤트와 상태 갱신에는 `occurred_at`, `received_at`, `updated_at` 중 필요한 시간을 명시적으로 저장해야 한다.
 - [필수] 상태 계산은 event stream 전체 재생이 아니라 latest snapshot 과 sequence 기준으로 수행해야 한다.
 
+### 11.3 Debug mode 통신 payload 기록 정책
+
+- [필수] backend 는 debug mode 로 구동될 때 `agent <-> backend`, `backend <-> frontend` 통신 payload 를 별도의 debug 저장 영역에 기록할 수 있어야 한다.
+- [필수] 해당 기능의 기본값은 비활성화 상태여야 하며, 운영 모드에서는 자동으로 저장되지 않아야 한다.
+- [필수] 저장 대상에는 최소한 agent 요청 JSON, backend 응답 JSON, frontend API 응답 payload, 실시간 갱신 메시지 payload 가 포함되어야 한다.
+- [필수] debug payload 로그는 운영용 event/log 테이블과 분리된 전용 테이블에 저장해야 한다.
+- [필수] 각 debug payload 레코드는 최소한 `channel`, `direction`, `endpoint_or_topic`, `agent_id`, `user_id`, `session_id`, `trace_id`, `status_code`, `payload_size`, `occurred_at` 정보를 포함해야 한다.
+- [필수] payload 저장 시 인증 토큰, 세션 쿠키, 비밀번호 등 민감 정보는 마스킹 또는 제거해야 한다.
+- [필수] debug payload 저장의 목적은 영구 감사가 아니라 재현 가능한 디버깅 지원이어야 한다.
+- [필수] MVP 에서는 debug payload 로그를 최근 24시간까지만 보존하거나, 동등한 짧은 보존 정책을 적용해야 한다.
+- [필수] 관리자 또는 개발자는 문제 조사 시 debug payload 로그를 시간 순서대로 조회하여 요청과 응답 흐름을 추적할 수 있어야 한다.
+
 ## 12. 테스트 요구사항
 
 - [필수] `pytest` 를 사용하여 단위 테스트와 Flask API 테스트를 작성해야 한다.
 - [필수] containment 검증, notation registry 조회, metamodel publish 정책, runtime binding, stale 처리, duplicate event 처리에 대한 테스트가 필요하다.
 - [필수] agent payload 수신 API 는 정상 수신, 중복 수신, 순서 역전, 인증 실패, 부분 수용에 대한 테스트가 필요하다.
 - [필수] 관리자 기능에 대해서는 메타모델 변경 권한, 로그 조회, 세션 조회 테스트가 필요하다.
+- [필수] debug mode 에 대해서는 payload 저장 활성화 여부, 민감 정보 마스킹, 보존 기간 정리, 요청/응답 연계 조회 테스트가 필요하다.
 - [선택] 이후 버전에서는 성능 테스트와 장시간 soak test 를 추가할 수 있다.
 
 ## 13. MVP 에서 제외하거나 단순화하는 항목
@@ -272,5 +291,5 @@
 
 - 본 백엔드는 단순한 CRUD 서버가 아니라 메타모델 기반 architecture monitoring backend 로 설계해야 한다.
 - 메타모델, notation, architecture model, runtime instance, latest state, event log 는 명확히 분리되어야 한다.
-- containment 규칙, group abstraction, MonitoringAgent, stale 정책, 1주 로그 보존, NTP 기반 밀리초 시간 정책, event storm 완화를 위한 반복 이벤트 그룹화는 MVP 에서 반드시 반영되어야 한다.
+- containment 규칙, group abstraction, MonitoringAgent, stale 정책, 1주 로그 보존, NTP 기반 밀리초 시간 정책, event storm 완화를 위한 반복 이벤트 그룹화, debug mode 통신 payload 기록 정책은 MVP 에서 반드시 반영되어야 한다.
 - 본 문서는 이후 ERD, API, 테스트 설계의 기준 문서로 사용한다.
