@@ -32,6 +32,13 @@
 - `Milestone 4`: debug mode 와 outbox 복구 게이트
 - `Milestone Gate`: 최소 E2E 수용 기준 전체 검증
 
+## 3.1 Agent 구현 권장 순서
+
+- agent 구현은 `설정/runner -> selector -> snapshot collector -> SQLite outbox -> transport -> backend 계약 테스트 -> Linux 실제 통합 테스트` 순서를 기본으로 한다.
+- backend ingest API 가 준비되어 있더라도, agent 는 별도 축으로 단계적 구현을 진행하고 각 단계마다 독립 `pytest` 테스트를 먼저 붙인다.
+- backend 와의 연동 검증은 transport 구현 이후 별도 계약 테스트 세트로 유지한다.
+- Linux 실제 통합 테스트는 마지막 게이트로 두되, dummy target process 와 실행 절차 준비는 너무 늦지 않게 시작한다.
+
 ## 4. Milestone 0 - 개발 골격과 seed 준비
 
 ### B-001 프로젝트 골격 생성
@@ -208,6 +215,16 @@
 - 선행 조건: 없음
 - 연결 테스트: agent 설정 로딩 테스트
 
+### B-205A agent runner 와 주기 스케줄 골격 구현
+
+- 우선순위: `필수`
+- 설명: 설정을 바탕으로 heartbeat, snapshot, flush 주기를 실행하는 최소 runner 골격을 만든다.
+- 완료 기준:
+- 단일 프로세스에서 scheduler 와 collector/transport 호출 경계가 분리되어야 한다.
+- 주기 함수가 테스트에서 독립 호출 가능해야 한다.
+- 선행 조건: B-205
+- 연결 테스트: runner 주기 실행 테스트
+
 ### B-206 selector 와 process snapshot 수집 구현
 
 - 우선순위: `필수`
@@ -217,6 +234,16 @@
 - `target_id`, `pid`, `state`, `cpu_usage`, `memory_rss` 가 포함되어야 한다.
 - 선행 조건: B-205
 - 연결 테스트: selector 및 snapshot 테스트
+
+### B-206A agent 단위 테스트 1차 세트 구축
+
+- 우선순위: `필수`
+- 설명: selector, snapshot, payload 직렬화, sequence 증가 로직에 대한 빠른 단위 테스트 세트를 고정한다.
+- 완료 기준:
+- backend 없이도 실행 가능한 agent 단위 테스트 세트가 분리되어 있어야 한다.
+- branch coverage report 에 agent 핵심 분기 경로가 포함되어야 한다.
+- 선행 조건: B-205, B-206
+- 연결 테스트: agent unit test suite
 
 ### B-207 SQLite outbox 구현
 
@@ -228,6 +255,16 @@
 - 선행 조건: B-205, B-206
 - 연결 테스트: outbox 저장/복구 테스트
 
+### B-207A backend 계약 테스트 1차 세트 구축
+
+- 우선순위: `필수`
+- 설명: agent 가 만든 payload 를 실제 backend ingest API 에 보내고 ack 와 후처리 반영을 검증하는 계약 테스트를 구축한다.
+- 완료 기준:
+- `ack_seq`, latest state 반영, raw event 반영이 한 경로에서 검증되어야 한다.
+- payload schema drift 가 생기면 빠르게 깨지는 테스트가 있어야 한다.
+- 선행 조건: B-201, B-202, B-206, B-207
+- 연결 테스트: agent-backend contract test
+
 ### B-208 agent transport 구현
 
 - 우선순위: `필수`
@@ -237,6 +274,16 @@
 - `ack_seq` 기준으로 outbox 를 정리할 수 있어야 한다.
 - 선행 조건: B-201, B-207
 - 연결 테스트: transport/ack 테스트
+
+### B-208A Linux 실제 통합 테스트 준비
+
+- 우선순위: `필수`
+- 설명: Linux 에서 실행 가능한 dummy target process 와 실행/종료 확인 절차를 정리한다.
+- 완료 기준:
+- 실제 Linux 환경에서 target process 를 띄우고 selector 로 찾을 수 있어야 한다.
+- 종료/재시작 시나리오를 반복 가능한 체크리스트나 스크립트로 남겨야 한다.
+- 선행 조건: B-206, B-208
+- 연결 테스트: Linux integration smoke test
 
 ### Refactor Checkpoint R-2
 
@@ -340,6 +387,7 @@
 - 설명: 최소 E2E 수용 기준에 대응하는 자동 테스트 묶음을 정리한다.
 - 완료 기준:
 - `pytest` 기반으로 로그인 API, view 저장 API, ingest, latest state, raw event, debug mode, outbox 복구 테스트가 한 세트로 실행 가능해야 한다.
+- agent 쪽은 `단위 테스트 세트`와 `backend 계약 테스트 세트`가 분리되어 실행 가능해야 한다.
 - `Playwright` 기반으로 로그인, editor 저장, monitoring 진입 흐름이 한 세트로 실행 가능해야 한다.
 - backend 와 agent 의 branch coverage report 가 함께 생성되어야 한다.
 - 선행 조건: B-101, B-105, B-201, B-203, B-204, B-401, B-403
@@ -351,6 +399,7 @@
 - 설명: 실제 Linux process 를 대상으로 최소 E2E 시나리오를 반복 실행한다.
 - 완료 기준:
 - 로그인 -> editor 저장 -> agent 연결 -> monitoring 확인 -> process 종료 -> event 반영 흐름이 성공해야 한다.
+- agent 수동 통합 테스트는 실제 Linux 환경에서 dummy process 를 사용해 최소 1회 이상 성공해야 한다.
 - 동일 시나리오를 3회 이상 치명적 예외 없이 반복할 수 있어야 한다.
 - 선행 조건: 전체 선행 milestone 완료
 - 연결 테스트: 수동 통합 테스트 체크리스트
@@ -371,6 +420,7 @@
 - `R-CAND-02`: SQLite access 가 단일 책임 경로로 정리되어 있는가
 - `R-CAND-03`: frontend editor 상태와 monitoring 상태가 분리되어 있는가
 - `R-CAND-04`: agent collector, outbox, transport 가 테스트 가능한 단위로 분리되어 있는가
+- `R-CAND-04A`: agent runner, selector, collector, outbox, transport, self-monitor 경계가 테스트 단위와 일치하는가
 - `R-CAND-05`: 회귀 테스트가 새 기능 추가 전에 충분한 안전망 역할을 하는가
 
 ## 11. 구현 순서에 대한 의견
@@ -393,6 +443,8 @@
 - [리스크] branch coverage 를 늦게 도입하면 backend 와 agent 내부 분기 경로의 테스트 공백을 초기에 파악하기 어렵다.
 - [리스크] Playwright 기반 브라우저 테스트를 너무 늦게 붙이면 editor 와 monitoring 흐름의 UI 회귀를 초기에 잡기 어렵다.
 - [리스크] agent 자동 업데이트를 현재 backlog 에 조기 편입하면 핵심 흐름 검증 전 운영 복잡도가 증가할 수 있다.
+- [리스크] agent 단위 테스트와 backend 계약 테스트가 섞여 있으면 실패 원인 분리가 어려워질 수 있다.
+- [리스크] Linux 실제 통합 테스트 준비를 너무 늦게 시작하면 agent 코드가 Windows 개발 환경 가정에 묶일 수 있다.
 - [관찰] 최소 E2E 단계에서는 기능 수가 아니라 반복 가능한 성공 시나리오 확보 여부가 더 중요하다.
 
 ## 13. 요약

@@ -12,6 +12,7 @@
 - [필수] backend 와 agent 에 대해서는 line coverage 뿐 아니라 branch coverage 측정을 포함해야 한다.
 - [필수] 로그인, editor, monitoring 흐름의 브라우저 테스트는 `Playwright` 를 기본으로 한다.
 - [필수] 최소 E2E 게이트는 `pytest` 와 `Playwright` 가 모두 통과되어야 한다.
+- [필수] agent 테스트는 `단위 테스트`, `backend 계약 테스트`, `Linux 실제 통합 테스트`의 세 층으로 분리해 관리해야 한다.
 - [필수] 테스트는 기능 추가 직후가 아니라 milestone 진행 중 지속적으로 추가되어야 한다.
 - [필수] 구조 refactoring 이 발생하더라도 핵심 회귀 테스트 세트는 유지되어야 한다.
 - [필수] coverage report 는 실행 시마다 남겨 증적 자료로 활용할 수 있어야 한다.
@@ -45,7 +46,31 @@
 - agent SQLite outbox 저장/복구/재전송
 - backend worker 분기 경로와 agent transport/outbox 분기 경로에 대한 branch coverage 측정
 
-### 3.2 Playwright 범위
+### 3.2 agent 단위 테스트 범위
+
+- 설정 로딩과 기본 runner 초기화
+- selector 매칭과 target_id 결정
+- process snapshot 생성과 직렬화
+- sequence 증가와 millisecond 시간 정밀도
+- SQLite outbox enqueue, ack 정리, 재기동 복구
+- self-state 생성
+
+### 3.3 agent-backend 계약 테스트 범위
+
+- agent batch payload 를 backend ingest API 가 정상 수용하는지 확인
+- `ack_seq`, `accepted_count`, `server_time` 계약 확인
+- ingest 후 worker 처리로 latest state 와 raw event 가 정상 반영되는지 확인
+- payload schema drift 와 필수 필드 누락 시 실패를 빠르게 감지
+
+### 3.4 Linux 실제 통합 테스트 범위
+
+- dummy target process 를 실제 Linux 에서 실행
+- selector 로 target 발견
+- snapshot 전송 후 backend 반영 확인
+- target 종료/재시작 감지
+- backend 비가용 후 outbox 복구 전송
+
+### 3.5 Playwright 범위
 
 - 로그인 성공 후 view 목록 진입
 - 최소 editor 화면에서 node 배치 및 저장
@@ -68,13 +93,26 @@
 - `test_debug_mode_off_does_not_store_payload`
 - `test_agent_outbox_retries_after_backend_recovery`
 
-### 4.2 Playwright 최소 세트
+### 4.2 agent 계약 테스트 최소 세트
+
+- `test_agent_payload_contract_accepts_valid_batch`
+- `test_agent_payload_contract_rejects_invalid_batch`
+- `test_agent_transport_ack_updates_outbox`
+- `test_agent_transport_batch_updates_latest_state_and_raw_event`
+
+### 4.3 Playwright 최소 세트
 
 - `login-smoke`
 - `editor-save-smoke`
 - `monitoring-view-smoke`
 - `monitoring-polling-update`
 - `event-panel-smoke`
+
+### 4.4 Linux 실제 통합 최소 세트
+
+- `linux-agent-selector-smoke`
+- `linux-agent-process-stop-detect`
+- `linux-agent-outbox-recovery-smoke`
 
 ## 5. 테스트 데이터와 환경
 
@@ -86,16 +124,19 @@
 
 ## 6. 실행 순서
 
-1. `pytest` 단위/통합 테스트 실행
-2. Flask 앱 및 필요한 프로세스 기동
-3. `Playwright` 브라우저 테스트 실행
-4. 실패 시 로그, debug payload, outbox 상태 확인
+1. agent/backend `pytest` 단위 테스트 실행
+2. agent-backend 계약 테스트 실행
+3. Flask 앱 및 필요한 프로세스 기동
+4. `Playwright` 브라우저 테스트 실행
+5. Linux 실제 통합 테스트 실행 또는 체크리스트 수행
+6. 실패 시 로그, debug payload, outbox 상태 확인
 
 ## 7. 게이트 기준
 
 - [필수] `pytest` 최소 세트 전부 통과
+- [필수] agent-backend 계약 테스트 최소 세트가 통과해야 한다.
 - [필수] `Playwright` 최소 세트 전부 통과
-- [필수] 수동 통합 테스트 1회 이상 성공
+- [필수] Linux 실제 통합 테스트 또는 동등한 수동 통합 테스트가 1회 이상 성공해야 한다.
 - [필수] backend 와 agent 의 branch coverage report 가 `app` 기준으로 생성되어야 한다.
 - [필수] 초기 단계에서는 coverage 수치 자체를 강한 합격 기준으로 두기보다, 측정과 추적 자체를 필수 게이트로 본다.
 
@@ -109,7 +150,8 @@
 ## 9. 요약
 
 - 최소 E2E 테스트 전략의 기본 조합은 `pytest + Playwright` 다.
-- `pytest` 는 내부 계약과 내구성 검증, `Playwright` 는 사용자 흐름 검증을 담당한다.
+- `pytest` 는 내부 로직 검증, agent-backend 계약 검증, 내구성 검증을 담당하고 `Playwright` 는 사용자 흐름 검증을 담당한다.
+- agent 는 `단위 -> 계약 -> Linux 실제 통합`의 세 층 테스트를 가지며, 서로 다른 실패 원인을 분리할 수 있어야 한다.
 - backend 와 agent 는 초기부터 branch coverage 측정과 report 축적을 시작하고, 이후 단계에서 coverage 게이트를 점진적으로 강화한다.
 - Playwright 는 coverage 수치 계산 대상이 아니라 최소 E2E 사용자 흐름의 pass/fail 과 실행 증적을 담당한다.
 - 최소 E2E 게이트는 두 계층 테스트가 함께 통과할 때만 완료로 본다.

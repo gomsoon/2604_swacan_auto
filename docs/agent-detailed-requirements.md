@@ -297,6 +297,14 @@
 - [필수] coverage 결과 report 는 지속적으로 저장되어 이후 회귀 비교와 refactoring 증적 자료로 활용 가능해야 한다.
 - [선택] 이후 버전에서는 장시간 실행, 메모리 누수, 대량 target 시나리오에 대한 soak test 를 추가할 수 있다.
 
+### 16.1 테스트 계층 분리
+
+- [필수] agent 테스트는 `단위 테스트`, `backend 계약 테스트`, `Linux 실제 통합 테스트`의 세 층으로 분리되어야 한다.
+- [필수] 단위 테스트는 backend 없이도 빠르게 반복 실행 가능해야 하며, 설정 로딩, selector, snapshot, 직렬화, sequence, outbox 처리를 검증해야 한다.
+- [필수] backend 계약 테스트는 agent payload 가 backend ingest API 와 `ack_seq` 계약을 지키는지 검증해야 한다.
+- [필수] Linux 실제 통합 테스트는 dummy target process 를 이용해 `발견 -> 수집 -> 전송 -> 종료 감지 -> 복구` 흐름을 실제 OS 환경에서 검증해야 한다.
+- [필수] 서로 다른 테스트 층은 실패 원인 분리가 가능하도록 별도 실행 세트로 유지해야 한다.
+
 ## 17. MVP 에서 제외하거나 단순화하는 항목
 
 - [후속] application 내부 SDK 또는 침습형 agent
@@ -308,6 +316,13 @@
 - [후속] backend 와 연계된 agent 자동 업데이트
 
 ## 18. 다음 설계 단계 입력 항목
+
+### 18.1 구현 순서 권장안
+
+- [필수] 최소 agent 구현은 `설정/runner -> selector -> snapshot collector -> SQLite outbox -> transport -> backend 계약 테스트 -> Linux 실제 통합 테스트` 순서를 기본으로 한다.
+- [필수] collector 와 transport 를 모두 구현한 뒤에 테스트를 붙이는 방식이 아니라, 각 단계 직후 단위 테스트를 먼저 고정해야 한다.
+- [필수] transport 단계부터는 backend 와의 계약 테스트를 병행하여 payload schema drift 를 초기에 발견해야 한다.
+- [필수] Linux 실제 통합 테스트는 마지막 게이트로 두되, dummy target process 와 실행 절차는 초기에 준비해 Windows 개발 환경 의존성을 줄여야 한다.
 
 - [필수] agent 설정 파일 스키마 초안에는 backend endpoint, token, 주기 설정, target selector, debug mode 가 포함되어야 한다.
 - [필수] 로컬 SQLite 스키마 초안에는 outbox, agent_meta, target_cache, 필요 시 debug_transport_log 가 포함되어야 한다.

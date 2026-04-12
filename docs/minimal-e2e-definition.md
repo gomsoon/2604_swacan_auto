@@ -22,6 +22,7 @@
 - [필수] 상세 요구사항 문서가 도메인 순서로 정리되어 있더라도, 실제 구현 순서는 별도 구현 백로그 문서를 기준으로 따라야 한다.
 - [필수] 최소 E2E 자동화 테스트는 backend/agent 는 `pytest`, 브라우저 흐름은 `Playwright` 를 기준으로 한다.
 - [필수] backend 와 agent 자동화 테스트에는 branch coverage 측정과 report 생성이 포함되어야 한다.
+- [필수] agent 테스트는 `단위 테스트`, `backend 계약 테스트`, `Linux 실제 통합 테스트`의 세 층으로 나누어 관리해야 한다.
 - [필수] 최소 E2E 버전이 안정적으로 통과되기 전에는 고급 기능, 고급 UI, 확장성 기능을 추가하지 않는다.
 
 ## 3. 최소 E2E 버전의 목표
@@ -79,6 +80,9 @@
 - [필수] agent 는 단일 Python 프로세스 구조를 사용한다.
 - [필수] agent 는 Linux 에서 단독 실행되며, target process 하나를 selector 로 감시한다.
 - [필수] agent 는 outbox 기반 durable transport 를 유지한다.
+- [필수] agent 최소 구현 순서는 `설정/runner -> selector -> snapshot collector -> SQLite outbox -> transport -> backend 계약 테스트 -> Linux 실제 통합 테스트` 순서를 기본으로 한다.
+- [필수] agent 단위 테스트는 backend 나 frontend 개발과 분리해서 빠르게 반복 가능해야 한다.
+- [필수] agent 와 backend 사이의 payload 형식, `ack_seq`, `target_id`, `payload_type` 은 별도의 계약 테스트로 지속 검증되어야 한다.
 
 ### 5.3 Frontend
 
@@ -135,6 +139,7 @@
 - [필수] backend 와 agent 자동화 테스트는 `pytest` 기반으로 작성해야 한다.
 - [필수] 로그인과 주요 브라우저 흐름 자동화 테스트는 `Playwright` 기반으로 작성해야 한다.
 - [필수] backend 와 agent 자동화 테스트 실행 시 branch coverage report 가 생성되어야 한다.
+- [필수] agent 자동화 테스트는 `단위 테스트`와 `backend 계약 테스트`로 구분해서 실행 가능해야 한다.
 - [필수] 인증 테스트: 로그인 성공/실패
 - [필수] model 저장 테스트: 최소 view 생성 및 저장
 - [필수] agent ingest API 테스트: 정상 payload 수신
@@ -142,6 +147,8 @@
 - [필수] event 생성 테스트: process stopped 또는 restarted event 생성
 - [필수] debug mode 테스트: payload 저장 on/off 동작
 - [필수] outbox 테스트: backend 미연결 시 로컬 저장, 복구 후 재전송
+- [필수] agent 단위 테스트에는 설정 로딩, selector, snapshot 생성, payload 직렬화, sequence 증가, outbox enqueue/ack 정리가 포함되어야 한다.
+- [필수] backend 계약 테스트에는 agent payload 를 backend ingest API 로 보내고 `ack_seq`, latest state 반영, raw event 반영을 함께 검증하는 경로가 포함되어야 한다.
 
 ### 8.2 수동 통합 테스트
 
@@ -149,6 +156,7 @@
 - [필수] target process 종료 시 화면 상태 색상과 event panel 이 함께 변하는지 확인해야 한다.
 - [필수] agent 중지 시 MonitoringAgent 상태가 비정상으로 보이는지 확인해야 한다.
 - [필수] backend debug mode 활성화 후 payload 저장 여부를 확인해야 한다.
+- [필수] Linux 실제 통합 테스트는 dummy target process 를 이용해 `발견 -> 수집 -> 전송 -> 종료 감지 -> 재전송/복구` 흐름을 별도 증적으로 남겨야 한다.
 
 ### 8.3 회귀 테스트 최소 세트
 
@@ -164,6 +172,7 @@
 - [필수] 8절 필수 테스트 게이트가 자동 또는 수동 방식으로 통과되어야 한다.
 - [필수] 최소 E2E 자동화 게이트는 `pytest + Playwright` 조합으로 통과되어야 한다.
 - [필수] backend 와 agent 의 branch coverage report 가 증적 자료로 남아 있어야 한다.
+- [필수] agent 는 모의 payload 주입 수준이 아니라 실제 Linux process 를 감시하는 최소 실행체 기준으로 한 번 이상 검증되어야 한다.
 - [필수] 반복 실행 중 구조적 병목이나 책임 혼합이 확인되면, 기능 추가 전 refactoring 후보를 먼저 정리해야 한다.
 - [필수] 최소 E2E 단계 완료 전에는 SSE, grouped event 고도화, admin UI 확장, 동적 metamodel UI 추가, agent 자동 업데이트를 시작하지 않는다.
 
