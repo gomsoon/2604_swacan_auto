@@ -303,6 +303,7 @@
 - [후속] Windows, macOS 지원
 - [후속] backend 로부터의 원격 명령 제어
 - [후속] 설정 hot reload
+- [후속] backend 와 연계된 agent 자동 업데이트
 
 ## 18. 다음 설계 단계 입력 항목
 
@@ -317,4 +318,5 @@
 - MVP agent 는 단일 Python 프로세스 구조를 기본으로 하고, 내부 역할 분리와 SQLite outbox 기반 내구성을 우선해야 한다.
 - `target_id`, selector, multi-process 대응, self-state, SQLite outbox, batch payload, ack 처리, debug mode 는 MVP 의 핵심 요구사항이다.
 - agent 는 데이터를 수집하고 복구 가능한 방식으로 전달하는 역할에 집중하고, 판단과 시각화는 backend 가 담당해야 한다.
+- agent 자동 업데이트는 중요한 기능이지만, 최소 E2E 와 core ingest 안정화 이후 별도 milestone 으로 다루는 것이 적절하다.
 - 본 문서는 이후 agent 설정, 로컬 DB, payload schema, 테스트 설계의 기준 문서로 사용한다.

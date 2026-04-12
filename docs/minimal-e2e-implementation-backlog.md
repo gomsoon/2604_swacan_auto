@@ -19,6 +19,8 @@
 - [필수] 구조적 문제가 발견되면 새 기능을 이어붙이지 않고 refactoring 작업을 별도 backlog 항목으로 분리한다.
 - [필수] 최소 E2E 수용 기준과 직접 연결되지 않는 작업은 후순위로 미룬다.
 - [필수] 각 milestone 종료 시점에는 자동 테스트와 수동 통합 테스트 게이트를 함께 점검한다.
+- [필수] 상세 요구사항 문서의 정리 순서와 별개로, 실제 구현 순서의 기준 문서는 본 backlog 로 본다.
+- [필수] 최소 E2E 자동화 테스트 기본 조합은 `pytest + Playwright` 로 고정한다.
 
 ## 3. 구현 순서 개요
 
@@ -70,6 +72,16 @@
 - 선행 조건: B-001, B-002, B-003
 - 연결 테스트: pytest fixture smoke test
 
+### B-005 Playwright 기본 실행 골격 준비
+
+- 우선순위: `필수`
+- 설명: 브라우저 기반 최소 E2E 테스트를 위한 Playwright 실행 환경과 기본 smoke 시나리오를 준비한다.
+- 완료 기준:
+- 로그인 화면 또는 최소 진입 화면까지 Playwright 로 열 수 있어야 한다.
+- 테스트 실행 스크립트와 기본 설정이 저장소에 정리되어야 한다.
+- 선행 조건: B-001
+- 연결 테스트: Playwright smoke test
+
 ## 5. Milestone 1 - 로그인과 최소 editor 저장 흐름
 
 ### B-101 로그인 화면 및 인증 API 연동
@@ -80,7 +92,7 @@
 - 로그인 성공/실패 흐름이 동작해야 한다.
 - 인증되지 않은 사용자는 editor 와 monitoring 에 접근할 수 없어야 한다.
 - 선행 조건: B-001, B-002
-- 연결 테스트: 로그인 성공/실패 테스트
+- 연결 테스트: pytest 로그인 API 테스트, Playwright 로그인 smoke test
 
 ### B-102 workspace/view 목록 최소 화면
 
@@ -90,7 +102,7 @@
 - 사용자는 접근 가능한 view 목록을 볼 수 있어야 한다.
 - 새 최소 view 생성 진입점이 있어야 한다.
 - 선행 조건: B-101, B-003
-- 연결 테스트: view 목록 조회 테스트
+- 연결 테스트: pytest view 목록 API 테스트
 
 ### B-103 최소 editor SVG canvas 구현
 
@@ -100,7 +112,7 @@
 - `PhysicalServer`, `SoftwareProcess`, `MonitoringAgent` 를 화면에 배치할 수 있어야 한다.
 - 선택과 이동이 가능해야 한다.
 - 선행 조건: B-003, B-102
-- 연결 테스트: 수동 editor smoke test
+- 연결 테스트: Playwright editor smoke test
 
 ### B-104 containment 제약 1차 적용
 
@@ -315,7 +327,8 @@
 - 우선순위: `필수`
 - 설명: 최소 E2E 수용 기준에 대응하는 자동 테스트 묶음을 정리한다.
 - 완료 기준:
-- 로그인, view 저장, ingest, latest state, raw event, debug mode, outbox 복구 테스트가 한 세트로 실행 가능해야 한다.
+- `pytest` 기반으로 로그인 API, view 저장 API, ingest, latest state, raw event, debug mode, outbox 복구 테스트가 한 세트로 실행 가능해야 한다.
+- `Playwright` 기반으로 로그인, editor 저장, monitoring 진입 흐름이 한 세트로 실행 가능해야 한다.
 - 선행 조건: B-101, B-105, B-201, B-203, B-204, B-401, B-403
 - 연결 테스트: 최소 E2E test suite
 
@@ -335,7 +348,7 @@
 - 설명: 최소 E2E 완료 후 구조 문제, 테스트 공백, 다음 우선순위를 정리한다.
 - 완료 기준:
 - refactoring 필요 항목과 다음 확장 기능 후보가 분리된 backlog 로 정리되어야 한다.
-- grouped event, SSE, admin UI 확장 중 무엇을 다음으로 할지 결정 가능해야 한다.
+- grouped event, SSE, admin UI 확장, agent 자동 업데이트 중 무엇을 다음으로 할지 결정 가능해야 한다.
 - 선행 조건: B-501, B-502
 - 연결 테스트: 없음
 
@@ -351,6 +364,7 @@
 
 - 먼저 가장 작은 성공 경험을 만드는 것이 중요하므로, `Milestone 1` 과 `Milestone 2` 사이에 과도한 UI 고도화를 넣지 않는 것이 좋다.
 - event panel 과 debug mode 는 최소 기능만 먼저 넣고, grouped event 나 debug 조회 UI 는 다음 단계로 넘기는 것이 맞다.
+- agent 자동 업데이트는 중요하지만 최소 E2E 게이트 통과 전에는 backlog 범위에 넣지 않는 것이 좋다.
 - 최소 E2E 단계의 핵심은 화려한 화면보다 `end-to-end 데이터 흐름의 반복 가능성`과 `회귀 테스트 기반`이다.
 - 따라서 백로그 수행 중 구조적 냄새가 보이면 기능 추가 속도를 잠시 늦추더라도 refactoring 을 먼저 하는 편이 결과적으로 빠르다.
 
@@ -363,6 +377,8 @@
 - [리스크] `Milestone 4` 의 debug mode 와 outbox 복구는 뒤로 미루기 쉽지만, 실제로는 최소 E2E 품질을 결정하는 핵심 게이트다.
 - [리스크] seed 구조와 최소 메타모델을 임시 코드로만 처리하면 이후 metamodel/notation 확장 시 재작업이 발생할 수 있다.
 - [리스크] 회귀 테스트가 milestone 끝에서만 추가되면 점진적 개발의 장점이 줄어들고, refactoring 비용이 커질 수 있다.
+- [리스크] Playwright 기반 브라우저 테스트를 너무 늦게 붙이면 editor 와 monitoring 흐름의 UI 회귀를 초기에 잡기 어렵다.
+- [리스크] agent 자동 업데이트를 현재 backlog 에 조기 편입하면 핵심 흐름 검증 전 운영 복잡도가 증가할 수 있다.
 - [관찰] 최소 E2E 단계에서는 기능 수가 아니라 반복 가능한 성공 시나리오 확보 여부가 더 중요하다.
 
 ## 13. 요약
