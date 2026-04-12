@@ -112,10 +112,11 @@
 - [필수] `load_average`
 - [필수] `cpu_usage`
 - [필수] `memory_total`, `memory_used`, `memory_free`
-- [필수] `disk_total`, `disk_used`, `disk_free`
-- [필수] `network_rx_bytes`, `network_tx_bytes`
+- [필수] 최소 E2E 단계의 host resource 수집은 `/proc/stat`, `/proc/loadavg`, `/proc/meminfo` 기반 정보로 제한한다.
+- [필수] 최소 E2E 단계에서는 `disk_total`, `disk_used`, `disk_free`, `network_rx_bytes`, `network_tx_bytes` 를 필수 수집 범위에 포함하지 않는다.
 - [선택] 파일 시스템별 상세 사용량
 - [선택] 네트워크 인터페이스별 상세 통계
+- [후속] `/proc/diskstats`, `/proc/net/dev`, 파일 시스템 상세 수집은 MVP 이후 확장 항목으로 둔다.
 
 ### 7.2 Process 수준 수집
 

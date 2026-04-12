@@ -45,6 +45,7 @@
 - [필수] editor: `PhysicalServer` 내부에 `SoftwareProcess` 와 `MonitoringAgent` 를 배치하고, 컴포넌트 간 단순 `CommunicationLink` line 을 생성하여 저장할 수 있어야 한다.
 - [필수] view 저장: node layout 좌표, edge 연결 정보, 최소 속성이 DB 에 저장되어야 한다.
 - [필수] backend ingest: agent payload 를 수신하고 durable write 후 처리할 수 있어야 한다.
+- [필수] agent 는 최소한 host resource 정보로 `stat`, `loadavg`, `meminfo` 기반 snapshot 을 생성할 수 있어야 한다.
 - [필수] latest state: process up/down 과 agent heartbeat 상태가 latest state 에 반영되어야 한다.
 - [필수] event 기록: 최소한 `process started`, `process stopped`, `agent heartbeat lost` 수준의 event 를 기록할 수 있어야 한다.
 - [필수] monitoring view: polling 기반으로 상태 변화를 표시할 수 있어야 한다.
@@ -58,6 +59,7 @@
 - [후속] ExecutionThread 상세 표현 및 thread-level 계측
 - [후속] group abstraction 고도화
 - [후속] grouped event 고도화와 event storm 완화 고급 정책
+- [후속] `/proc/diskstats`, `/proc/net/dev` 기반 host 상세 resource 수집
 - [후속] SSE 기반 실시간 갱신
 - [후속] 관리자 운영 콘솔 전체
 - [후속] debug payload 조회 UI
@@ -83,6 +85,7 @@
 - [필수] agent 최소 구현 순서는 `설정/runner -> selector -> snapshot collector -> SQLite outbox -> transport -> backend 계약 테스트 -> Linux 실제 통합 테스트` 순서를 기본으로 한다.
 - [필수] agent 단위 테스트는 backend 나 frontend 개발과 분리해서 빠르게 반복 가능해야 한다.
 - [필수] agent 와 backend 사이의 payload 형식, `ack_seq`, `target_id`, `payload_type` 은 별도의 계약 테스트로 지속 검증되어야 한다.
+- [필수] minimal E2E 단계의 host collector 는 `/proc/stat`, `/proc/loadavg`, `/proc/meminfo` 범위까지만 구현하고, disk/network 상세는 후속으로 둔다.
 
 ### 5.3 Frontend
 
