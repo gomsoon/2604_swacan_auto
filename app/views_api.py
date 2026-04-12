@@ -13,6 +13,8 @@ bp = Blueprint("views_api", __name__, url_prefix="/api/views")
 
 ALLOWED_NODE_TYPES = {"PhysicalServer", "SoftwareProcess", "MonitoringAgent"}
 ALLOWED_EDGE_TYPES = {"CommunicationLink"}
+DEFAULT_EVENTS_LIMIT = 20
+MAX_EVENTS_LIMIT = 100
 
 
 def now_iso() -> str:
@@ -70,6 +72,52 @@ def serialize_edge(edge_row) -> dict[str, Any]:
     if edge_row["style_json"]:
         payload["style"] = json.loads(edge_row["style_json"])
     return payload
+
+
+def serialize_latest_state(state_row) -> dict[str, Any]:
+    return {
+        "target_id": state_row["target_id"],
+        "state_type": state_row["state_type"],
+        "status": state_row["status"],
+        "severity": state_row["severity"],
+        "occurred_at": state_row["occurred_at"],
+        "received_at": state_row["received_at"],
+        "state": json.loads(state_row["state_json"]),
+    }
+
+
+def serialize_raw_event(event_row) -> dict[str, Any]:
+    payload = {
+        "id": event_row["id"],
+        "target_id": event_row["target_id"],
+        "event_type": event_row["event_type"],
+        "severity": event_row["severity"],
+        "message": event_row["message"],
+        "occurred_at": event_row["occurred_at"],
+        "received_at": event_row["received_at"],
+    }
+    if event_row["event_json"]:
+        payload["event"] = json.loads(event_row["event_json"])
+    return payload
+
+
+def get_view_target_rows(view_id: int):
+    return get_db().execute(
+        """
+        SELECT id, target_id
+        FROM view_nodes
+        WHERE view_id = ? AND is_deleted = 0 AND target_id IS NOT NULL
+        ORDER BY id
+        """,
+        (view_id,),
+    ).fetchall()
+
+
+def query_by_targets(sql_prefix: str, target_ids: list[str], extra_params: tuple[Any, ...] = ()):  # noqa: ANN401
+    placeholders = ", ".join("?" for _ in target_ids)
+    sql = sql_prefix.format(placeholders=placeholders)
+    params = tuple(target_ids) + extra_params
+    return get_db().execute(sql, params).fetchall()
 
 
 def validate_nodes(nodes: list[dict[str, Any]]) -> str | None:
@@ -280,6 +328,69 @@ def get_view_detail(view_id: int):
         "nodes": [serialize_node(row) for row in node_rows],
         "edges": [serialize_edge(row) for row in edge_rows],
     }
+
+
+@bp.get("/<int:view_id>/latest-state")
+@login_required
+def get_latest_state(view_id: int):
+    view_row, error = get_view_for_user(view_id)
+    if error:
+        return error
+
+    target_rows = get_view_target_rows(view_row["id"])
+    target_ids = [row["target_id"] for row in target_rows]
+    if not target_ids:
+        return {"items": []}
+
+    rows = query_by_targets(
+        """
+        SELECT target_id, state_type, status, severity, state_json, occurred_at, received_at
+        FROM latest_states
+        WHERE target_id IN ({placeholders})
+        """,
+        target_ids,
+    )
+
+    order = {target_id: index for index, target_id in enumerate(target_ids)}
+    sorted_rows = sorted(rows, key=lambda row: (order.get(row["target_id"], 10**9), row["state_type"]))
+
+    return {"items": [serialize_latest_state(row) for row in sorted_rows]}
+
+
+@bp.get("/<int:view_id>/events")
+@login_required
+def get_view_events(view_id: int):
+    view_row, error = get_view_for_user(view_id)
+    if error:
+        return error
+
+    limit_raw = request.args.get("limit", default=str(DEFAULT_EVENTS_LIMIT))
+    try:
+        limit = int(limit_raw)
+    except (TypeError, ValueError):
+        return error_response("validation_error", "limit must be an integer", 400)
+
+    if limit <= 0 or limit > MAX_EVENTS_LIMIT:
+        return error_response("validation_error", f"limit must be between 1 and {MAX_EVENTS_LIMIT}", 400)
+
+    target_rows = get_view_target_rows(view_row["id"])
+    target_ids = [row["target_id"] for row in target_rows]
+    if not target_ids:
+        return {"items": []}
+
+    rows = query_by_targets(
+        """
+        SELECT id, target_id, event_type, severity, message, event_json, occurred_at, received_at
+        FROM raw_events
+        WHERE target_id IN ({placeholders})
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT ?
+        """,
+        target_ids,
+        (limit,),
+    )
+
+    return {"items": [serialize_raw_event(row) for row in rows]}
 
 
 @bp.post("")
