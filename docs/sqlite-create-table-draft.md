@@ -73,11 +73,35 @@ CREATE TABLE IF NOT EXISTS view_nodes (
     updated_at TEXT NOT NULL,
     FOREIGN KEY (view_id) REFERENCES views(id) ON DELETE CASCADE,
     FOREIGN KEY (parent_node_id) REFERENCES view_nodes(id) ON DELETE CASCADE,
-    CHECK (node_type IN ('PhysicalServer', 'SoftwareProcess', 'MonitoringAgent', 'CommunicationLink'))
+    CHECK (node_type IN ('PhysicalServer', 'SoftwareProcess', 'MonitoringAgent'))
 );
 ```
 
-### 3.4 ingest_inbox
+### 3.4 view_edges
+
+```sql
+CREATE TABLE IF NOT EXISTS view_edges (
+    id INTEGER PRIMARY KEY,
+    view_id INTEGER NOT NULL,
+    edge_type TEXT NOT NULL,
+    source_node_id INTEGER NOT NULL,
+    target_node_id INTEGER NOT NULL,
+    source_anchor TEXT,
+    target_anchor TEXT,
+    control_points_json TEXT,
+    label TEXT,
+    style_json TEXT,
+    is_deleted INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (view_id) REFERENCES views(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_node_id) REFERENCES view_nodes(id) ON DELETE CASCADE,
+    FOREIGN KEY (target_node_id) REFERENCES view_nodes(id) ON DELETE CASCADE,
+    CHECK (edge_type IN ('CommunicationLink'))
+);
+```
+
+### 3.5 ingest_inbox
 
 ```sql
 CREATE TABLE IF NOT EXISTS ingest_inbox (
@@ -95,7 +119,7 @@ CREATE TABLE IF NOT EXISTS ingest_inbox (
 );
 ```
 
-### 3.5 latest_states
+### 3.6 latest_states
 
 ```sql
 CREATE TABLE IF NOT EXISTS latest_states (
@@ -114,7 +138,7 @@ CREATE TABLE IF NOT EXISTS latest_states (
 );
 ```
 
-### 3.6 raw_events
+### 3.7 raw_events
 
 ```sql
 CREATE TABLE IF NOT EXISTS raw_events (
@@ -131,7 +155,7 @@ CREATE TABLE IF NOT EXISTS raw_events (
 );
 ```
 
-### 3.7 debug_payload_logs
+### 3.8 debug_payload_logs
 
 ```sql
 CREATE TABLE IF NOT EXISTS debug_payload_logs (
@@ -168,6 +192,15 @@ CREATE INDEX IF NOT EXISTS idx_view_nodes_parent_node_id
 CREATE INDEX IF NOT EXISTS idx_view_nodes_target_id
     ON view_nodes(target_id);
 
+CREATE INDEX IF NOT EXISTS idx_view_edges_view_id
+    ON view_edges(view_id);
+
+CREATE INDEX IF NOT EXISTS idx_view_edges_source_node_id
+    ON view_edges(source_node_id);
+
+CREATE INDEX IF NOT EXISTS idx_view_edges_target_node_id
+    ON view_edges(target_node_id);
+
 CREATE INDEX IF NOT EXISTS idx_ingest_inbox_status_received
     ON ingest_inbox(status, received_at);
 
@@ -201,7 +234,8 @@ CREATE INDEX IF NOT EXISTS idx_debug_payload_logs_trace_id_occurred
 - 삭제는 즉시 hard delete 가 아니어도 되며, 필요 시 soft delete 후 background cleanup 정책으로 확장 가능하다.
 - 최소 E2E 에서는 `view_nodes.is_deleted` 를 0으로 유지하는 단순 정책으로 시작하고, 후속 단계에서 soft delete 활용을 확장할 수 있다.
 - `payload_json`, `state_json`, `event_json`, `style_json` 은 최소 E2E 단계에서는 JSON TEXT 로 저장한다.
-- `view_nodes` 에서 `CommunicationLink` 를 넣어두었지만, 최소 E2E 에서는 실제 사용하지 않아도 된다.
+- `CommunicationLink` 는 `view_nodes` 가 아니라 `view_edges` 로 저장하는 것을 전제로 한다.
+- 최소 E2E 에서는 `view_edges` 를 단순 직선 connection 저장 용도로만 사용하고, 고급 edge 편집은 후속 단계로 미룬다.
 - grouped event 도입 시에는 `raw_events` 와 별도의 요약 테이블을 추가하는 것이 좋다.
 
 ## 7. 다음 단계 입력

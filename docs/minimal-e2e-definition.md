@@ -41,8 +41,8 @@
 - [필수] 인증: seed 된 관리자 계정 또는 단일 테스트 계정으로 로그인 가능해야 한다.
 - [필수] 메타모델: 최소한 `PhysicalServer`, `SoftwareProcess`, `MonitoringAgent`, `CommunicationLink` 정의가 seed 되어 있어야 한다.
 - [필수] notation: 위 semantic type 에 대응하는 최소 SVG 표현 정의가 존재해야 한다.
-- [필수] editor: `PhysicalServer` 내부에 `SoftwareProcess` 와 `MonitoringAgent` 를 배치하고 저장할 수 있어야 한다.
-- [필수] view 저장: layout 좌표와 최소 속성이 DB 에 저장되어야 한다.
+- [필수] editor: `PhysicalServer` 내부에 `SoftwareProcess` 와 `MonitoringAgent` 를 배치하고, 컴포넌트 간 단순 `CommunicationLink` line 을 생성하여 저장할 수 있어야 한다.
+- [필수] view 저장: node layout 좌표, edge 연결 정보, 최소 속성이 DB 에 저장되어야 한다.
 - [필수] backend ingest: agent payload 를 수신하고 durable write 후 처리할 수 있어야 한다.
 - [필수] latest state: process up/down 과 agent heartbeat 상태가 latest state 에 반영되어야 한다.
 - [필수] event 기록: 최소한 `process started`, `process stopped`, `agent heartbeat lost` 수준의 event 를 기록할 수 있어야 한다.
@@ -82,7 +82,7 @@
 ### 5.3 Frontend
 
 - [필수] frontend 는 login 화면, editor 화면, monitoring 화면의 최소 세 화면을 제공해야 한다.
-- [필수] editor 는 inline SVG 기반으로 최소한의 배치와 저장이 가능해야 한다.
+- [필수] editor 는 inline SVG 기반으로 최소한의 node 배치, edge 생성, 저장이 가능해야 한다.
 - [필수] monitoring 화면은 polling 기반 상태 갱신만 우선 지원한다.
 
 ## 6. 최소 E2E 시나리오
@@ -90,15 +90,16 @@
 1. 사용자가 로그인한다.
 2. 사용자가 새 architecture view 를 생성한다.
 3. editor 에서 `PhysicalServer` 하나, 그 내부에 `SoftwareProcess` 하나와 `MonitoringAgent` 하나를 배치한다.
-4. 사용자가 해당 view 를 저장한다.
-5. Linux host 에서 agent 를 실행하고, 지정된 target process 하나를 감시하도록 설정한다.
-6. agent 가 heartbeat 와 process snapshot 을 backend 로 전송한다.
-7. backend 는 payload 를 저장하고 latest state 를 갱신한다.
-8. monitoring 화면에서 process 상태와 agent 상태가 표시된다.
-9. target process 를 중지하거나 재시작한다.
-10. agent 가 상태 변화를 감지해 event 를 전송한다.
-11. backend 가 event 를 저장하고 monitoring 화면 및 event panel 에 반영한다.
-12. backend debug mode 가 활성화되어 있다면, 해당 통신 payload 가 저장된다.
+4. 사용자는 `SoftwareProcess` 와 `MonitoringAgent` 또는 필요한 두 node 사이에 단순 `CommunicationLink` line 을 추가한다.
+5. 사용자가 해당 view 를 저장한다.
+6. Linux host 에서 agent 를 실행하고, 지정된 target process 하나를 감시하도록 설정한다.
+7. agent 가 heartbeat 와 process snapshot 을 backend 로 전송한다.
+8. backend 는 payload 를 저장하고 latest state 를 갱신한다.
+9. monitoring 화면에서 process 상태와 agent 상태가 표시되고, 저장된 communication line 이 함께 렌더링된다.
+10. target process 를 중지하거나 재시작한다.
+11. agent 가 상태 변화를 감지해 event 를 전송한다.
+12. backend 가 event 를 저장하고 monitoring 화면 및 event panel 에 반영한다.
+13. backend debug mode 가 활성화되어 있다면, 해당 통신 payload 가 저장된다.
 
 ## 7. 최소 E2E 수용 기준
 

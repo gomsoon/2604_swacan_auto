@@ -18,6 +18,7 @@
 - `users`
 - `views`
 - `view_nodes`
+- `view_edges`
 - `ingest_inbox`
 - `latest_states`
 - `raw_events`
@@ -95,7 +96,37 @@
 - 이 정책은 이후 라이선스, 감사, 정책 적용, soft delete, background cleanup 기능을 붙일 때 유리하다.
 - 최소 E2E 단계에서는 `is_deleted` 를 기본 0으로 두고, 실제 soft delete 처리는 후속 단계에서 활성화할 수 있다.
 
-### 3.4 ingest_inbox
+### 3.4 view_edges
+
+목적:
+- editor 와 monitoring view 가 공유하는 최소 edge 및 communication line 정의 저장
+
+주요 컬럼:
+- `id` INTEGER PK
+- `view_id` INTEGER NOT NULL
+- `edge_type` TEXT NOT NULL
+- `source_node_id` INTEGER NOT NULL
+- `target_node_id` INTEGER NOT NULL
+- `source_anchor` TEXT NULL
+- `target_anchor` TEXT NULL
+- `control_points_json` TEXT NULL
+- `label` TEXT NULL
+- `style_json` TEXT NULL
+- `is_deleted` INTEGER NOT NULL DEFAULT 0
+- `created_at` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
+
+관계:
+- `view_id -> views.id`
+- `source_node_id -> view_nodes.id`
+- `target_node_id -> view_nodes.id`
+
+비고:
+- 최소 E2E 에서는 `edge_type=CommunicationLink` 하나만 지원해도 된다.
+- 단순 직선은 node 좌표와 anchor 정보만으로 계산 가능하므로, `x`, `y` 컬럼을 직접 두기보다 `control_points_json` 을 선택적으로 사용한다.
+- `view_edges` 도 backend 가 생성/관리하는 정수 PK 를 사용하는 것이 바람직하다.
+
+### 3.5 ingest_inbox
 
 목적:
 - agent ingest 요청을 durable 하게 먼저 저장하는 내부 work queue
@@ -116,7 +147,7 @@
 - request path 는 이 테이블까지 durable write 한 뒤 ack 를 반환한다.
 - worker 가 `status=pending` 레코드를 읽어 후처리한다.
 
-### 3.5 latest_states
+### 3.6 latest_states
 
 목적:
 - monitoring 화면 조회용 최신 상태 저장
@@ -141,7 +172,7 @@
 - `state_json` 에는 cpu, memory, pid, heartbeat 등 최소 overlay 정보가 들어간다.
 - 같은 `target_id + state_type` 조합에 대해 upsert 중심으로 관리한다.
 
-### 3.6 raw_events
+### 3.7 raw_events
 
 목적:
 - 최소 event panel 에 표시할 원시 이벤트 저장
@@ -161,7 +192,7 @@
 - 최소 E2E 에서는 `process_started`, `process_stopped`, `process_restarted`, `agent_heartbeat_lost` 정도면 충분하다.
 - grouped event 는 이후 확장에서 별도 테이블 또는 파생 구조로 추가한다.
 
-### 3.7 debug_payload_logs
+### 3.8 debug_payload_logs
 
 목적:
 - backend debug mode 에서만 저장되는 통신 payload 기록
@@ -192,8 +223,10 @@
 
 - `users 1:N views`
 - `views 1:N view_nodes`
+- `views 1:N view_edges`
 - `view_nodes 1:N view_nodes` self-reference for containment
 - `view_nodes 1:N latest_states` optional by `view_node_id`
+- `view_nodes 1:N view_edges` by source/target reference
 - `users 1:N debug_payload_logs` optional
 - `ingest_inbox` 는 다른 테이블의 직접 FK 없이 ingest/work queue 역할을 수행
 - `raw_events` 와 `latest_states` 는 `target_id` 중심으로 연결됨
@@ -205,6 +238,9 @@
 - `view_nodes(view_id)`
 - `view_nodes(parent_node_id)`
 - `view_nodes(target_id)`
+- `view_edges(view_id)`
+- `view_edges(source_node_id)`
+- `view_edges(target_node_id)`
 - `ingest_inbox(status, received_at)`
 - `latest_states(target_id, state_type)` UNIQUE 또는 동등 인덱스
 - `raw_events(target_id, occurred_at)`
@@ -221,11 +257,10 @@
 - `admin_audit_logs`
 - `viewer_sessions`
 - `workspace_members`
-- `view_edges` 별도 테이블
 
 비고:
-- 최소 E2E 에서는 edge 편집보다 node 배치와 runtime overlay 검증이 더 중요하므로, 선 연결 정보는 `style_json` 또는 후속 확장으로 미룰 수 있다.
 - metamodel 과 notation 은 우선 seed 데이터와 enum 수준으로 처리하고, 정식 테이블화는 다음 단계에서 진행할 수 있다.
+- 최소 E2E 에서는 `view_edges` 를 단순 `CommunicationLink` 저장 용도로만 사용하고, 고급 edge 스타일과 bend-point 편집은 후속 확장으로 미룬다.
 
 ## 7. 최소 ERD에 대한 판단
 

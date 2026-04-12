@@ -81,6 +81,7 @@
 ### 7.2 semantic type 별 기본 표현
 
 - [필수] `PhysicalServer`, `VirtualMachine`, `SoftwareProcess`, `ExecutionThread`, `MonitoringAgent`, `CommunicationLink` 의 기본 시각 표현을 제공해야 한다.
+- [필수] `CommunicationLink` 는 node 가 아니라 별도 edge entity 로 취급되어야 한다.
 - [필수] `MonitoringAgent` 는 일반 process 와 구분 가능한 별도 semantic type 으로 표시되어야 한다.
 - [필수] `MonitoringAgent` 의 기본 도형은 process 계열과 일관되게 라운드 사각형을 유지하는 것이 바람직하다.
 - [필수] `MonitoringAgent` 는 특수한 process 임을 보여주기 위해 이중 테두리, 전용 배지, 또는 거의 원형에 가까운 라운드 사각형 같은 추가 스타일을 사용할 수 있어야 한다.
@@ -113,7 +114,7 @@
 
 - [필수] view layout 은 최소한 `x`, `y`, `width`, `height`, `z_index`, `collapsed_state` 를 저장할 수 있어야 한다.
 - [필수] containment 자식 요소의 좌표는 부모 기준 좌표계로 해석되어야 한다.
-- [필수] edge 는 최소한 source anchor, target anchor, control point 또는 동등한 경로 정보를 저장할 수 있어야 한다.
+- [필수] edge 는 최소한 source_node_id, target_node_id, source anchor, target anchor, control point 또는 동등한 경로 정보를 저장할 수 있어야 한다.
 - [필수] 이동과 크기 변경 후의 최신 배치 정보는 view 저장 시 backend 로 전송되어야 한다.
 
 ### 8.4 속성 편집 요구사항

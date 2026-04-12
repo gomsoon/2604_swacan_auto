@@ -129,6 +129,17 @@ Response JSON 200:
       "width": 150,
       "height": 56
     }
+  ],
+  "edges": [
+    {
+      "id": 201,
+      "edge_type": "CommunicationLink",
+      "source_node_id": 102,
+      "target_node_id": 103,
+      "source_anchor": "right",
+      "target_anchor": "left",
+      "control_points": []
+    }
   ]
 }
 ```
@@ -166,8 +177,8 @@ Response JSON 201:
 
 - Method: `PUT`
 - Path: `/api/views/{view_id}`
-- 목적: node layout 과 최소 속성 저장
-- 비고: 새 node 는 frontend 임시 ID가 아니라 backend 가 생성한 정수 ID를 사용한다고 가정한다.
+- 목적: node layout, edge 연결, 최소 속성 저장
+- 비고: 새 node 와 edge 는 frontend 임시 ID가 아니라 backend 가 생성한 정수 ID를 사용한다고 가정한다.
 
 Request JSON:
 ```json
@@ -207,6 +218,17 @@ Request JSON:
       "width": 150,
       "height": 56
     }
+  ],
+  "edges": [
+    {
+      "id": 201,
+      "edge_type": "CommunicationLink",
+      "source_node_id": 102,
+      "target_node_id": 103,
+      "source_anchor": "right",
+      "target_anchor": "left",
+      "control_points": []
+    }
   ]
 }
 ```
@@ -222,7 +244,7 @@ Response JSON 200:
 
 오류:
 - `409`: revision mismatch
-- `400`: containment 위반 또는 필수 필드 누락
+- `400`: containment 위반, edge 연결 규칙 위반 또는 필수 필드 누락
 
 ## 4. Monitoring 조회 API
 

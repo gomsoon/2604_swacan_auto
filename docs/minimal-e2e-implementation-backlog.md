@@ -47,7 +47,7 @@
 ### B-002 최소 DB 스키마 초안 적용
 
 - 우선순위: `필수`
-- 설명: 최소 E2E에 필요한 users, views, layouts, ingest inbox, latest state, raw event, debug payload 테이블을 준비한다.
+- 설명: 최소 E2E에 필요한 users, views, view_nodes, view_edges, ingest inbox, latest state, raw event, debug payload 테이블을 준비한다.
 - 완료 기준:
 - SQLite DB 초기화 스크립트가 있어야 한다.
 - 테스트 환경에서 독립 DB 생성이 가능해야 한다.
@@ -118,9 +118,10 @@
 ### B-103 최소 editor SVG canvas 구현
 
 - 우선순위: `필수`
-- 설명: inline SVG 기반 editor 에서 최소 node 생성과 이동이 가능하게 한다.
+- 설명: inline SVG 기반 editor 에서 최소 node 생성, 이동, edge 생성이 가능하게 한다.
 - 완료 기준:
 - `PhysicalServer`, `SoftwareProcess`, `MonitoringAgent` 를 화면에 배치할 수 있어야 한다.
+- 두 node 사이에 단순 `CommunicationLink` line 을 생성할 수 있어야 한다.
 - 선택과 이동이 가능해야 한다.
 - 선행 조건: B-003, B-102
 - 연결 테스트: Playwright editor smoke test
@@ -128,7 +129,7 @@
 ### B-104 containment 제약 1차 적용
 
 - 우선순위: `필수`
-- 설명: editor 에서 허용된 containment 조합만 생성 가능하게 한다.
+- 설명: editor 에서 허용된 containment 조합과 최소 edge 연결 규칙만 생성 가능하게 한다.
 - 완료 기준:
 - `PhysicalServer` 내부에만 `SoftwareProcess`, `MonitoringAgent` 생성이 가능해야 한다.
 - 잘못된 위치에는 생성되지 않아야 한다.
@@ -138,10 +139,10 @@
 ### B-105 view 저장 API 및 layout 저장
 
 - 우선순위: `필수`
-- 설명: editor 에서 만든 최소 layout 을 저장할 수 있게 한다.
+- 설명: editor 에서 만든 최소 layout 과 edge 연결을 저장할 수 있게 한다.
 - 완료 기준:
-- node 좌표와 최소 속성이 DB 에 저장되어야 한다.
-- 저장 후 다시 열었을 때 같은 배치가 보여야 한다.
+- node 좌표, edge source/target, 최소 속성이 DB 에 저장되어야 한다.
+- 저장 후 다시 열었을 때 같은 배치와 line 연결이 보여야 한다.
 - 선행 조건: B-103, B-104
 - 연결 테스트: view 저장/재조회 테스트
 
@@ -254,8 +255,8 @@
 - 우선순위: `필수`
 - 설명: 저장된 view layout 위에 latest state 를 overlay 하는 화면을 만든다.
 - 완료 기준:
-- 저장된 `PhysicalServer`, `SoftwareProcess`, `MonitoringAgent` 가 표시되어야 한다.
-- latest state 에 따라 색상 또는 배지가 바뀌어야 한다.
+- 저장된 `PhysicalServer`, `SoftwareProcess`, `MonitoringAgent` 와 `CommunicationLink` 가 표시되어야 한다.
+- latest state 에 따라 node 색상 또는 배지가 바뀌어야 한다.
 - 선행 조건: B-105, B-203
 - 연결 테스트: monitoring 조회 테스트
 
