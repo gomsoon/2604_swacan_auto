@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from functools import wraps
 from typing import Any, Callable
@@ -15,6 +15,17 @@ def page_login_required(view: Callable[..., Any]) -> Callable[..., Any]:
     def wrapped_view(*args: Any, **kwargs: Any):
         if g.get("user") is None:
             return redirect(url_for("web.login_page"))
+        return view(*args, **kwargs)
+
+    return wrapped_view
+
+
+def page_admin_required(view: Callable[..., Any]) -> Callable[..., Any]:
+    @wraps(view)
+    @page_login_required
+    def wrapped_view(*args: Any, **kwargs: Any):
+        if g.user["role"] != "admin":
+            abort(403)
         return view(*args, **kwargs)
 
     return wrapped_view
@@ -94,4 +105,14 @@ def monitor_page(view_id: int):
         page_key="monitor",
         view_id=view_row["id"],
         view_name=view_row["name"],
+    )
+
+
+@bp.get("/admin")
+@page_admin_required
+def admin_page():
+    return render_template(
+        "admin.html",
+        page_title="???",
+        page_key="admin",
     )

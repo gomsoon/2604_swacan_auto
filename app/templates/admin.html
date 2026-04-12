@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section id="admin-app" class="workspace admin-workspace">
+    <div class="page-title-row">
+        <div>
+            <p class="eyebrow">Admin Console</p>
+            <h1>기본 관리자 화면</h1>
+            <p class="section-copy">backend 운영 상태와 inbox, 최근 event, debug payload를 읽기 전용으로 확인합니다.</p>
+        </div>
+        <div class="toolbar-inline">
+            <span id="admin-debug-status" class="meta-pill">debug mode 확인 중</span>
+            <button id="refresh-admin-button" class="button ghost" type="button">새로고침</button>
+        </div>
+    </div>
+
+    <section class="card">
+        <div class="section-header">
+            <h2>시스템 요약</h2>
+            <span id="admin-generated-at" class="meta-pill">-</span>
+        </div>
+        <div id="admin-summary-cards" class="stat-grid"></div>
+        <div id="admin-ingest-status" class="summary-metrics"></div>
+    </section>
+
+    <div class="admin-grid">
+        <section class="card">
+            <div class="section-header section-header-stack">
+                <div>
+                    <h2>Ingest Inbox</h2>
+                    <p class="section-copy">worker가 처리 중인 batch와 최근 실패 항목을 확인합니다.</p>
+                </div>
+                <div class="toolbar-inline filter-row">
+                    <label class="field compact-field">
+                        <span>상태</span>
+                        <select id="ingest-status-filter">
+                            <option value="">전체</option>
+                            <option value="pending">pending</option>
+                            <option value="processing">processing</option>
+                            <option value="processed">processed</option>
+                            <option value="failed">failed</option>
+                        </select>
+                    </label>
+                    <button id="refresh-ingest-button" class="button ghost small" type="button">갱신</button>
+                </div>
+            </div>
+            <div id="admin-ingest-list" class="admin-list"></div>
+        </section>
+
+        <section class="card">
+            <div class="section-header section-header-stack">
+                <div>
+                    <h2>최근 Event</h2>
+                    <p class="section-copy">최근 raw event를 시간 역순으로 확인합니다.</p>
+                </div>
+                <button id="refresh-admin-events-button" class="button ghost small" type="button">갱신</button>
+            </div>
+            <div id="admin-events-list" class="event-list"></div>
+        </section>
+
+        <section class="card admin-debug-panel">
+            <div class="section-header section-header-stack">
+                <div>
+                    <h2>Debug Payload</h2>
+                    <p class="section-copy">debug mode가 켜진 경우 최근 payload 흐름을 확인합니다.</p>
+                </div>
+                <div class="toolbar-inline filter-row">
+                    <label class="field compact-field">
+                        <span>방향</span>
+                        <select id="debug-direction-filter">
+                            <option value="">전체</option>
+                            <option value="request">request</option>
+                            <option value="response">response</option>
+                        </select>
+                    </label>
+                    <button id="refresh-debug-button" class="button ghost small" type="button">갱신</button>
+                </div>
+            </div>
+            <div id="admin-debug-list" class="admin-list"></div>
+        </section>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ url_for('static', filename='js/admin.js') }}"></script>
+{% endblock %}

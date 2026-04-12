@@ -1,4 +1,4 @@
-﻿:root {
+:root {
     --bg: #f4f1ea;
     --panel: #fffdf8;
     --panel-strong: #fff8ee;
@@ -485,5 +485,107 @@ a {
     .toolbar-status {
         width: 100%;
         margin-left: 0;
+    }
+}
+
+
+.admin-workspace {
+    gap: 20px;
+}
+
+.admin-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+    align-items: start;
+}
+
+.stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.stat-card {
+    display: grid;
+    gap: 6px;
+    padding: 16px;
+    border-radius: 16px;
+    background: var(--panel-strong);
+    border: 1px solid var(--line);
+}
+
+.stat-label {
+    color: var(--muted);
+    font-size: 0.88rem;
+}
+
+.stat-value {
+    font-size: 1.5rem;
+    line-height: 1;
+}
+
+.summary-metrics {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+}
+
+.section-header-stack {
+    align-items: flex-start;
+}
+
+.admin-list {
+    display: grid;
+    gap: 12px;
+}
+
+.admin-item {
+    padding: 14px;
+    border-radius: 16px;
+    border: 1px solid var(--line);
+    background: var(--panel-strong);
+}
+
+.admin-item h3 {
+    margin: 0;
+}
+
+.admin-meta {
+    margin: 8px 0 0;
+    color: var(--muted);
+}
+
+.payload-preview {
+    margin: 12px 0 0;
+    max-height: 220px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.compact-field {
+    min-width: 120px;
+}
+
+.field select {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--ink);
+    font: inherit;
+}
+
+@media (max-width: 960px) {
+    .admin-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .stat-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }

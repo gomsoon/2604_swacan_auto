@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import re
@@ -71,7 +71,7 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     page.get_by_role("button", name="선택 항목 저장").click()
     expect(page.locator('text="Worker Alpha"')).to_be_visible()
 
-    process_shape.click(force=True)
+    expect(page.get_by_role("button", name="통신선 시작")).to_be_visible()
     page.get_by_role("button", name="통신선 시작").click()
     agent_shape.click(force=True)
     expect(page.locator("path.diagram-edge")).to_have_count(1)
@@ -127,3 +127,15 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     expect(page.locator("#monitor-selection-summary")).to_contain_text("상태: up")
     expect(page.locator("#events-list")).to_contain_text("process_started")
     expect(page.locator("#events-list")).to_contain_text("Playwright process started")
+
+
+def test_playwright_admin_page(page: Page, live_server) -> None:
+    base_url, _seeded_app = live_server
+
+    browser_login(page, base_url)
+    page.goto(f"{base_url}/admin")
+
+    expect(page.get_by_role("heading", name="기본 관리자 화면")).to_be_visible()
+    expect(page.get_by_role("heading", name="시스템 요약", exact=True)).to_be_visible()
+    expect(page.locator("#admin-summary-cards")).to_contain_text("사용자")
+    expect(page.locator("#admin-ingest-list")).to_contain_text("표시할 ingest batch가 없습니다.")

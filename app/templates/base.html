@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="ko">
 <head>
     <meta charset="utf-8">
@@ -15,6 +15,7 @@
             {% if current_user %}
             <nav class="header-nav">
                 <a href="{{ url_for('web.views_page') }}">뷰</a>
+                {% if current_user['role'] == 'admin' %}<a href="{{ url_for('web.admin_page') }}">관리</a>{% endif %}
                 <span class="user-chip">{{ current_user['username'] }}</span>
                 <button id="logout-button" class="button ghost" type="button">로그아웃</button>
             </nav>
