@@ -57,5 +57,10 @@ def client(app):
 
 
 @pytest.fixture()
+def seeded_client(seeded_app):
+    return seeded_app.test_client()
+
+
+@pytest.fixture()
 def runner(app):
     return app.test_cli_runner()

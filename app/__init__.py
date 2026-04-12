@@ -2,7 +2,7 @@ from pathlib import Path
 
 from flask import Flask
 
-from . import db
+from . import auth, db, views_api
 
 
 def create_app(test_config: dict | None = None) -> Flask:
@@ -21,6 +21,9 @@ def create_app(test_config: dict | None = None) -> Flask:
     Path(app.instance_path).mkdir(parents=True, exist_ok=True)
 
     db.init_app(app)
+    auth.init_app(app)
+    app.register_blueprint(auth.bp)
+    app.register_blueprint(views_api.bp)
 
     @app.get("/health")
     def health() -> dict[str, str]:
