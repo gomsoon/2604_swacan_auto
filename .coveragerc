@@ -1,6 +1,8 @@
 [run]
 branch = True
-source = app
+source =
+    app
+    agent
 
 [report]
 omit =
