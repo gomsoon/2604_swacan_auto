@@ -1,0 +1,31 @@
+﻿{% extends "base.html" %}
+
+{% block content %}
+<section class="hero-panel narrow">
+    <div class="hero-copy">
+        <p class="eyebrow">Minimal E2E</p>
+        <h1>로그인</h1>
+        <p class="hero-text">
+            seed 계정으로 바로 시작할 수 있습니다. 기본 계정은 <strong>admin</strong>,
+            비밀번호는 <strong>admin123!</strong> 입니다.
+        </p>
+    </div>
+
+    <form id="login-form" class="card stack-form">
+        <label class="field">
+            <span>사용자 이름</span>
+            <input id="username" name="username" type="text" value="admin" autocomplete="username" required>
+        </label>
+        <label class="field">
+            <span>비밀번호</span>
+            <input id="password" name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <button class="button primary" type="submit">로그인</button>
+        <p id="login-error" class="inline-error" hidden></p>
+    </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ url_for('static', filename='js/login.js') }}"></script>
+{% endblock %}

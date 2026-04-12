@@ -1,0 +1,36 @@
+﻿<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ page_title }} | SWA Runtime Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body data-page-key="{{ page_key or '' }}">
+    <header class="app-header">
+        <div class="shell">
+            <a class="brand" href="{{ url_for('web.views_page') if current_user else url_for('web.login_page') }}">
+                SWA Runtime Monitor
+            </a>
+            {% if current_user %}
+            <nav class="header-nav">
+                <a href="{{ url_for('web.views_page') }}">뷰</a>
+                <span class="user-chip">{{ current_user['username'] }}</span>
+                <button id="logout-button" class="button ghost" type="button">로그아웃</button>
+            </nav>
+            {% endif %}
+        </div>
+    </header>
+
+    <main class="shell page-shell">
+        <div id="page-banner" class="page-banner" hidden></div>
+        {% block content %}{% endblock %}
+    </main>
+
+    <script type="module">
+        import { bindGlobalUi } from "{{ url_for('static', filename='js/common.js') }}";
+        bindGlobalUi();
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

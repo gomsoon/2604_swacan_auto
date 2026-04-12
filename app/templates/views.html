@@ -1,0 +1,39 @@
+﻿{% extends "base.html" %}
+
+{% block content %}
+<section class="page-title-row">
+    <div>
+        <p class="eyebrow">Frontend MVP</p>
+        <h1>뷰 목록</h1>
+        <p class="section-copy">저장된 아키텍처 뷰를 선택하거나 새 뷰를 만들어 편집을 시작합니다.</p>
+    </div>
+    <button id="refresh-views-button" class="button ghost" type="button">새로고침</button>
+</section>
+
+<section class="two-column">
+    <form id="create-view-form" class="card stack-form">
+        <h2>새 뷰 만들기</h2>
+        <label class="field">
+            <span>이름</span>
+            <input id="new-view-name" name="name" type="text" required>
+        </label>
+        <label class="field">
+            <span>설명</span>
+            <textarea id="new-view-description" name="description" rows="4"></textarea>
+        </label>
+        <button class="button primary" type="submit">생성</button>
+    </form>
+
+    <section class="card">
+        <div class="section-header">
+            <h2>저장된 뷰</h2>
+            <span id="views-count" class="meta-pill">0</span>
+        </div>
+        <div id="views-list" class="view-list"></div>
+    </section>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ url_for('static', filename='js/views.js') }}"></script>
+{% endblock %}

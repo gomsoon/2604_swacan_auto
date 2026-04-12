@@ -1,0 +1,46 @@
+﻿{% extends "base.html" %}
+
+{% block content %}
+<section id="monitor-app" class="workspace" data-view-id="{{ view_id }}">
+    <div class="page-title-row">
+        <div>
+            <p class="eyebrow">Monitoring</p>
+            <h1>{{ view_name }}</h1>
+            <p class="section-copy">저장된 아키텍처 위에 latest state와 recent event를 덧입혀 관찰합니다.</p>
+        </div>
+        <div class="toolbar-inline">
+            <span id="monitor-status" class="meta-pill">polling 준비</span>
+            <a class="button ghost" href="{{ url_for('web.editor_page', view_id=view_id) }}">편집으로</a>
+        </div>
+    </div>
+
+    <div class="workspace-grid monitor-grid">
+        <section class="card canvas-card">
+            <svg id="monitor-canvas" class="diagram-canvas" aria-label="monitoring canvas"></svg>
+        </section>
+
+        <aside class="card monitor-sidebar">
+            <section>
+                <div class="section-header">
+                    <h2>상태 요약</h2>
+                </div>
+                <div id="monitor-selection-summary" class="stack-block">
+                    <p>노드를 선택하면 latest state를 볼 수 있습니다.</p>
+                </div>
+            </section>
+
+            <section>
+                <div class="section-header">
+                    <h2>최근 이벤트</h2>
+                    <button id="refresh-events-button" class="button ghost small" type="button">즉시 갱신</button>
+                </div>
+                <div id="events-list" class="event-list"></div>
+            </section>
+        </aside>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ url_for('static', filename='js/monitor.js') }}"></script>
+{% endblock %}

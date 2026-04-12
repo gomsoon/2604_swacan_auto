@@ -1,5 +1,10 @@
-__pycache__/
+﻿__pycache__/
 .pytest_cache/
 instance/
 test_artifacts/
 *.sqlite3
+.venv/
+.pytest_run_*/
+pytest-cache-files-*/
+pytest_tmp/
+pytest_tmp_fixed/
