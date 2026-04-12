@@ -45,6 +45,9 @@
 
 ### 4.3 동시성 및 쓰기 정책
 
+- [íì] MVP ììë worker ê° `ingest_inbox` ë¥¼ polling íë©´ì ì ììì íì¸íë ë¨ì loop êµ¬ì¡°ë¥¼ ì¬ì©í  ì ìì´ì¼ íë¤.
+- [íì] ì´ worker loop ë ê³ ì  sleep ëë ì§§ì backoff ì ì±ì í¬í¨í  ì ìì¼ë©°, ì´í event-driven wake-up ëë ì¸ë¶ broker êµ¬ì¡°ë¡ íì¥ ê°ë¥í´ì¼ íë¤.
+
 - [필수] Flask request 처리 경로에서는 무거운 후처리 로직을 직접 수행하지 않고, durable write 후 worker 처리로 넘기는 구조를 우선해야 한다.
 - [필수] SQLite 사용 시 writer 는 실질적으로 직렬화된 흐름을 가져야 하며, single-writer discipline 을 유지해야 한다.
 - [필수] latest state, grouped event, raw event, debug payload 정리는 동시에 여러 경로에서 무질서하게 쓰기보다 제어된 쓰기 흐름을 가져야 한다.
