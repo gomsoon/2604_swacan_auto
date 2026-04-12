@@ -52,7 +52,7 @@
 - `id` INTEGER PK
 - `name` TEXT NOT NULL
 - `description` TEXT NULL
-- `owner_user_id` TEXT NOT NULL
+- `owner_user_id` INTEGER NOT NULL
 - `metamodel_version` TEXT NOT NULL
 - `revision` INTEGER NOT NULL DEFAULT 1
 - `created_at` TEXT NOT NULL
@@ -203,7 +203,7 @@
 - `direction` TEXT NOT NULL
 - `endpoint_or_topic` TEXT NOT NULL
 - `agent_id` TEXT NULL
-- `user_id` TEXT NULL
+- `user_id` INTEGER NULL
 - `session_id` TEXT NULL
 - `trace_id` TEXT NULL
 - `status_code` INTEGER NULL

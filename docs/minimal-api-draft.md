@@ -25,7 +25,7 @@ Request JSON:
 ```json
 {
   "username": "admin",
-  "password": "password"
+  "password": "admin123!"
 }
 ```
 

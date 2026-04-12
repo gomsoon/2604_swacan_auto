@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS views (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
-    owner_user_id TEXT NOT NULL,
+    owner_user_id INTEGER NOT NULL,
     metamodel_version TEXT NOT NULL,
     revision INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS debug_payload_logs (
     direction TEXT NOT NULL,
     endpoint_or_topic TEXT NOT NULL,
     agent_id TEXT,
-    user_id TEXT,
+    user_id INTEGER,
     session_id TEXT,
     trace_id TEXT,
     status_code INTEGER,
@@ -223,6 +223,7 @@ CREATE INDEX IF NOT EXISTS idx_debug_payload_logs_trace_id_occurred
 ## 5. Seed 데이터 초안 방향
 
 - `users` 에는 최소 `admin` 계정 1개를 seed 한다.
+- ê¸°ë³¸ seed ë¡ê·¸ì¸ ììë `admin / admin123!` ë¡ ëë¤.
 - `views` 와 `view_nodes` 는 demo view 1개와 `PhysicalServer`, `SoftwareProcess`, `MonitoringAgent` 노드 3개를 seed 할 수 있다.
 - `view_nodes.id` 는 backend 가 생성해서 frontend 에 반환하는 정수 PK 로 사용한다.
 - `latest_states`, `raw_events`, `ingest_inbox`, `debug_payload_logs` 는 기본적으로 빈 상태로 시작한다.
