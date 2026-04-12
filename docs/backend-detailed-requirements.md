@@ -299,10 +299,12 @@
 ## 13. 테스트 요구사항
 
 - [필수] `pytest` 를 사용하여 단위 테스트와 Flask API 테스트를 작성해야 한다.
+- [필수] backend 테스트에는 branch coverage 측정이 포함되어야 한다.
 - [필수] containment 검증, notation registry 조회, metamodel publish 정책, runtime binding, stale 처리, duplicate event 처리에 대한 테스트가 필요하다.
 - [필수] agent payload 수신 API 는 정상 수신, 중복 수신, 순서 역전, 인증 실패, 부분 수용에 대한 테스트가 필요하다.
 - [필수] 관리자 기능에 대해서는 메타모델 변경 권한, 로그 조회, 세션 조회 테스트가 필요하다.
 - [필수] debug mode 에 대해서는 payload 저장 활성화 여부, 민감 정보 마스킹, 보존 기간 정리, 요청/응답 연계 조회 테스트가 필요하다.
+- [필수] coverage 결과 report 는 지속적으로 저장되어 구조 refactoring 시 증적 자료로 활용 가능해야 한다.
 - [선택] 이후 버전에서는 성능 테스트와 장시간 soak test 를 추가할 수 있다.
 
 ## 14. MVP 에서 제외하거나 단순화하는 항목

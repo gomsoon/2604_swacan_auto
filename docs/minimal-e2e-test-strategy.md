@@ -9,10 +9,12 @@
 ## 1. 기본 원칙
 
 - [필수] backend, worker, agent 의 로직 테스트는 `pytest` 를 기본으로 한다.
+- [필수] backend 와 agent 에 대해서는 line coverage 뿐 아니라 branch coverage 측정을 포함해야 한다.
 - [필수] 로그인, editor, monitoring 흐름의 브라우저 테스트는 `Playwright` 를 기본으로 한다.
 - [필수] 최소 E2E 게이트는 `pytest` 와 `Playwright` 가 모두 통과되어야 한다.
 - [필수] 테스트는 기능 추가 직후가 아니라 milestone 진행 중 지속적으로 추가되어야 한다.
 - [필수] 구조 refactoring 이 발생하더라도 핵심 회귀 테스트 세트는 유지되어야 한다.
+- [필수] coverage report 는 실행 시마다 남겨 증적 자료로 활용할 수 있어야 한다.
 
 ## 2. 도구 선택 기준
 
@@ -21,6 +23,7 @@
 - 적용 대상: Flask API, worker 후처리, SQLite 접근, agent selector, outbox, transport, debug mode 저장 여부
 - 장점: 빠른 실행, 독립 SQLite fixture, 세밀한 로직 검증, CI 적용 용이
 - 역할: 최소 E2E 의 내부 계약과 안정성 검증
+- coverage 정책: backend 와 agent 의 branch coverage 를 측정하고 report 를 남긴다.
 
 ### 2.2 Playwright
 
@@ -40,6 +43,7 @@
 - debug mode payload 저장 on/off
 - agent selector 와 snapshot 생성
 - agent SQLite outbox 저장/복구/재전송
+- backend worker 분기 경로와 agent transport/outbox 분기 경로에 대한 branch coverage 측정
 
 ### 3.2 Playwright 범위
 
@@ -78,6 +82,7 @@
 - [필수] 테스트용 dummy target process 를 제공해 process alive/dead 시나리오를 반복 가능하게 해야 한다.
 - [필수] pytest 는 독립 SQLite DB 를 사용해야 한다.
 - [필수] Playwright 실행 시 backend 와 frontend 는 테스트용 설정으로 기동되어야 한다.
+- [필수] coverage 결과는 파일 또는 HTML/XML report 형태로 저장되어 나중에 증적 자료로 확인 가능해야 한다.
 
 ## 6. 실행 순서
 
@@ -92,6 +97,8 @@
 - [필수] `Playwright` 최소 세트 전부 통과
 - [필수] 수동 통합 테스트 1회 이상 성공
 - [필수] 주요 실패 원인에 대해 debug 정보 수집 가능
+- [필수] backend 와 agent 의 branch coverage report 가 생성되어야 한다.
+- [필수] 초기 단계에서는 coverage 수치 자체를 강한 합격 기준으로 두기보다, 측정과 추적 자체를 필수 게이트로 본다.
 
 ## 8. 후속 확장
 
@@ -104,4 +111,5 @@
 
 - 최소 E2E 테스트 전략의 기본 조합은 `pytest + Playwright` 다.
 - `pytest` 는 내부 계약과 내구성 검증, `Playwright` 는 사용자 흐름 검증을 담당한다.
+- backend 와 agent 는 초기부터 branch coverage 측정과 report 축적을 시작하고, 이후 단계에서 coverage 게이트를 점진적으로 강화한다.
 - 최소 E2E 게이트는 두 계층 테스트가 함께 통과할 때만 완료로 본다.

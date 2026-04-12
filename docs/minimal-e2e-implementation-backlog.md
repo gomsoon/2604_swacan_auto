@@ -21,6 +21,7 @@
 - [필수] 각 milestone 종료 시점에는 자동 테스트와 수동 통합 테스트 게이트를 함께 점검한다.
 - [필수] 상세 요구사항 문서의 정리 순서와 별개로, 실제 구현 순서의 기준 문서는 본 backlog 로 본다.
 - [필수] 최소 E2E 자동화 테스트 기본 조합은 `pytest + Playwright` 로 고정한다.
+- [필수] backend 와 agent 테스트에는 branch coverage 측정 및 report 생성 작업이 포함되어야 한다.
 
 ## 3. 구현 순서 개요
 
@@ -71,6 +72,16 @@
 - backend API 테스트가 fixture 만으로 실행 가능해야 한다.
 - 선행 조건: B-001, B-002, B-003
 - 연결 테스트: pytest fixture smoke test
+
+### B-004A pytest coverage 설정 추가
+
+- 우선순위: `필수`
+- 설명: backend 와 agent 테스트 실행 시 branch coverage 를 측정하고 report 를 남기는 설정을 추가한다.
+- 완료 기준:
+- `pytest` 실행 시 branch coverage report 가 생성되어야 한다.
+- coverage 결과 파일이 증적 자료로 남아 추후 비교 가능해야 한다.
+- 선행 조건: B-001, B-004
+- 연결 테스트: pytest coverage smoke test
 
 ### B-005 Playwright 기본 실행 골격 준비
 
@@ -329,6 +340,7 @@
 - 완료 기준:
 - `pytest` 기반으로 로그인 API, view 저장 API, ingest, latest state, raw event, debug mode, outbox 복구 테스트가 한 세트로 실행 가능해야 한다.
 - `Playwright` 기반으로 로그인, editor 저장, monitoring 진입 흐름이 한 세트로 실행 가능해야 한다.
+- backend 와 agent 의 branch coverage report 가 함께 생성되어야 한다.
 - 선행 조건: B-101, B-105, B-201, B-203, B-204, B-401, B-403
 - 연결 테스트: 최소 E2E test suite
 
@@ -377,6 +389,7 @@
 - [리스크] `Milestone 4` 의 debug mode 와 outbox 복구는 뒤로 미루기 쉽지만, 실제로는 최소 E2E 품질을 결정하는 핵심 게이트다.
 - [리스크] seed 구조와 최소 메타모델을 임시 코드로만 처리하면 이후 metamodel/notation 확장 시 재작업이 발생할 수 있다.
 - [리스크] 회귀 테스트가 milestone 끝에서만 추가되면 점진적 개발의 장점이 줄어들고, refactoring 비용이 커질 수 있다.
+- [리스크] branch coverage 를 늦게 도입하면 backend 와 agent 내부 분기 경로의 테스트 공백을 초기에 파악하기 어렵다.
 - [리스크] Playwright 기반 브라우저 테스트를 너무 늦게 붙이면 editor 와 monitoring 흐름의 UI 회귀를 초기에 잡기 어렵다.
 - [리스크] agent 자동 업데이트를 현재 backlog 에 조기 편입하면 핵심 흐름 검증 전 운영 복잡도가 증가할 수 있다.
 - [관찰] 최소 E2E 단계에서는 기능 수가 아니라 반복 가능한 성공 시나리오 확보 여부가 더 중요하다.

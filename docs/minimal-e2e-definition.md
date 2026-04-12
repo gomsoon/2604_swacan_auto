@@ -21,6 +21,7 @@
 - [필수] 구조적 문제가 확인되면 새 기능을 추가하기 전에 refactoring 을 먼저 수행한다.
 - [필수] 상세 요구사항 문서가 도메인 순서로 정리되어 있더라도, 실제 구현 순서는 별도 구현 백로그 문서를 기준으로 따라야 한다.
 - [필수] 최소 E2E 자동화 테스트는 backend/agent 는 `pytest`, 브라우저 흐름은 `Playwright` 를 기준으로 한다.
+- [필수] backend 와 agent 자동화 테스트에는 branch coverage 측정과 report 생성이 포함되어야 한다.
 - [필수] 최소 E2E 버전이 안정적으로 통과되기 전에는 고급 기능, 고급 UI, 확장성 기능을 추가하지 않는다.
 
 ## 3. 최소 E2E 버전의 목표
@@ -131,6 +132,7 @@
 
 - [필수] backend 와 agent 자동화 테스트는 `pytest` 기반으로 작성해야 한다.
 - [필수] 로그인과 주요 브라우저 흐름 자동화 테스트는 `Playwright` 기반으로 작성해야 한다.
+- [필수] backend 와 agent 자동화 테스트 실행 시 branch coverage report 가 생성되어야 한다.
 - [필수] 인증 테스트: 로그인 성공/실패
 - [필수] model 저장 테스트: 최소 view 생성 및 저장
 - [필수] agent ingest API 테스트: 정상 payload 수신
@@ -159,6 +161,7 @@
 - [필수] 7절 수용 기준이 모두 충족되어야 한다.
 - [필수] 8절 필수 테스트 게이트가 자동 또는 수동 방식으로 통과되어야 한다.
 - [필수] 최소 E2E 자동화 게이트는 `pytest + Playwright` 조합으로 통과되어야 한다.
+- [필수] backend 와 agent 의 branch coverage report 가 증적 자료로 남아 있어야 한다.
 - [필수] 반복 실행 중 구조적 병목이나 책임 혼합이 확인되면, 기능 추가 전 refactoring 후보를 먼저 정리해야 한다.
 - [필수] 최소 E2E 단계 완료 전에는 SSE, grouped event 고도화, admin UI 확장, 동적 metamodel UI 추가, agent 자동 업데이트를 시작하지 않는다.
 

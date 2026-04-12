@@ -289,10 +289,12 @@
 ## 16. 테스트 요구사항
 
 - [필수] `pytest` 를 사용하여 단위 테스트와 통합 테스트를 작성해야 한다.
+- [필수] agent 테스트에는 branch coverage 측정이 포함되어야 한다.
 - [필수] selector 매칭, target_id 기반 grouping, host/process snapshot 생성, self-state 생성에 대한 테스트가 필요하다.
 - [필수] outbox enqueue, ack 후 정리, 장애 후 재전송, agent 재시작 복구에 대한 테스트가 필요하다.
 - [필수] batch payload 직렬화, millisecond 시간 정밀도, sequence 증가, duplicate retransmission 에 대한 테스트가 필요하다.
 - [필수] debug mode 에 대해서는 trace_id 포함, 민감 정보 마스킹, 전송 메타데이터 기록 여부에 대한 테스트가 필요하다.
+- [필수] coverage 결과 report 는 지속적으로 저장되어 이후 회귀 비교와 refactoring 증적 자료로 활용 가능해야 한다.
 - [선택] 이후 버전에서는 장시간 실행, 메모리 누수, 대량 target 시나리오에 대한 soak test 를 추가할 수 있다.
 
 ## 17. MVP 에서 제외하거나 단순화하는 항목
