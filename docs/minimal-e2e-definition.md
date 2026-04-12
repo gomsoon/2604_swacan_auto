@@ -68,7 +68,7 @@
 
 ### 5.1 Backend
 
-- [íì] ìµì E2E ë¨ê³ììë worker ê° `ingest_inbox` ë¥¼ polling íë©° pending payload ë¥¼ ì²ë¦¬íë ë¨ì loop êµ¬ì¡°ë¥¼ ì¬ì©í´ë ëë¤.
+- [필수] 최소 E2E 단계에서는 worker 가 `ingest_inbox` 를 polling 하며 pending payload 를 처리하는 단순 loop 구조를 사용해도 된다.
 - [필수] MVP 최소 E2E 구조에서도 `web` 과 `worker` 의 책임 경계는 유지해야 한다.
 - [필수] `web` 은 로그인, view 저장, monitoring 조회, agent ingest 를 담당한다.
 - [필수] `worker` 는 latest state 갱신과 단순 event 생성 정도의 최소 후처리를 담당한다.
