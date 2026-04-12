@@ -1,9 +1,14 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
+import socket
+import threading
+from contextlib import closing
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
+from werkzeug.serving import make_server
 
 from app import create_app
 from app.db import init_db
@@ -11,6 +16,18 @@ from app.db import init_db
 
 ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "test_artifacts"
 ARTIFACTS_DIR.mkdir(exist_ok=True)
+
+
+class LiveServerThread(threading.Thread):
+    def __init__(self, app, host: str, port: int):
+        super().__init__(daemon=True)
+        self._server = make_server(host, port, app, threaded=True)
+
+    def run(self) -> None:
+        self._server.serve_forever()
+
+    def shutdown(self) -> None:
+        self._server.shutdown()
 
 
 def _build_app(db_name: str, include_seed: bool):
@@ -29,6 +46,13 @@ def _build_app(db_name: str, include_seed: bool):
         init_db(include_seed=include_seed)
 
     return app, db_path
+
+
+def _find_free_port() -> int:
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        return int(sock.getsockname()[1])
 
 
 @pytest.fixture()
@@ -69,3 +93,38 @@ def runner(app):
 @pytest.fixture()
 def seeded_runner(seeded_app):
     return seeded_app.test_cli_runner()
+
+
+@pytest.fixture(scope="session")
+def browser() -> Browser:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        yield browser
+        browser.close()
+
+
+@pytest.fixture()
+def browser_context(browser: Browser) -> BrowserContext:
+    context = browser.new_context(locale="ko-KR", timezone_id="Asia/Seoul")
+    try:
+        yield context
+    finally:
+        context.close()
+
+
+@pytest.fixture()
+def page(browser_context: BrowserContext) -> Page:
+    return browser_context.new_page()
+
+
+@pytest.fixture()
+def live_server(seeded_app):
+    host = "127.0.0.1"
+    port = _find_free_port()
+    server_thread = LiveServerThread(seeded_app, host, port)
+    server_thread.start()
+    try:
+        yield f"http://{host}:{port}", seeded_app
+    finally:
+        server_thread.shutdown()
+        server_thread.join(timeout=5)

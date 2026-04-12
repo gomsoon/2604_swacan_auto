@@ -1,0 +1,12 @@
+[run]
+branch = True
+source = app
+
+[report]
+omit =
+    tests/*
+show_missing = True
+skip_covered = False
+
+[xml]
+output = test_artifacts/coverage.xml

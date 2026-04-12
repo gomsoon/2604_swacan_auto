@@ -155,6 +155,7 @@ export function renderDiagram(svg, options) {
             transform: `translate(${node.x}, ${node.y})`,
         });
         group.dataset.nodeId = String(node.id);
+        group.dataset.nodeType = node.node_type;
 
         const radius = node.node_type === "PhysicalServer" ? 4 : 18;
         group.appendChild(
@@ -220,3 +221,6 @@ export function clientToSvg(svg, clientX, clientY) {
     point.y = clientY;
     return point.matrixTransform(svg.getScreenCTM().inverse());
 }
+
+
+

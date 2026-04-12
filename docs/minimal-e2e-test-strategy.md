@@ -1,4 +1,4 @@
-# Software Architecture Runtime Monitoring System
+﻿# Software Architecture Runtime Monitoring System
 
 ## 최소 E2E 테스트 전략
 
@@ -15,6 +15,7 @@
 - [필수] 테스트는 기능 추가 직후가 아니라 milestone 진행 중 지속적으로 추가되어야 한다.
 - [필수] 구조 refactoring 이 발생하더라도 핵심 회귀 테스트 세트는 유지되어야 한다.
 - [필수] coverage report 는 실행 시마다 남겨 증적 자료로 활용할 수 있어야 한다.
+- [필수] coverage 는 제품 코드 기준으로 `app` 패키지에 대해 분리 측정하고, `tests` 와 Playwright 시나리오 코드는 coverage 계산에서 분리한다.
 
 ## 2. 도구 선택 기준
 
@@ -22,8 +23,7 @@
 
 - 적용 대상: Flask API, worker 후처리, SQLite 접근, agent selector, outbox, transport, debug mode 저장 여부
 - 장점: 빠른 실행, 독립 SQLite fixture, 세밀한 로직 검증, CI 적용 용이
-- 역할: 최소 E2E 의 내부 계약과 안정성 검증
-- coverage 정책: backend 와 agent 의 branch coverage 를 측정하고 report 를 남긴다.
+- coverage 정책: backend 와 agent 의 branch coverage 를 `app` 기준으로 측정하고 report 를 남긴다. 테스트 코드와 Playwright 시나리오는 coverage 수치와 분리한다.
 
 ### 2.2 Playwright
 
@@ -96,8 +96,7 @@
 - [필수] `pytest` 최소 세트 전부 통과
 - [필수] `Playwright` 최소 세트 전부 통과
 - [필수] 수동 통합 테스트 1회 이상 성공
-- [필수] 주요 실패 원인에 대해 debug 정보 수집 가능
-- [필수] backend 와 agent 의 branch coverage report 가 생성되어야 한다.
+- [필수] backend 와 agent 의 branch coverage report 가 `app` 기준으로 생성되어야 한다.
 - [필수] 초기 단계에서는 coverage 수치 자체를 강한 합격 기준으로 두기보다, 측정과 추적 자체를 필수 게이트로 본다.
 
 ## 8. 후속 확장
@@ -112,4 +111,5 @@
 - 최소 E2E 테스트 전략의 기본 조합은 `pytest + Playwright` 다.
 - `pytest` 는 내부 계약과 내구성 검증, `Playwright` 는 사용자 흐름 검증을 담당한다.
 - backend 와 agent 는 초기부터 branch coverage 측정과 report 축적을 시작하고, 이후 단계에서 coverage 게이트를 점진적으로 강화한다.
+- Playwright 는 coverage 수치 계산 대상이 아니라 최소 E2E 사용자 흐름의 pass/fail 과 실행 증적을 담당한다.
 - 최소 E2E 게이트는 두 계층 테스트가 함께 통과할 때만 완료로 본다.
