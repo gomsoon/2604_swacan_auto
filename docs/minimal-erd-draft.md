@@ -31,7 +31,7 @@
 - 로그인과 최소 권한 확인을 위한 사용자 계정 저장
 
 주요 컬럼:
-- `id` TEXT PK
+- `id` INTEGER PK
 - `username` TEXT UNIQUE NOT NULL
 - `password_hash` TEXT NOT NULL
 - `role` TEXT NOT NULL
@@ -48,7 +48,7 @@
 - architecture view 메타데이터 저장
 
 주요 컬럼:
-- `id` TEXT PK
+- `id` INTEGER PK
 - `name` TEXT NOT NULL
 - `description` TEXT NULL
 - `owner_user_id` TEXT NOT NULL
@@ -69,9 +69,9 @@
 - editor 와 monitoring view 가 공유하는 최소 layout 및 노드 정의 저장
 
 주요 컬럼:
-- `id` TEXT PK
-- `view_id` TEXT NOT NULL
-- `parent_node_id` TEXT NULL
+- `id` INTEGER PK
+- `view_id` INTEGER NOT NULL
+- `parent_node_id` INTEGER NULL
 - `node_type` TEXT NOT NULL
 - `display_name` TEXT NOT NULL
 - `target_id` TEXT NULL
@@ -79,6 +79,7 @@
 - `y` REAL NOT NULL
 - `width` REAL NOT NULL
 - `height` REAL NOT NULL
+- `is_deleted` INTEGER NOT NULL DEFAULT 0
 - `style_json` TEXT NULL
 - `created_at` TEXT NOT NULL
 - `updated_at` TEXT NOT NULL
@@ -90,6 +91,9 @@
 비고:
 - 최소 E2E 에서는 `PhysicalServer`, `SoftwareProcess`, `MonitoringAgent` 세 타입만 지원해도 된다.
 - `target_id` 는 process node 와 agent node 를 runtime 상태와 연결하기 위한 최소 식별자다.
+- `view_nodes.id` 는 frontend 임시 문자열이 아니라 backend 에서 일관되게 생성하고 반환하는 정수 PK 를 사용하는 것이 바람직하다.
+- 이 정책은 이후 라이선스, 감사, 정책 적용, soft delete, background cleanup 기능을 붙일 때 유리하다.
+- 최소 E2E 단계에서는 `is_deleted` 를 기본 0으로 두고, 실제 soft delete 처리는 후속 단계에서 활성화할 수 있다.
 
 ### 3.4 ingest_inbox
 
@@ -118,8 +122,8 @@
 - monitoring 화면 조회용 최신 상태 저장
 
 주요 컬럼:
-- `id` TEXT PK
-- `view_node_id` TEXT NULL
+- `id` INTEGER PK
+- `view_node_id` INTEGER NULL
 - `target_id` TEXT NOT NULL
 - `state_type` TEXT NOT NULL
 - `status` TEXT NOT NULL

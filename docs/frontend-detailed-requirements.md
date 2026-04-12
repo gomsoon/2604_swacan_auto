@@ -82,6 +82,8 @@
 
 - [필수] `PhysicalServer`, `VirtualMachine`, `SoftwareProcess`, `ExecutionThread`, `MonitoringAgent`, `CommunicationLink` 의 기본 시각 표현을 제공해야 한다.
 - [필수] `MonitoringAgent` 는 일반 process 와 구분 가능한 별도 semantic type 으로 표시되어야 한다.
+- [필수] `MonitoringAgent` 의 기본 도형은 process 계열과 일관되게 라운드 사각형을 유지하는 것이 바람직하다.
+- [필수] `MonitoringAgent` 는 특수한 process 임을 보여주기 위해 이중 테두리, 전용 배지, 또는 거의 원형에 가까운 라운드 사각형 같은 추가 스타일을 사용할 수 있어야 한다.
 - [필수] group abstraction 이 적용된 `Server`, `Process`, `Thread` 는 stacked shape 또는 `xN` 배지 등으로 표현 가능해야 한다.
 - [필수] `MonitoringAgent` 와 관측 대상의 관계는 containment 가 아니라 `monitors` association 으로 표현되어야 한다.
 

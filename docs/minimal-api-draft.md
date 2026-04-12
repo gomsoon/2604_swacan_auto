@@ -33,7 +33,7 @@ Response JSON 200:
 ```json
 {
   "user": {
-    "id": "usr_001",
+    "id": 1,
     "username": "admin",
     "role": "admin"
   }
@@ -70,7 +70,7 @@ Response JSON 200:
 {
   "items": [
     {
-      "id": "view_001",
+      "id": 1,
       "name": "Demo View",
       "description": "Minimal E2E view",
       "revision": 1,
@@ -90,14 +90,14 @@ Response JSON 200:
 ```json
 {
   "view": {
-    "id": "view_001",
+    "id": 1,
     "name": "Demo View",
     "revision": 1,
     "metamodel_version": "seed-v1"
   },
   "nodes": [
     {
-      "id": "node_srv_001",
+      "id": 101,
       "parent_node_id": null,
       "node_type": "PhysicalServer",
       "display_name": "Host A",
@@ -108,8 +108,8 @@ Response JSON 200:
       "height": 260
     },
     {
-      "id": "node_proc_001",
-      "parent_node_id": "node_srv_001",
+      "id": 102,
+      "parent_node_id": 101,
       "node_type": "SoftwareProcess",
       "display_name": "App Process",
       "target_id": "app_main",
@@ -119,8 +119,8 @@ Response JSON 200:
       "height": 56
     },
     {
-      "id": "node_agent_001",
-      "parent_node_id": "node_srv_001",
+      "id": 103,
+      "parent_node_id": 101,
       "node_type": "MonitoringAgent",
       "display_name": "Local Agent",
       "target_id": "agent_local",
@@ -155,7 +155,7 @@ Response JSON 201:
 ```json
 {
   "view": {
-    "id": "view_001",
+    "id": 1,
     "name": "Demo View",
     "revision": 1
   }
@@ -167,6 +167,7 @@ Response JSON 201:
 - Method: `PUT`
 - Path: `/api/views/{view_id}`
 - 목적: node layout 과 최소 속성 저장
+- 비고: 새 node 는 frontend 임시 ID가 아니라 backend 가 생성한 정수 ID를 사용한다고 가정한다.
 
 Request JSON:
 ```json
@@ -174,7 +175,7 @@ Request JSON:
   "revision": 1,
   "nodes": [
     {
-      "id": "node_srv_001",
+      "id": 101,
       "parent_node_id": null,
       "node_type": "PhysicalServer",
       "display_name": "Host A",
@@ -185,8 +186,8 @@ Request JSON:
       "height": 260
     },
     {
-      "id": "node_proc_001",
-      "parent_node_id": "node_srv_001",
+      "id": 102,
+      "parent_node_id": 101,
       "node_type": "SoftwareProcess",
       "display_name": "App Process",
       "target_id": "app_main",
@@ -196,8 +197,8 @@ Request JSON:
       "height": 56
     },
     {
-      "id": "node_agent_001",
-      "parent_node_id": "node_srv_001",
+      "id": 103,
+      "parent_node_id": 101,
       "node_type": "MonitoringAgent",
       "display_name": "Local Agent",
       "target_id": "agent_local",

@@ -27,7 +27,7 @@ PRAGMA synchronous = NORMAL;
 
 ```sql
 CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
+    id INTEGER PRIMARY KEY,
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL,
@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 ```sql
 CREATE TABLE IF NOT EXISTS views (
-    id TEXT PRIMARY KEY,
+    id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
     owner_user_id TEXT NOT NULL,
@@ -57,9 +57,9 @@ CREATE TABLE IF NOT EXISTS views (
 
 ```sql
 CREATE TABLE IF NOT EXISTS view_nodes (
-    id TEXT PRIMARY KEY,
-    view_id TEXT NOT NULL,
-    parent_node_id TEXT,
+    id INTEGER PRIMARY KEY,
+    view_id INTEGER NOT NULL,
+    parent_node_id INTEGER,
     node_type TEXT NOT NULL,
     display_name TEXT NOT NULL,
     target_id TEXT,
@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS view_nodes (
     y REAL NOT NULL,
     width REAL NOT NULL,
     height REAL NOT NULL,
+    is_deleted INTEGER NOT NULL DEFAULT 0,
     style_json TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -98,8 +99,8 @@ CREATE TABLE IF NOT EXISTS ingest_inbox (
 
 ```sql
 CREATE TABLE IF NOT EXISTS latest_states (
-    id TEXT PRIMARY KEY,
-    view_node_id TEXT,
+    id INTEGER PRIMARY KEY,
+    view_node_id INTEGER,
     target_id TEXT NOT NULL,
     state_type TEXT NOT NULL,
     status TEXT NOT NULL,
@@ -190,11 +191,15 @@ CREATE INDEX IF NOT EXISTS idx_debug_payload_logs_trace_id_occurred
 
 - `users` 에는 최소 `admin` 계정 1개를 seed 한다.
 - `views` 와 `view_nodes` 는 demo view 1개와 `PhysicalServer`, `SoftwareProcess`, `MonitoringAgent` 노드 3개를 seed 할 수 있다.
+- `view_nodes.id` 는 backend 가 생성해서 frontend 에 반환하는 정수 PK 로 사용한다.
 - `latest_states`, `raw_events`, `ingest_inbox`, `debug_payload_logs` 는 기본적으로 빈 상태로 시작한다.
 
 ## 6. 구현 시 주의사항
 
 - `latest_states.id` 는 단순 PK 용 내부 식별자이지만, 실제 upsert 키는 `target_id + state_type` 를 사용한다.
+- `view_nodes` 생성과 삭제는 frontend 임시 ID 기반이 아니라 backend 생성/관리 방식으로 진행하는 것을 전제로 한다.
+- 삭제는 즉시 hard delete 가 아니어도 되며, 필요 시 soft delete 후 background cleanup 정책으로 확장 가능하다.
+- 최소 E2E 에서는 `view_nodes.is_deleted` 를 0으로 유지하는 단순 정책으로 시작하고, 후속 단계에서 soft delete 활용을 확장할 수 있다.
 - `payload_json`, `state_json`, `event_json`, `style_json` 은 최소 E2E 단계에서는 JSON TEXT 로 저장한다.
 - `view_nodes` 에서 `CommunicationLink` 를 넣어두었지만, 최소 E2E 에서는 실제 사용하지 않아도 된다.
 - grouped event 도입 시에는 `raw_events` 와 별도의 요약 테이블을 추가하는 것이 좋다.
