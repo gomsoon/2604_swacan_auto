@@ -8,3 +8,4 @@ test_artifacts/
 pytest-cache-files-*/
 pytest_tmp/
 pytest_tmp_fixed/
+.coverage
