@@ -199,11 +199,13 @@
 
 ### 13.2 세션과 운영 상태
 
-- [필수] 관리자는 현재 접속 사용자, 열린 view, 편집/관제 모드, 마지막 활동 시각을 볼 수 있어야 한다.
+- [필수] 1차 관리자 화면은 실시간 세션 목록보다 system summary, ingest inbox 상태 요약, backend 상태, agent 연결 상태처럼 현재 저장 가능한 운영 정보를 우선 보여주어야 한다.
+- [후속] 세션 레지스트리와 heartbeat 구조가 도입되면, 관리자는 현재 접속 사용자, 열린 view, 편집/관제 모드, 마지막 활동 시각을 볼 수 있어야 한다.
 - [필수] 관리자는 backend 상태, agent 연결 상태, 실시간 연결 수 등 운영에 필요한 요약 정보를 볼 수 있어야 한다.
 
 ### 13.3 운영 로그와 debug payload 조회
 
+- [필수] 1차 관리자 화면은 `raw_events`, `ingest_inbox`, `debug_payload_logs` 를 각각 읽기 전용 목록으로 조회할 수 있어야 한다.
 - [필수] 관리자는 최근 1주일 범위의 구조화된 운영 로그를 조회할 수 있어야 한다.
 - [필수] 로그는 시간, severity, component, 관련 객체 기준으로 필터링할 수 있어야 한다.
 - [필수] backend debug mode 가 활성화된 경우, 관리자는 debug payload 조회 화면에 접근할 수 있어야 한다.
@@ -211,6 +213,7 @@
 - [필수] debug payload 화면은 민감 정보가 마스킹된 JSON 만 표시해야 한다.
 - [필수] debug payload 와 운영 로그의 시간값은 밀리초(1/1000초) 단위까지 확인 가능해야 한다.
 - [필수] debug payload 조회는 일반 운영 로그 조회와 분리된 화면 또는 탭으로 제공해야 한다.
+- [필수] 관리자 화면은 admin API backend 를 먼저 구현하고, 이후 frontend 화면이 해당 API 를 연동하는 순서로 개발해야 한다.
 
 ## 14. 오류 처리와 사용자 피드백 요구사항
 
@@ -268,7 +271,7 @@
 
 - [필수] 화면 설계 초안에는 workspace 목록, editor, monitoring, admin, debug payload 화면이 포함되어야 한다.
 - [필수] SVG canvas interaction 설계에는 palette drag, containment 검증, edge 생성, layout 저장, group 표현 규칙이 포함되어야 한다.
-- [필수] frontend API 연동 명세에는 notation registry 조회, model/view CRUD, latest state 조회, grouped event 조회, low-level event drill-down, 세션 조회, 로그 조회, debug payload 조회가 포함되어야 한다.
+- [필수] frontend API 연동 명세에는 notation registry 조회, model/view CRUD, latest state 조회, grouped event 조회, low-level event drill-down, 관리자 summary 조회, ingest inbox 조회, 세션 조회, 로그 조회, debug payload 조회가 포함되어야 한다.
 - [필수] 실시간 연동 설계에는 SSE 이벤트 종류, snapshot polling 주기, reconnect 정책, stale 표시 정책이 포함되어야 한다.
 
 ## 19. 요약

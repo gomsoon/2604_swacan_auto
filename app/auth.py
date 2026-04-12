@@ -25,6 +25,17 @@ def login_required(view: Callable[..., Any]) -> Callable[..., Any]:
     return wrapped_view
 
 
+def admin_required(view: Callable[..., Any]) -> Callable[..., Any]:
+    @wraps(view)
+    @login_required
+    def wrapped_view(*args: Any, **kwargs: Any):
+        if g.user["role"] != "admin":
+            return error_response("forbidden", "admin access required", 403)
+        return view(*args, **kwargs)
+
+    return wrapped_view
+
+
 def load_logged_in_user() -> None:
     user_id = session.get("user_id")
 
