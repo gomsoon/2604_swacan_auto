@@ -64,3 +64,8 @@ def seeded_client(seeded_app):
 @pytest.fixture()
 def runner(app):
     return app.test_cli_runner()
+
+
+@pytest.fixture()
+def seeded_runner(seeded_app):
+    return seeded_app.test_cli_runner()

@@ -2,7 +2,7 @@ from pathlib import Path
 
 from flask import Flask
 
-from . import auth, db, editor_api, views_api
+from . import agent_api, auth, db, editor_api, ingest_worker, views_api
 
 
 def create_app(test_config: dict | None = None) -> Flask:
@@ -13,6 +13,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         SECRET_KEY="dev",
         DATABASE=str(default_db_path),
         TESTING=False,
+        AGENT_TOKENS={"agent_local": "dev-agent-token"},
+        DEBUG_PAYLOAD_LOGGING=False,
     )
 
     if test_config is not None:
@@ -22,9 +24,11 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     db.init_app(app)
     auth.init_app(app)
+    ingest_worker.init_app(app)
     app.register_blueprint(auth.bp)
     app.register_blueprint(views_api.bp)
     app.register_blueprint(editor_api.bp)
+    app.register_blueprint(agent_api.bp)
 
     @app.get("/health")
     def health() -> dict[str, str]:
