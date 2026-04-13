@@ -1,5 +1,6 @@
 from .collector import CpuSample, ProcessSnapshot, ProcessSnapshotCollector
-from .config import AgentConfig, AgentConfigError, AgentIntervals, AgentTarget, load_config
+from .config import AgentConfig, AgentConfigError, AgentIntervals, AgentStoragePolicy, AgentTarget, load_config
+from .transport import AgentTransport, BatchPayload, TransportResult
 from .host_collector import HostCpuSample, HostSnapshot, HostSnapshotCollector
 from .payloads import OutboxItem
 from .runner import AgentRunner, RunnerCycleResult, RunnerServices
@@ -14,7 +15,10 @@ __all__ = [
     "AgentRunner",
     "AgentRuntimeServices",
     "AgentStorage",
+    "AgentStoragePolicy",
     "AgentTarget",
+    "AgentTransport",
+    "BatchPayload",
     "CollectedCycleSummary",
     "CpuSample",
     "HostCpuSample",
@@ -28,5 +32,6 @@ __all__ = [
     "RunnerCycleResult",
     "RunnerServices",
     "StoredOutboxRow",
+    "TransportResult",
     "load_config",
 ]

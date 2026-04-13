@@ -4,7 +4,9 @@ import argparse
 from collections.abc import Sequence
 
 from .config import AgentConfigError, load_config
-from .runner import LoggingRunnerServices, AgentRunner
+from .runner import AgentRunner
+from .services import AgentRuntimeServices
+from .storage import AgentStorage
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -16,7 +18,41 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def build_runtime_services(config):
+    storage = AgentStorage(config.storage_path)
+    storage.initialize()
+    return AgentRuntimeServices(config, storage)
+
+
+def print_service_summary(services) -> None:
+    actions = getattr(services, "actions", None)
+    if isinstance(actions, list):
+        for action_name, occurred_at in actions:
+            print(f"{occurred_at} {action_name}")
+        return
+
+    last_cycle = getattr(services, "last_cycle", None)
+    if last_cycle is None:
+        return
+
+    print(
+        "heartbeat_seq={heartbeat_seq} host_snapshot_seq={host_snapshot_seq} "
+        "process_snapshot_count={process_count} flush_sent_count={flush_sent_count} "
+        "flush_ack_seq={flush_ack_seq} purged_acked_count={purged_acked_count} "
+        "backend_status={backend_status} flush_error={flush_error}".format(
+            heartbeat_seq=last_cycle.heartbeat_seq,
+            host_snapshot_seq=last_cycle.host_snapshot_seq,
+            process_count=len(last_cycle.process_snapshot_seqs),
+            flush_sent_count=last_cycle.flush_sent_count,
+            flush_ack_seq=last_cycle.flush_ack_seq,
+            purged_acked_count=last_cycle.purged_acked_count,
+            backend_status=getattr(services, "backend_connection_status", "unknown"),
+            flush_error=last_cycle.flush_error or "-",
+        )
+    )
+
+
+def main(argv: Sequence[str] | None = None, *, services_factory=build_runtime_services) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -28,11 +64,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.dump_config:
         print(
             f"agent_id={config.agent_id} endpoint={config.backend_endpoint} "
-            f"targets={len(config.targets)} debug_mode={config.debug_mode}"
+            f"targets={len(config.targets)} debug_mode={config.debug_mode} "
+            f"storage_path={config.storage_path} keep_acked_rows={config.storage.keep_acked_rows}"
         )
         return 0
 
-    services = LoggingRunnerServices()
+    services = services_factory(config)
     runner = AgentRunner(config, services)
 
     if args.once:
@@ -41,8 +78,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_cycles = args.cycles if args.cycles is not None else 1
         runner.run_forever(max_cycles=max_cycles)
 
-    for action_name, occurred_at in services.actions:
-        print(f"{occurred_at} {action_name}")
+    print_service_summary(services)
     return 0
 
 

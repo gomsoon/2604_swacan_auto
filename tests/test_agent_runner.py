@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import agent.main as agent_main
 from agent.config import AgentConfig, AgentIntervals, AgentStoragePolicy, AgentTarget
-from agent.main import main
 from agent.runner import AgentRunner
 
 
@@ -144,10 +144,56 @@ def test_agent_main_once_runs_single_cycle(tmp_path, capsys) -> None:
         encoding="utf-8",
     )
 
-    exit_code = main(["--config", str(config_path), "--once"])
+    class FakeRuntimeServices(SpyServices):
+        pass
+
+    exit_code = agent_main.main(
+        ["--config", str(config_path), "--once"],
+        services_factory=lambda _config: FakeRuntimeServices(),
+    )
     output = capsys.readouterr().out
 
     assert exit_code == 0
     assert "heartbeat" in output
     assert "snapshot" in output
     assert "flush" in output
+
+
+def test_agent_main_dump_config_includes_storage_policy(tmp_path, capsys) -> None:
+    config_path = tmp_path / "agent.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[agent]",
+                'agent_id = "agent_local"',
+                'token = "dev-agent-token"',
+                "",
+                "[backend]",
+                'endpoint = "https://backend.example.com/api/agents/ingest"',
+                "",
+                "[storage]",
+                'database_path = "runtime/agent.sqlite3"',
+                "keep_acked_rows = 25",
+                "",
+                "[intervals]",
+                "heartbeat_seconds = 5",
+                "snapshot_seconds = 10",
+                "flush_seconds = 2",
+                "retry_backoff_seconds = 15",
+                "",
+                "[[targets]]",
+                'target_id = "app_main"',
+                'process_name = "python"',
+                "",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    exit_code = agent_main.main(["--config", str(config_path), "--dump-config"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "storage_path=" in output
+    assert "keep_acked_rows=25" in output
