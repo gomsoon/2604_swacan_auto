@@ -12,6 +12,7 @@ from agent.runner import AgentRunner
 def sample_config() -> AgentConfig:
     return AgentConfig(
         config_path=Path("agent.toml"),
+        storage_path=Path("agent.agent.sqlite3"),
         agent_id="agent_local",
         backend_endpoint="https://backend.example.com/api/agents/ingest",
         token="dev-agent-token",

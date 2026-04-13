@@ -35,6 +35,7 @@ class AgentTarget:
 @dataclass(frozen=True)
 class AgentConfig:
     config_path: Path
+    storage_path: Path
     agent_id: str
     backend_endpoint: str
     token: str
@@ -116,6 +117,23 @@ def _load_target(raw_target: Any) -> AgentTarget:
     )
 
 
+def _resolve_storage_path(raw: dict[str, Any], config_path: Path) -> Path:
+    storage_section = raw.get("storage", {})
+    if storage_section is not None and not isinstance(storage_section, dict):
+        raise AgentConfigError("'storage' section must be an object when provided")
+
+    database_path = None if not isinstance(storage_section, dict) else storage_section.get("database_path")
+    if database_path is None:
+        return config_path.with_suffix(".agent.sqlite3")
+    if not isinstance(database_path, str) or not database_path.strip():
+        raise AgentConfigError("'storage.database_path' must be a non-empty string when provided")
+
+    expanded = Path(os.path.expandvars(database_path.strip())).expanduser()
+    if expanded.is_absolute():
+        return expanded.resolve()
+    return (config_path.parent / expanded).resolve()
+
+
 def load_config(config_path: str | Path) -> AgentConfig:
     path = Path(config_path).expanduser().resolve()
     if not path.exists():
@@ -141,6 +159,7 @@ def load_config(config_path: str | Path) -> AgentConfig:
 
     return AgentConfig(
         config_path=path,
+        storage_path=_resolve_storage_path(raw, path),
         agent_id=_require_text(agent_section, "agent_id"),
         backend_endpoint=_require_text(backend_section, "endpoint"),
         token=_require_text(agent_section, "token"),
