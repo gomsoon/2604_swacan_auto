@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import agent.main as agent_main
 from agent.config import AgentConfig, AgentIntervals, AgentStoragePolicy, AgentTarget
@@ -44,6 +45,8 @@ def sample_config() -> AgentConfig:
 @dataclass
 class SpyServices:
     actions: list[tuple[str, str]] = field(default_factory=list)
+    flush_outcomes: list[str | None] = field(default_factory=list)
+    last_cycle: object = field(default_factory=lambda: SimpleNamespace(flush_error=None))
 
     def emit_heartbeat(self, occurred_at: datetime) -> None:
         self.actions.append(("heartbeat", occurred_at.isoformat(timespec="milliseconds")))
@@ -53,6 +56,8 @@ class SpyServices:
 
     def flush_outbox(self, occurred_at: datetime) -> None:
         self.actions.append(("flush", occurred_at.isoformat(timespec="milliseconds")))
+        flush_error = self.flush_outcomes.pop(0) if self.flush_outcomes else None
+        self.last_cycle = SimpleNamespace(flush_error=flush_error)
 
 
 class FakeClock:
@@ -114,6 +119,32 @@ def test_runner_forever_uses_scheduler_intervals() -> None:
         "flush",
         "flush",
     ]
+
+
+def test_runner_applies_retry_backoff_after_flush_failure() -> None:
+    started_at = datetime(2026, 4, 13, 9, 0, 0, tzinfo=timezone.utc)
+    services = SpyServices(flush_outcomes=["temporary backend failure"])
+    runner = AgentRunner(sample_config(), services, clock=FakeClock(started_at))
+
+    result = runner.run_cycle(now=started_at)
+
+    assert result.ran_flush is True
+    assert result.sleep_seconds == 5.0
+    assert runner.schedule.next_flush_at == started_at + timedelta(seconds=15)
+
+
+def test_runner_returns_to_normal_flush_interval_after_backoff_success() -> None:
+    started_at = datetime(2026, 4, 13, 9, 0, 0, tzinfo=timezone.utc)
+    services = SpyServices(flush_outcomes=["temporary backend failure", None])
+    runner = AgentRunner(sample_config(), services, clock=FakeClock(started_at))
+
+    first_result = runner.run_cycle(now=started_at)
+    second_at = started_at + timedelta(seconds=15)
+    second_result = runner.run_cycle(now=second_at)
+
+    assert first_result.sleep_seconds == 5.0
+    assert second_result.ran_flush is True
+    assert runner.schedule.next_flush_at == second_at + timedelta(seconds=2)
 
 
 def test_agent_main_once_runs_single_cycle(tmp_path, capsys) -> None:

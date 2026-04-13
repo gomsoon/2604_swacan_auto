@@ -152,6 +152,7 @@
 - [필수] host/process snapshot 은 기본 5초 또는 10초 주기로 생성 가능해야 한다.
 - [필수] backend 로의 outbox flush 는 연결 정상 시 1초 또는 2초 주기로 시도할 수 있어야 한다.
 - [필수] backend 장애 시 재시도는 backoff 정책을 적용해야 한다.
+- [필수] flush 실패 시 다음 flush 시점은 `retry_backoff_seconds` 기준으로 다시 예약되어야 하며, 성공 시 기본 flush 주기로 복귀해야 한다.
 
 ### 8.2 즉시 전송 이벤트
 

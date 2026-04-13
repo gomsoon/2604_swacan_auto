@@ -79,6 +79,11 @@ class AgentRunner:
     def request_stop(self) -> None:
         self._stop_requested = True
 
+    def _flush_failed(self) -> bool:
+        last_cycle = getattr(self.services, "last_cycle", None)
+        flush_error = getattr(last_cycle, "flush_error", None)
+        return isinstance(flush_error, str) and bool(flush_error.strip())
+
     def run_cycle(self, *, now: datetime | None = None) -> RunnerCycleResult:
         occurred_at = now or self.clock.now()
         intervals = self.config.intervals
@@ -105,11 +110,16 @@ class AgentRunner:
 
         if ran_flush:
             self.services.flush_outbox(occurred_at)
-            self.schedule.next_flush_at = _advance_due_time(
-                self.schedule.next_flush_at,
-                intervals.flush_seconds,
-                occurred_at,
-            )
+            if self._flush_failed():
+                self.schedule.next_flush_at = occurred_at + timedelta(
+                    seconds=intervals.retry_backoff_seconds
+                )
+            else:
+                self.schedule.next_flush_at = _advance_due_time(
+                    self.schedule.next_flush_at,
+                    intervals.flush_seconds,
+                    occurred_at,
+                )
 
         return RunnerCycleResult(
             occurred_at=occurred_at,

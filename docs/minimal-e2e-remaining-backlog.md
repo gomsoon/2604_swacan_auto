@@ -11,7 +11,7 @@
 - 현재 시스템은 `frontend -> backend -> DB -> monitoring` 흐름과 `agent payload -> backend ingest -> worker -> latest state/raw event` 흐름의 기본 골격이 구현되어 있다.
 - editor, monitoring, admin 기본 화면과 backend API, ingest pipeline, SQLite schema, pytest/Playwright 기반 자동화 테스트가 준비되어 있다.
 - agent 는 설정 로딩, runner, selector, host/process snapshot, process 상태 전이 event, SQLite outbox, batch transport, ack 반영, acked row cleanup 정책까지 최소 골격이 구현되어 있다.
-- 현재 가장 큰 남은 공백은 `retry/backoff 보강`, `worker 안정성 보강`, `실제 Linux 통합 테스트` 이다.
+- 현재 가장 큰 남은 공백은 `SSH 기반 Linux agent 테스트 골격`, `worker 안정성 보강`, `실제 Linux 통합 테스트` 이다.
 
 ## 2. 우선순위 개요
 
@@ -26,15 +26,7 @@
 
 - `A-01 agent main 실제 runtime 연결` 완료
 - `A-02 process 상태 전이 event 생성` 완료
-
-### A-03 retry/backoff 실동작 보강
-
-- 우선순위: `높음`
-- 설명: flush 실패 시 다음 cycle 에서 backoff 를 반영하고, queue pressure 와 connection status 가 self-state 에 자연스럽게 반영되도록 보강한다.
-- 완료 기준:
-- 일시 실패와 반복 실패가 구분되어야 한다.
-- backoff 정책이 transport 재시도에 반영되어야 한다.
-- 테스트 기준: transport failure/backoff 테스트
+- `A-03 retry/backoff 실동작 보강` 완료
 
 ### A-04 실행 운영 보조
 
@@ -143,11 +135,11 @@
 
 ## 7. 지금 바로 이어서 할 작업
 
-1. `A-03 retry/backoff 실동작 보강`
-2. `A-05 SSH 기반 Linux agent 테스트 실행 골격`
-3. `B-01 worker loop/service화`
-4. `L-01 Linux 실제 통합 시나리오`
-5. `F-01 실제 agent 결과 기반 monitoring 최종 점검`
+1. `A-05 SSH 기반 Linux agent 테스트 실행 골격`
+2. `B-01 worker loop/service화`
+3. `L-01 Linux 실제 통합 시나리오`
+4. `F-01 실제 agent 결과 기반 monitoring 최종 점검`
+5. `A-04 실행 운영 보조`
 
 ## 8. 요약
 
