@@ -10,6 +10,7 @@ from .host_collector import HostSnapshotCollector
 from .payloads import OutboxItem
 from .selector import ProcfsSelector
 from .storage import AgentStorage
+from .transport import AgentTransport
 
 
 def _iso(dt: datetime) -> str:
@@ -21,6 +22,9 @@ class CollectedCycleSummary:
     heartbeat_seq: int | None = None
     host_snapshot_seq: int | None = None
     process_snapshot_seqs: list[int] = field(default_factory=list)
+    flush_sent_count: int = 0
+    flush_ack_seq: int | None = None
+    flush_error: str | None = None
 
 
 class AgentRuntimeServices:
@@ -32,6 +36,7 @@ class AgentRuntimeServices:
         selector: ProcfsSelector | None = None,
         process_collector: ProcessSnapshotCollector | None = None,
         host_collector: HostSnapshotCollector | None = None,
+        transport: AgentTransport | None = None,
         agent_version: str = "0.1.0-dev",
         backend_connection_status: str = "idle",
         pid_provider=os.getpid,
@@ -45,10 +50,11 @@ class AgentRuntimeServices:
         self.backend_connection_status = backend_connection_status
         self.pid_provider = pid_provider
         self.started_at = datetime.now().astimezone().replace(microsecond=0)
+        self.boot_id = self.host_collector.collect(occurred_at=self.started_at)[0].boot_id
+        self.transport = transport or AgentTransport(config, storage, boot_id=self.boot_id)
         self.last_cycle = CollectedCycleSummary()
 
     def emit_heartbeat(self, occurred_at: datetime) -> None:
-        boot_id = self.host_collector.collect(occurred_at=occurred_at)[0].boot_id
         item = OutboxItem(
             payload_type="agent_state",
             target_id=self.config.agent_id,
@@ -64,7 +70,7 @@ class AgentRuntimeServices:
                 "last_sent_seq": self.storage.last_seq(),
                 "last_ack_seq": self.storage.last_ack_seq(),
                 "monitored_target_count": len(self.config.targets),
-                "host_boot_id": boot_id,
+                "host_boot_id": self.boot_id,
             },
         )
         self.last_cycle.heartbeat_seq = self.storage.enqueue_item(item)
@@ -114,5 +120,18 @@ class AgentRuntimeServices:
         self.last_cycle.process_snapshot_seqs = process_sequences
 
     def flush_outbox(self, occurred_at: datetime) -> None:
-        _ = occurred_at
-        return None
+        try:
+            result = self.transport.send_pending(sent_at=occurred_at)
+        except Exception as exc:
+            self.backend_connection_status = "error"
+            self.last_cycle.flush_sent_count = 0
+            self.last_cycle.flush_ack_seq = None
+            self.last_cycle.flush_error = str(exc)
+            return
+
+        if result.sent_count > 0:
+            self.backend_connection_status = "connected"
+
+        self.last_cycle.flush_sent_count = result.sent_count
+        self.last_cycle.flush_ack_seq = result.ack_seq
+        self.last_cycle.flush_error = None

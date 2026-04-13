@@ -201,6 +201,8 @@
 - [필수] 각 item 은 최소한 `seq`, `payload_type`, `occurred_at`, `target_id` 또는 동등한 대상 식별자, payload 본문을 포함해야 한다.
 - [필수] payload type 은 최소한 `host_snapshot`, `process_snapshot`, `process_event`, `agent_state` 를 지원해야 한다.
 - [선택] `transport_event`, `diagnostic_event` 를 별도 type 으로 분리할 수 있다.
+- [필수] outbox 에는 item 단위로 저장하되, backend 전송은 여러 item 을 묶은 batch 단위로 수행해야 한다.
+- [필수] transport 는 ack 되지 않은 item 을 `seq` 순서로 최대 batch 크기까지 묶어 `items[]` 로 전송해야 한다.
 
 ### 10.3 sequence 와 ack 처리
 
@@ -237,6 +239,7 @@
 - [필수] backend 장애가 길어질 경우 outbox queue depth 증가를 self-state 로 보고할 수 있어야 한다.
 - [필수] outbox 는 seq 순서대로 읽고 전송해야 한다.
 - [필수] agent 는 재시작 후 미처리 outbox 부터 재전송해야 한다.
+- [필수] outbox 의 저장 단위는 item 이고, transport 의 전송 단위는 batch 임을 구조적으로 분리해야 한다.
 
 ## 12. 장애 복구와 stale 대응 지원 요구사항
 

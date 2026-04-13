@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS latest_states (
     id INTEGER PRIMARY KEY,
     view_node_id INTEGER,
     target_id TEXT NOT NULL,
-    state_type TEXT NOT NULL CHECK (state_type IN ('process', 'agent')),
+    state_type TEXT NOT NULL CHECK (state_type IN ('process', 'agent', 'host')),
     status TEXT NOT NULL,
     severity TEXT,
     state_json TEXT NOT NULL,

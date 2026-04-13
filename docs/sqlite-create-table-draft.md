@@ -134,7 +134,7 @@ CREATE TABLE IF NOT EXISTS latest_states (
     received_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (view_node_id) REFERENCES view_nodes(id) ON DELETE SET NULL,
-    CHECK (state_type IN ('process', 'agent'))
+    CHECK (state_type IN ('process', 'agent', 'host'))
 );
 ```
 

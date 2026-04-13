@@ -9,6 +9,7 @@ from agent.host_collector import HostSnapshotCollector
 from agent.selector import ProcfsSelector
 from agent.services import AgentRuntimeServices
 from agent.storage import AgentStorage
+from agent.transport import TransportResult
 from tests.test_agent_collector import make_proc_snapshot_fixture
 from tests.test_agent_host_collector import make_host_proc_fixture
 from tests.test_agent_selector import make_process
@@ -81,3 +82,82 @@ def test_runtime_services_enqueue_heartbeat_and_snapshots(tmp_path) -> None:
     assert rows[1].target_id == "agent_local:host"
     assert rows[2].target_id == "app_main"
     assert storage.pending_count() == 3
+
+
+class SuccessfulTransport:
+    def __init__(self) -> None:
+        self.sent_at: str | None = None
+
+    def send_pending(self, *, sent_at):
+        self.sent_at = sent_at.isoformat(timespec="milliseconds")
+        return TransportResult(
+            sent_count=3,
+            ack_seq=3,
+            accepted_count=3,
+            server_time="2026-04-13T10:45:01.000+00:00",
+        )
+
+
+class FailingTransport:
+    def send_pending(self, *, sent_at):
+        raise RuntimeError("temporary backend failure")
+
+
+def test_runtime_services_flush_outbox_updates_connection_status(tmp_path) -> None:
+    config = sample_config(tmp_path)
+    storage = AgentStorage(config.storage_path)
+    storage.initialize()
+    transport = SuccessfulTransport()
+    proc_root = tmp_path / "proc_success"
+    make_host_proc_fixture(
+        proc_root,
+        cpu_fields=[100, 20, 30, 400, 10, 0, 0, 0, 0, 0],
+        loadavg=(0.15, 0.25, 0.35),
+        uptime_seconds=321.5,
+        mem_total_kb=1024 * 8,
+        mem_available_kb=1024 * 3,
+    )
+    services = AgentRuntimeServices(
+        config,
+        storage,
+        transport=transport,
+        host_collector=HostSnapshotCollector(proc_root=proc_root),
+    )
+
+    occurred_at = datetime(2026, 4, 13, 10, 45, 0, tzinfo=timezone.utc)
+    services.flush_outbox(occurred_at)
+
+    assert transport.sent_at == "2026-04-13T10:45:00.000+00:00"
+    assert services.backend_connection_status == "connected"
+    assert services.last_cycle.flush_sent_count == 3
+    assert services.last_cycle.flush_ack_seq == 3
+    assert services.last_cycle.flush_error is None
+
+
+def test_runtime_services_flush_outbox_handles_transport_failure(tmp_path) -> None:
+    config = sample_config(tmp_path)
+    storage = AgentStorage(config.storage_path)
+    storage.initialize()
+    proc_root = tmp_path / "proc_failure"
+    make_host_proc_fixture(
+        proc_root,
+        cpu_fields=[100, 20, 30, 400, 10, 0, 0, 0, 0, 0],
+        loadavg=(0.15, 0.25, 0.35),
+        uptime_seconds=321.5,
+        mem_total_kb=1024 * 8,
+        mem_available_kb=1024 * 3,
+    )
+    services = AgentRuntimeServices(
+        config,
+        storage,
+        transport=FailingTransport(),
+        host_collector=HostSnapshotCollector(proc_root=proc_root),
+    )
+
+    occurred_at = datetime(2026, 4, 13, 10, 45, 0, tzinfo=timezone.utc)
+    services.flush_outbox(occurred_at)
+
+    assert services.backend_connection_status == "error"
+    assert services.last_cycle.flush_sent_count == 0
+    assert services.last_cycle.flush_ack_seq is None
+    assert services.last_cycle.flush_error == "temporary backend failure"

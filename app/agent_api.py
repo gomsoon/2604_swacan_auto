@@ -11,7 +11,7 @@ from .db import get_db
 
 bp = Blueprint("agent_api", __name__, url_prefix="/api/agents")
 
-SUPPORTED_PAYLOAD_TYPES = {"agent_state", "process_snapshot", "process_event", "agent_event"}
+SUPPORTED_PAYLOAD_TYPES = {"agent_state", "host_snapshot", "process_snapshot", "process_event", "agent_event"}
 
 
 def now_iso() -> str:

@@ -16,7 +16,7 @@ def sample_batch() -> dict:
         "agent_id": "agent_local",
         "boot_id": "boot_001",
         "seq_start": 10,
-        "seq_end": 12,
+        "seq_end": 13,
         "sent_at": "2026-04-10T10:20:00.150+09:00",
         "items": [
             {
@@ -32,6 +32,22 @@ def sample_batch() -> dict:
             },
             {
                 "seq": 11,
+                "payload_type": "host_snapshot",
+                "occurred_at": "2026-04-10T10:20:00.100+09:00",
+                "target_id": "agent_local:host",
+                "payload": {
+                    "hostname": "host-alpha",
+                    "cpu_usage": 12.5,
+                    "loadavg_1": 0.11,
+                    "loadavg_5": 0.15,
+                    "loadavg_15": 0.20,
+                    "memory_total": 16777216,
+                    "memory_available": 8388608,
+                    "memory_used": 8388608,
+                },
+            },
+            {
+                "seq": 12,
                 "payload_type": "process_snapshot",
                 "occurred_at": "2026-04-10T10:20:00.100+09:00",
                 "target_id": "app_main",
@@ -43,7 +59,7 @@ def sample_batch() -> dict:
                 },
             },
             {
-                "seq": 12,
+                "seq": 13,
                 "payload_type": "process_event",
                 "occurred_at": "2026-04-10T10:21:10.100+09:00",
                 "target_id": "app_main",
@@ -83,8 +99,8 @@ def test_ingest_persists_inbox_and_returns_ack(seeded_app, seeded_client) -> Non
 
     assert response.status_code == 202
     payload = response.get_json()
-    assert payload["ack_seq"] == 12
-    assert payload["accepted_count"] == 3
+    assert payload["ack_seq"] == 13
+    assert payload["accepted_count"] == 4
 
     with seeded_app.app_context():
         db_conn = get_db()
@@ -95,7 +111,7 @@ def test_ingest_persists_inbox_and_returns_ack(seeded_app, seeded_client) -> Non
     assert row["agent_id"] == "agent_local"
     assert row["boot_id"] == "boot_001"
     assert row["seq_start"] == 10
-    assert row["seq_end"] == 12
+    assert row["seq_end"] == 13
     assert row["status"] == "pending"
 
 
@@ -123,12 +139,13 @@ def test_process_pending_ingest_updates_states_and_events(seeded_app, seeded_cli
     assert result == {
         "processed_batches": 1,
         "failed_batches": 0,
-        "processed_items": 3,
+        "processed_items": 4,
     }
     assert inbox_row["status"] == "processed"
     assert inbox_row["processed_at"] is not None
     assert [(row["target_id"], row["state_type"], row["status"]) for row in state_rows] == [
         ("agent_local", "agent", "up"),
+        ("agent_local:host", "host", "up"),
         ("app_main", "process", "down"),
     ]
     assert [(row["target_id"], row["event_type"], row["severity"]) for row in event_rows] == [
@@ -148,4 +165,4 @@ def test_process_ingest_cli_command(seeded_client, seeded_runner) -> None:
 
     assert result.exit_code == 0
     assert "processed_batches=1" in result.output
-    assert "processed_items=3" in result.output
+    assert "processed_items=4" in result.output

@@ -168,7 +168,7 @@
 - `view_node_id -> view_nodes.id`
 
 비고:
-- `state_type` 은 최소한 `process`, `agent` 를 지원한다.
+- `state_type` 은 최소한 `process`, `agent`, `host` 를 지원한다.
 - `state_json` 에는 cpu, memory, pid, heartbeat 등 최소 overlay 정보가 들어간다.
 - 같은 `target_id + state_type` 조합에 대해 upsert 중심으로 관리한다.
 

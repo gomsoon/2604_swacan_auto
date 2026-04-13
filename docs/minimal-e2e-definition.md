@@ -46,6 +46,7 @@
 - [필수] view 저장: node layout 좌표, edge 연결 정보, 최소 속성이 DB 에 저장되어야 한다.
 - [필수] backend ingest: agent payload 를 수신하고 durable write 후 처리할 수 있어야 한다.
 - [필수] agent 는 최소한 host resource 정보로 `stat`, `loadavg`, `meminfo` 기반 snapshot 을 생성할 수 있어야 한다.
+- [필수] agent 는 outbox 에 item 단위로 저장된 heartbeat, host snapshot, process snapshot 을 여러 개 묶어 batch 로 backend ingest 에 전송할 수 있어야 한다.
 - [필수] latest state: process up/down 과 agent heartbeat 상태가 latest state 에 반영되어야 한다.
 - [필수] event 기록: 최소한 `process started`, `process stopped`, `agent heartbeat lost` 수준의 event 를 기록할 수 있어야 한다.
 - [필수] monitoring view: polling 기반으로 상태 변화를 표시할 수 있어야 한다.

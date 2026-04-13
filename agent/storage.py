@@ -164,6 +164,29 @@ class AgentStorage:
             for row in rows
         ]
 
+    def list_pending_outbox(self, *, limit: int) -> list[StoredOutboxRow]:
+        query = """
+            SELECT seq, payload_type, target_id, occurred_at, payload_json, retry_count, acked_at
+            FROM outbox
+            WHERE acked_at IS NULL
+            ORDER BY seq
+            LIMIT ?
+        """
+        with self.connect() as connection:
+            rows = connection.execute(query, (limit,)).fetchall()
+        return [
+            StoredOutboxRow(
+                seq=int(row["seq"]),
+                payload_type=str(row["payload_type"]),
+                target_id=str(row["target_id"]),
+                occurred_at=str(row["occurred_at"]),
+                payload_json=str(row["payload_json"]),
+                retry_count=int(row["retry_count"]),
+                acked_at=None if row["acked_at"] is None else str(row["acked_at"]),
+            )
+            for row in rows
+        ]
+
     def pending_count(self) -> int:
         with self.connect() as connection:
             row = connection.execute(
@@ -189,6 +212,23 @@ class AgentStorage:
                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
                 """,
                 (str(ack_seq), acked_value),
+            )
+            connection.commit()
+
+    def mark_attempted(self, seq_values: list[int], *, attempted_at: str | None = None) -> None:
+        if not seq_values:
+            return
+        attempt_value = attempted_at or _now_iso()
+        placeholders = ", ".join("?" for _ in seq_values)
+        with self.connect() as connection:
+            connection.execute(
+                f"""
+                UPDATE outbox
+                SET retry_count = retry_count + 1,
+                    last_attempt_at = ?
+                WHERE seq IN ({placeholders}) AND acked_at IS NULL
+                """,
+                (attempt_value, *seq_values),
             )
             connection.commit()
 

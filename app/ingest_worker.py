@@ -126,6 +126,18 @@ def process_item(agent_id: str, item: dict, received_at: str) -> None:
         )
         return
 
+    if payload_type == "host_snapshot":
+        upsert_latest_state(
+            target_id=target_id,
+            state_type="host",
+            status="up",
+            severity=payload.get("severity", "normal"),
+            state=payload,
+            occurred_at=occurred_at,
+            received_at=received_at,
+        )
+        return
+
     if payload_type == "process_snapshot":
         process_state = payload.get("state")
         if process_state in ("running", "up"):

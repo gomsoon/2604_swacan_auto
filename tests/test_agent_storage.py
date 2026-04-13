@@ -74,3 +74,26 @@ def test_storage_persists_cpu_samples(tmp_path) -> None:
 
     assert host_sample == HostCpuSample(idle_ticks=100, total_ticks=200)
     assert process_sample == CpuSample(process_ticks=50, system_ticks=1000)
+
+
+def test_storage_lists_pending_outbox_with_limit_and_marks_attempted(tmp_path) -> None:
+    db_path = tmp_path / "agent.sqlite3"
+    storage = AgentStorage(db_path)
+    storage.initialize()
+
+    for offset in range(3):
+        storage.enqueue_item(
+            OutboxItem(
+                payload_type="process_snapshot",
+                target_id=f"app_{offset}",
+                occurred_at=f"2026-04-13T10:40:0{offset}.000+09:00",
+                payload={"pid": 1000 + offset, "state": "running"},
+            )
+        )
+
+    pending_rows = storage.list_pending_outbox(limit=2)
+    storage.mark_attempted([row.seq for row in pending_rows], attempted_at="2026-04-13T10:40:10.000+09:00")
+    all_rows = storage.list_outbox(include_acked=False)
+
+    assert [row.seq for row in pending_rows] == [1, 2]
+    assert [row.retry_count for row in all_rows] == [1, 1, 0]
