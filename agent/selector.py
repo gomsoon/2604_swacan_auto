@@ -39,6 +39,12 @@ def _read_exe_path(path: Path) -> str:
     return ""
 
 
+@dataclass(frozen=True)
+class _BaseProcess:
+    pid: int
+    name: str
+
+
 class ProcfsSelector:
     def __init__(self, *, proc_root: str | Path = "/proc") -> None:
         self.proc_root = Path(proc_root)
@@ -51,24 +57,43 @@ class ProcfsSelector:
             key=lambda path: int(path.name),
         )
 
-    def read_process(self, pid_dir: Path) -> ProcessMatch | None:
+    def read_process_base(self, pid_dir: Path) -> _BaseProcess | None:
         try:
             pid = int(pid_dir.name)
             name = _read_text(pid_dir / "comm")
-            cmdline = _read_cmdline(pid_dir / "cmdline")
-            exe_path = _read_exe_path(pid_dir / "exe")
+        except (FileNotFoundError, PermissionError, ValueError):
+            return None
+
+        return _BaseProcess(
+            pid=pid,
+            name=name,
+        )
+
+    def _build_match(
+        self,
+        *,
+        target_id: str,
+        pid: int,
+        name: str,
+        pid_dir: Path,
+        need_cmdline: bool,
+        need_exe: bool,
+    ) -> ProcessMatch | None:
+        try:
+            cmdline = _read_cmdline(pid_dir / "cmdline") if need_cmdline else ""
+            exe_path = _read_exe_path(pid_dir / "exe") if need_exe else ""
         except (FileNotFoundError, PermissionError, ValueError):
             return None
 
         return ProcessMatch(
-            target_id="",
+            target_id=target_id,
             pid=pid,
             name=name,
             cmdline=cmdline,
             exe_path=exe_path,
         )
 
-    def matches_target(self, process: ProcessMatch, target: AgentTarget) -> bool:
+    def _matches_target(self, process: ProcessMatch, target: AgentTarget) -> bool:
         if target.pid is not None and process.pid != target.pid:
             return False
         if target.process_name is not None and process.name != target.process_name:
@@ -79,24 +104,79 @@ class ProcfsSelector:
             return False
         return True
 
-    def discover(self, target: AgentTarget) -> list[ProcessMatch]:
-        matches: list[ProcessMatch] = []
-        for pid_dir in self.iter_pid_dirs():
-            process = self.read_process(pid_dir)
-            if process is None:
-                continue
-            if not self.matches_target(process, target):
-                continue
-            matches.append(
-                ProcessMatch(
-                    target_id=target.target_id,
-                    pid=process.pid,
-                    name=process.name,
-                    cmdline=process.cmdline,
-                    exe_path=process.exe_path,
-                )
-            )
+    def discover_targets(self, targets: Iterable[AgentTarget]) -> dict[str, list[ProcessMatch]]:
+        target_list = list(targets)
+        matches_by_target: dict[str, list[ProcessMatch]] = {
+            target.target_id: [] for target in target_list
+        }
+        if not target_list:
+            return matches_by_target
 
-        if target.mode == "single":
-            return matches[:1]
-        return matches
+        for pid_dir in self.iter_pid_dirs():
+            base = self.read_process_base(pid_dir)
+            if base is None:
+                continue
+
+            candidate_targets = [
+                target
+                for target in target_list
+                if (target.pid is None or target.pid == base.pid)
+                and (target.process_name is None or target.process_name == base.name)
+            ]
+            if not candidate_targets:
+                continue
+
+            need_exe = any(target.executable_path is not None for target in candidate_targets)
+            preliminary_match = self._build_match(
+                target_id="",
+                pid=base.pid,
+                name=base.name,
+                pid_dir=pid_dir,
+                need_cmdline=False,
+                need_exe=need_exe,
+            )
+            if preliminary_match is None:
+                continue
+
+            candidate_targets = [
+                target
+                for target in candidate_targets
+                if target.executable_path is None or target.executable_path == preliminary_match.exe_path
+            ]
+            if not candidate_targets:
+                continue
+
+            need_cmdline = any(target.command_line_regex is not None for target in candidate_targets)
+            process_match = preliminary_match
+            if need_cmdline:
+                process_match = self._build_match(
+                    target_id="",
+                    pid=base.pid,
+                    name=base.name,
+                    pid_dir=pid_dir,
+                    need_cmdline=True,
+                    need_exe=need_exe,
+                )
+                if process_match is None:
+                    continue
+
+            for target in candidate_targets:
+                if not self._matches_target(process_match, target):
+                    continue
+                target_matches = matches_by_target[target.target_id]
+                if target.mode == "single" and target_matches:
+                    continue
+                target_matches.append(
+                    ProcessMatch(
+                        target_id=target.target_id,
+                        pid=process_match.pid,
+                        name=process_match.name,
+                        cmdline=process_match.cmdline,
+                        exe_path=process_match.exe_path,
+                    )
+                )
+
+        return matches_by_target
+
+    def discover(self, target: AgentTarget) -> list[ProcessMatch]:
+        return self.discover_targets([target]).get(target.target_id, [])

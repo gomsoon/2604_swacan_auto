@@ -155,8 +155,9 @@ class AgentRuntimeServices:
 
         process_sequences: list[int] = []
         process_event_sequences: list[int] = []
+        discovered_matches = self.selector.discover_targets(self.config.targets)
         for target in self.config.targets:
-            matches = self.selector.discover(target)
+            matches = discovered_matches.get(target.target_id, [])
             current_pids = [match.pid for match in matches]
             previous_state = self.storage.load_target_runtime_state(target.target_id)
             previous_pids = list(previous_state.pid_set) if previous_state is not None else []

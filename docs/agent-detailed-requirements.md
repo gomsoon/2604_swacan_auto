@@ -44,6 +44,7 @@
 - [필수] sequence 생성 책임은 단일 경로에서 관리되어야 한다.
 - [필수] SQLite 쓰기 책임은 가능한 한 단일 writer 흐름으로 모아야 한다.
 - [필수] collector 와 transport 는 느슨하게 결합되어야 하며, backend 장애가 collector 중단으로 바로 이어지지 않아야 한다.
+- [필수] process 발견(discovery)과 process 상세 수집(collection)은 분리되어야 하며, 이미 발견된 PID 집합에 대한 상태 확인은 전체 `/proc` 재탐색보다 가벼운 경로로 처리할 수 있어야 한다.
 
 ### 4.3 전송 및 내구성 구조
 
@@ -92,6 +93,9 @@
 - [필수] 하나의 target 은 `single` 또는 `multi` 매칭 모드를 가질 수 있어야 한다.
 - [필수] `process name` 기반 selector 는 필요 시 사용자, 경로 또는 추가 조건과 함께 사용할 수 있어야 한다.
 - [필수] selector 결과는 매 수집 주기마다 재평가되어야 한다.
+- [필수] 다수 target 을 평가할 때 agent 는 target 마다 `/proc` 전체를 반복 순회하지 않고, 가능한 한 한 번의 `/proc` 순회 결과를 여러 target 평가에 재사용해야 한다.
+- [필수] `pid exact`, `process name exact`, `executable path exact`, `command line regex` 순으로 비용이 증가하므로, 비싼 selector 는 더 저렴한 selector 로 좁혀진 후보군에만 적용해야 한다.
+- [필수] `command line regex` 기반 평가는 전체 process 집합에 대해 매번 수행하는 것을 피하고, 후보군 축소 이후에만 적용해야 한다.
 
 ### 6.3 다중 process 대응
 
@@ -153,6 +157,8 @@
 - [필수] backend 로의 outbox flush 는 연결 정상 시 1초 또는 2초 주기로 시도할 수 있어야 한다.
 - [필수] backend 장애 시 재시도는 backoff 정책을 적용해야 한다.
 - [필수] flush 실패 시 다음 flush 시점은 `retry_backoff_seconds` 기준으로 다시 예약되어야 하며, 성공 시 기본 flush 주기로 복귀해야 한다.
+- [필수] process 수가 많은 서버를 고려해, PID 존재 확인과 전체 discovery 재탐색 주기는 동일하게 묶지 않고 분리 가능한 구조를 가져야 한다.
+- [후속] 전체 `/proc` 재탐색 주기와 경량 PID 확인 주기를 분리하는 최적화는 MVP 에서 우선 검토 항목으로 둔다.
 
 ### 8.2 즉시 전송 이벤트
 

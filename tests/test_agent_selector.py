@@ -84,3 +84,70 @@ def test_selector_can_match_exact_pid(tmp_path) -> None:
 
     assert len(matches) == 1
     assert matches[0].pid == 111
+
+
+def test_selector_can_discover_multiple_targets_in_single_scan(tmp_path) -> None:
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    make_process(proc_root, pid=111, name="python", cmdline="python app.py", exe_path="/usr/bin/python")
+    make_process(proc_root, pid=222, name="python", cmdline="python worker.py --role worker", exe_path="/usr/bin/python")
+    make_process(proc_root, pid=333, name="nginx", cmdline="nginx: master process", exe_path="/usr/sbin/nginx")
+
+    selector = ProcfsSelector(proc_root=proc_root)
+    targets = [
+        AgentTarget(
+            target_id="app_main",
+            mode="single",
+            process_name="python",
+            command_line_regex="app.py",
+            executable_path=None,
+            pid=None,
+        ),
+        AgentTarget(
+            target_id="worker_pool",
+            mode="multi",
+            process_name="python",
+            command_line_regex="worker",
+            executable_path=None,
+            pid=None,
+        ),
+        AgentTarget(
+            target_id="nginx_master",
+            mode="single",
+            process_name="nginx",
+            command_line_regex=None,
+            executable_path=None,
+            pid=None,
+        ),
+    ]
+
+    matches = selector.discover_targets(targets)
+
+    assert [match.pid for match in matches["app_main"]] == [111]
+    assert [match.pid for match in matches["worker_pool"]] == [222]
+    assert [match.pid for match in matches["nginx_master"]] == [333]
+
+
+def test_selector_process_name_only_match_does_not_require_cmdline_or_exe(tmp_path) -> None:
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    pid_dir = proc_root / "111"
+    pid_dir.mkdir(parents=True, exist_ok=True)
+    (pid_dir / "comm").write_text("python\n", encoding="utf-8")
+
+    selector = ProcfsSelector(proc_root=proc_root)
+    target = AgentTarget(
+        target_id="app_main",
+        mode="single",
+        process_name="python",
+        command_line_regex=None,
+        executable_path=None,
+        pid=None,
+    )
+
+    matches = selector.discover(target)
+
+    assert len(matches) == 1
+    assert matches[0].pid == 111
+    assert matches[0].cmdline == ""
+    assert matches[0].exe_path == ""

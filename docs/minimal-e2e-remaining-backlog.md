@@ -11,6 +11,7 @@
 - 현재 시스템은 `frontend -> backend -> DB -> monitoring` 흐름과 `agent payload -> backend ingest -> worker -> latest state/raw event` 흐름의 기본 골격이 구현되어 있다.
 - editor, monitoring, admin 기본 화면과 backend API, ingest pipeline, SQLite schema, pytest/Playwright 기반 자동화 테스트가 준비되어 있다.
 - agent 는 설정 로딩, runner, selector, host/process snapshot, process 상태 전이 event, SQLite outbox, batch transport, ack 반영, acked row cleanup 정책까지 최소 골격이 구현되어 있다.
+- selector 는 target 마다 `/proc` 를 반복 순회하지 않도록 한 번의 discovery 결과를 여러 target 에 재사용하는 구조로 1차 최적화되었다.
 - 현재 가장 큰 남은 공백은 `SSH 기반 Linux agent 테스트 골격`, `worker 안정성 보강`, `실제 Linux 통합 테스트` 이다.
 
 ## 2. 우선순위 개요
@@ -27,6 +28,7 @@
 - `A-01 agent main 실제 runtime 연결` 완료
 - `A-02 process 상태 전이 event 생성` 완료
 - `A-03 retry/backoff 실동작 보강` 완료
+- `A-06 대규모 process 환경 discovery 최적화` 1차 완료
 
 ### A-04 실행 운영 보조
 
