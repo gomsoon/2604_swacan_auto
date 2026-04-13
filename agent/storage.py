@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
@@ -19,6 +20,13 @@ class StoredOutboxRow:
     payload_json: str
     retry_count: int
     acked_at: str | None
+
+
+@dataclass(frozen=True)
+class TargetRuntimeState:
+    target_id: str
+    pid_set: tuple[int, ...]
+    updated_at: str
 
 
 def _now_iso() -> str:
@@ -65,6 +73,12 @@ class AgentStorage:
                     system_ticks INTEGER NOT NULL,
                     sampled_at TEXT NOT NULL,
                     PRIMARY KEY (target_id, pid)
+                );
+
+                CREATE TABLE IF NOT EXISTS target_runtime_state (
+                    target_id TEXT PRIMARY KEY,
+                    pid_set_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_outbox_ack_seq ON outbox (acked_at, seq);
@@ -303,5 +317,40 @@ class AgentStorage:
                     sampled_at = excluded.sampled_at
                 """,
                 (target_id, pid, sample.process_ticks, sample.system_ticks, sampled_at),
+            )
+            connection.commit()
+
+    def load_target_runtime_state(self, target_id: str) -> TargetRuntimeState | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT target_id, pid_set_json, updated_at
+                FROM target_runtime_state
+                WHERE target_id = ?
+                """,
+                (target_id,),
+            ).fetchone()
+        if row is None:
+            return None
+
+        pid_values = json.loads(str(row["pid_set_json"]))
+        return TargetRuntimeState(
+            target_id=str(row["target_id"]),
+            pid_set=tuple(int(pid) for pid in pid_values),
+            updated_at=str(row["updated_at"]),
+        )
+
+    def save_target_runtime_state(self, *, target_id: str, pids: list[int], updated_at: str) -> None:
+        pid_set_json = json.dumps(sorted(set(pids)), ensure_ascii=False)
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO target_runtime_state (target_id, pid_set_json, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(target_id) DO UPDATE SET
+                    pid_set_json = excluded.pid_set_json,
+                    updated_at = excluded.updated_at
+                """,
+                (target_id, pid_set_json, updated_at),
             )
             connection.commit()

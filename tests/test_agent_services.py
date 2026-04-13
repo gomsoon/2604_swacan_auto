@@ -82,15 +82,113 @@ def test_runtime_services_enqueue_heartbeat_and_snapshots(tmp_path) -> None:
     assert [row.payload_type for row in rows] == [
         "agent_state",
         "host_snapshot",
+        "process_event",
         "process_snapshot",
     ]
     assert rows[0].target_id == "agent_local"
     assert rows[1].target_id == "agent_local:host"
     assert rows[2].target_id == "app_main"
-    assert storage.pending_count() == 3
+    assert rows[3].target_id == "app_main"
+    assert storage.pending_count() == 4
     heartbeat_payload = rows[0].payload_json
+    process_event_payload = rows[2].payload_json
     assert '"outbox_pending_warning_rows": 3' in heartbeat_payload
     assert '"outbox_warning_threshold_exceeded": false' in heartbeat_payload
+    assert '"event_type": "process_started"' in process_event_payload
+    assert services.last_cycle.process_event_seqs
+
+
+def test_runtime_services_collect_snapshots_emits_process_stopped_event(tmp_path) -> None:
+    proc_root = tmp_path / "proc_stopped"
+    make_host_proc_fixture(
+        proc_root,
+        cpu_fields=[100, 20, 30, 400, 10, 0, 0, 0, 0, 0],
+        loadavg=(0.15, 0.25, 0.35),
+        uptime_seconds=321.5,
+        mem_total_kb=1024 * 8,
+        mem_available_kb=1024 * 3,
+    )
+    make_process(proc_root, pid=1234, name="python", cmdline="python app.py", exe_path="/usr/bin/python")
+    make_proc_snapshot_fixture(proc_root, pid=1234)
+
+    config = sample_config(tmp_path)
+    storage = AgentStorage(config.storage_path)
+    storage.initialize()
+    services = AgentRuntimeServices(
+        config,
+        storage,
+        selector=ProcfsSelector(proc_root=proc_root),
+        process_collector=ProcessSnapshotCollector(proc_root=proc_root),
+        host_collector=HostSnapshotCollector(proc_root=proc_root),
+    )
+
+    first_at = datetime(2026, 4, 13, 10, 45, 0, tzinfo=timezone.utc)
+    services.collect_snapshots(first_at)
+
+    for path in (proc_root / "1234").rglob("*"):
+        if path.is_file():
+            path.unlink()
+    for path in sorted((proc_root / "1234").rglob("*"), reverse=True):
+        if path.is_dir():
+            path.rmdir()
+    (proc_root / "1234").rmdir()
+
+    second_at = datetime(2026, 4, 13, 10, 45, 5, tzinfo=timezone.utc)
+    services.collect_snapshots(second_at)
+
+    rows = storage.list_outbox(include_acked=False)
+    payloads = [row.payload_json for row in rows if row.payload_type == "process_event"]
+
+    assert any('"event_type": "process_started"' in payload for payload in payloads)
+    assert any('"event_type": "process_stopped"' in payload for payload in payloads)
+
+
+def test_runtime_services_collect_snapshots_emits_process_restarted_event(tmp_path) -> None:
+    proc_root = tmp_path / "proc_restarted"
+    make_host_proc_fixture(
+        proc_root,
+        cpu_fields=[100, 20, 30, 400, 10, 0, 0, 0, 0, 0],
+        loadavg=(0.15, 0.25, 0.35),
+        uptime_seconds=321.5,
+        mem_total_kb=1024 * 8,
+        mem_available_kb=1024 * 3,
+    )
+    make_process(proc_root, pid=1234, name="python", cmdline="python app.py", exe_path="/usr/bin/python")
+    make_proc_snapshot_fixture(proc_root, pid=1234)
+
+    config = sample_config(tmp_path)
+    storage = AgentStorage(config.storage_path)
+    storage.initialize()
+    services = AgentRuntimeServices(
+        config,
+        storage,
+        selector=ProcfsSelector(proc_root=proc_root),
+        process_collector=ProcessSnapshotCollector(proc_root=proc_root),
+        host_collector=HostSnapshotCollector(proc_root=proc_root),
+    )
+
+    first_at = datetime(2026, 4, 13, 10, 45, 0, tzinfo=timezone.utc)
+    services.collect_snapshots(first_at)
+
+    for path in (proc_root / "1234").rglob("*"):
+        if path.is_file():
+            path.unlink()
+    for path in sorted((proc_root / "1234").rglob("*"), reverse=True):
+        if path.is_dir():
+            path.rmdir()
+    (proc_root / "1234").rmdir()
+
+    make_process(proc_root, pid=2234, name="python", cmdline="python app.py", exe_path="/usr/bin/python")
+    make_proc_snapshot_fixture(proc_root, pid=2234)
+
+    second_at = datetime(2026, 4, 13, 10, 45, 5, tzinfo=timezone.utc)
+    services.collect_snapshots(second_at)
+
+    rows = storage.list_outbox(include_acked=False)
+    payloads = [row.payload_json for row in rows if row.payload_type == "process_event"]
+
+    assert any('"event_type": "process_started"' in payload for payload in payloads)
+    assert any('"event_type": "process_restarted"' in payload for payload in payloads)
 
 
 class SuccessfulTransport:

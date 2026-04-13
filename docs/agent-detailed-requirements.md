@@ -319,6 +319,9 @@
 - [필수] backend 계약 테스트는 agent payload 가 backend ingest API 와 `ack_seq` 계약을 지키는지 검증해야 한다.
 - [필수] Linux 실제 통합 테스트는 dummy target process 를 이용해 `발견 -> 수집 -> 전송 -> 종료 감지 -> 복구` 흐름을 실제 OS 환경에서 검증해야 한다.
 - [필수] 서로 다른 테스트 층은 실패 원인 분리가 가능하도록 별도 실행 세트로 유지해야 한다.
+- [필수] Windows 개발 환경에서는 SSH 를 통해 Linux agent test server 에 접속해 agent 를 기동/종료하는 실제 통합 테스트 stage 를 별도로 둘 수 있어야 한다.
+- [필수] SSH 기반 Linux 테스트는 기본 단위 테스트 및 backend 계약 테스트와 분리된 marker 또는 별도 실행 단계로 운영해야 한다.
+- [필수] SSH 기반 테스트는 원격 작업 디렉토리 준비, agent 기동, 로그/outbox 수집, agent 종료, 세션 종료까지 포함한 정리 절차를 가져야 한다.
 
 ## 17. MVP 에서 제외하거나 단순화하는 항목
 

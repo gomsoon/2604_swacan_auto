@@ -76,6 +76,25 @@ def test_storage_persists_cpu_samples(tmp_path) -> None:
     assert process_sample == CpuSample(process_ticks=50, system_ticks=1000)
 
 
+def test_storage_persists_target_runtime_state(tmp_path) -> None:
+    db_path = tmp_path / "agent.sqlite3"
+    storage = AgentStorage(db_path)
+    storage.initialize()
+
+    storage.save_target_runtime_state(
+        target_id="app_main",
+        pids=[1235, 1234, 1235],
+        updated_at="2026-04-14T09:00:00.000+09:00",
+    )
+
+    runtime_state = storage.load_target_runtime_state("app_main")
+
+    assert runtime_state is not None
+    assert runtime_state.target_id == "app_main"
+    assert runtime_state.pid_set == (1234, 1235)
+    assert runtime_state.updated_at == "2026-04-14T09:00:00.000+09:00"
+
+
 def test_storage_lists_pending_outbox_with_limit_and_marks_attempted(tmp_path) -> None:
     db_path = tmp_path / "agent.sqlite3"
     storage = AgentStorage(db_path)

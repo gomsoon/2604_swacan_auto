@@ -158,6 +158,7 @@
 - [필수] outbox 테스트: backend 미연결 시 로컬 저장, 복구 후 재전송
 - [필수] agent 단위 테스트에는 설정 로딩, selector, snapshot 생성, payload 직렬화, sequence 증가, outbox enqueue/ack 정리가 포함되어야 한다.
 - [필수] backend 계약 테스트에는 agent payload 를 backend ingest API 로 보내고 `ack_seq`, latest state 반영, raw event 반영을 함께 검증하는 경로가 포함되어야 한다.
+- [필수] Windows 개발 환경에서는 기본 `pytest` 세트와 별도로, SSH 를 통해 Linux agent test server 에 접속해 실제 agent 를 기동/종료하는 통합 테스트 단계를 둘 수 있어야 한다.
 
 ### 8.2 수동 통합 테스트
 
@@ -166,6 +167,7 @@
 - [필수] agent 중지 시 MonitoringAgent 상태가 비정상으로 보이는지 확인해야 한다.
 - [필수] backend debug mode 활성화 후 payload 저장 여부를 확인해야 한다.
 - [필수] Linux 실제 통합 테스트는 dummy target process 를 이용해 `발견 -> 수집 -> 전송 -> 종료 감지 -> 재전송/복구` 흐름을 별도 증적으로 남겨야 한다.
+- [필수] 실제 통합 테스트를 자동화할 경우, Windows 테스트 러너가 SSH 로 Linux agent test server 에 접속해 agent 를 실행하고, 테스트 종료 시 agent 종료와 로그 수집, SSH 세션 종료까지 수행할 수 있어야 한다.
 
 ### 8.3 회귀 테스트 최소 세트
 

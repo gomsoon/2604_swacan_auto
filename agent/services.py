@@ -17,11 +17,16 @@ def _iso(dt: datetime) -> str:
     return dt.isoformat(timespec="milliseconds")
 
 
+def _format_pid_list(pids: list[int]) -> str:
+    return ", ".join(str(pid) for pid in sorted(set(pids))) if pids else "-"
+
+
 @dataclass
 class CollectedCycleSummary:
     heartbeat_seq: int | None = None
     host_snapshot_seq: int | None = None
     process_snapshot_seqs: list[int] = field(default_factory=list)
+    process_event_seqs: list[int] = field(default_factory=list)
     flush_sent_count: int = 0
     flush_ack_seq: int | None = None
     flush_error: str | None = None
@@ -79,6 +84,59 @@ class AgentRuntimeServices:
         )
         self.last_cycle.heartbeat_seq = self.storage.enqueue_item(item)
 
+    def _build_process_transition_item(
+        self,
+        *,
+        target,
+        occurred_at: datetime,
+        previous_pids: list[int],
+        current_pids: list[int],
+    ) -> OutboxItem | None:
+        previous_unique = sorted(set(previous_pids))
+        current_unique = sorted(set(current_pids))
+        if not previous_unique and not current_unique:
+            return None
+
+        message: str
+        event_type: str
+        severity: str
+        if not previous_unique and current_unique:
+            event_type = "process_started"
+            severity = "normal"
+            message = (
+                f"target '{target.target_id}' started with pid(s): {_format_pid_list(current_unique)}"
+            )
+        elif previous_unique and not current_unique:
+            event_type = "process_stopped"
+            severity = "warning"
+            message = (
+                f"target '{target.target_id}' stopped; previous pid(s): {_format_pid_list(previous_unique)}"
+            )
+        elif previous_unique != current_unique:
+            event_type = "process_restarted"
+            severity = "warning"
+            message = (
+                f"target '{target.target_id}' changed pid(s) from "
+                f"{_format_pid_list(previous_unique)} to {_format_pid_list(current_unique)}"
+            )
+        else:
+            return None
+
+        return OutboxItem(
+            payload_type="process_event",
+            target_id=target.target_id,
+            occurred_at=_iso(occurred_at),
+            payload={
+                "event_type": event_type,
+                "severity": severity,
+                "message": message,
+                "selector_mode": target.mode,
+                "previous_pids": previous_unique,
+                "current_pids": current_unique,
+                "instance_count": len(current_unique),
+            },
+        )
+
     def collect_snapshots(self, occurred_at: datetime) -> None:
         host_previous = self.storage.load_host_cpu_sample()
         host_snapshot, host_sample = self.host_collector.collect(
@@ -96,8 +154,22 @@ class AgentRuntimeServices:
         )
 
         process_sequences: list[int] = []
+        process_event_sequences: list[int] = []
         for target in self.config.targets:
             matches = self.selector.discover(target)
+            current_pids = [match.pid for match in matches]
+            previous_state = self.storage.load_target_runtime_state(target.target_id)
+            previous_pids = list(previous_state.pid_set) if previous_state is not None else []
+
+            event_item = self._build_process_transition_item(
+                target=target,
+                occurred_at=occurred_at,
+                previous_pids=previous_pids,
+                current_pids=current_pids,
+            )
+            if event_item is not None:
+                process_event_sequences.append(self.storage.enqueue_item(event_item))
+
             for match in matches:
                 previous_cpu = self.storage.load_process_cpu_sample(target_id=target.target_id, pid=match.pid)
                 snapshot, cpu_sample = self.process_collector.collect(
@@ -121,7 +193,14 @@ class AgentRuntimeServices:
                 )
                 process_sequences.append(seq)
 
+            self.storage.save_target_runtime_state(
+                target_id=target.target_id,
+                pids=current_pids,
+                updated_at=_iso(occurred_at),
+            )
+
         self.last_cycle.process_snapshot_seqs = process_sequences
+        self.last_cycle.process_event_seqs = process_event_sequences
 
     def flush_outbox(self, occurred_at: datetime) -> None:
         try:

@@ -10,8 +10,8 @@
 
 - 현재 시스템은 `frontend -> backend -> DB -> monitoring` 흐름과 `agent payload -> backend ingest -> worker -> latest state/raw event` 흐름의 기본 골격이 구현되어 있다.
 - editor, monitoring, admin 기본 화면과 backend API, ingest pipeline, SQLite schema, pytest/Playwright 기반 자동화 테스트가 준비되어 있다.
-- agent 는 설정 로딩, runner, selector, host/process snapshot, SQLite outbox, batch transport, ack 반영, acked row cleanup 정책까지 최소 골격이 구현되어 있다.
-- 현재 가장 큰 남은 공백은 `실제 Linux agent 실행 흐름 완성`, `worker 안정성 보강`, `실제 Linux 통합 테스트` 이다.
+- agent 는 설정 로딩, runner, selector, host/process snapshot, process 상태 전이 event, SQLite outbox, batch transport, ack 반영, acked row cleanup 정책까지 최소 골격이 구현되어 있다.
+- 현재 가장 큰 남은 공백은 `retry/backoff 보강`, `worker 안정성 보강`, `실제 Linux 통합 테스트` 이다.
 
 ## 2. 우선순위 개요
 
@@ -22,23 +22,10 @@
 
 ## 3. Agent 남은 구현
 
-### A-01 agent main 실제 runtime 연결
+### 최근 완료된 항목
 
-- 우선순위: `최우선`
-- 설명: 현재 `agent.main` 은 logging 중심 실행 골격이므로, 실제 `AgentStorage`, `AgentRuntimeServices`, `AgentTransport` 를 연결해 진짜 수집/전송 경로가 동작하도록 바꾼다.
-- 완료 기준:
-- `--once` 실행 시 heartbeat, host snapshot, process snapshot, flush 가 실제 outbox/transport 경로를 사용해야 한다.
-- 설정 파일 기준으로 SQLite outbox 가 생성되고 재사용되어야 한다.
-- 테스트 기준: main/runner 연동 테스트
-
-### A-02 process 상태 전이 event 생성
-
-- 우선순위: `최우선`
-- 설명: snapshot 수집만으로는 운영 의미가 부족하므로, target 발견/미탐지/재시작을 비교해 `process_started`, `process_stopped`, `process_restarted`, `not_found` 계열 event 를 만든다.
-- 완료 기준:
-- 이전 cycle 대비 상태 전이 판단이 가능해야 한다.
-- event 가 outbox 에 즉시 기록되어 backend 로 전달될 수 있어야 한다.
-- 테스트 기준: agent unit test, backend contract test
+- `A-01 agent main 실제 runtime 연결` 완료
+- `A-02 process 상태 전이 event 생성` 완료
 
 ### A-03 retry/backoff 실동작 보강
 
@@ -56,6 +43,15 @@
 - 완료 기준:
 - Linux 환경에서 agent 실행 절차가 문서만으로 재현 가능해야 한다.
 - 테스트 기준: 수동 운영 점검
+
+### A-05 SSH 기반 Linux agent 테스트 실행 골격
+
+- 우선순위: `높음`
+- 설명: Windows 개발 환경에서 SSH 로 Linux agent test server 에 접속해 agent 를 원격 실행/종료하는 테스트 실행 골격을 만든다.
+- 완료 기준:
+- 테스트 시작 시 SSH 접속, 원격 작업 디렉토리 준비, agent 실행이 가능해야 한다.
+- 테스트 종료 시 agent 종료, 로그/outbox 수집, SSH 세션 종료가 자동화되어야 한다.
+- 테스트 기준: SSH integration smoke test
 
 ## 4. Backend 남은 구현
 
@@ -136,6 +132,7 @@
 - 완료 기준:
 - 최소 1회 이상 end-to-end 성공 증적이 있어야 한다.
 - 가능하면 동일 시나리오를 3회 반복해도 안정적으로 성공해야 한다.
+- SSH 기반 자동화가 가능하다면 Windows 테스트 러너에서 원격 agent 기동/종료까지 포함한 시나리오로 남겨야 한다.
 
 ### L-02 운영 증적 정리
 
@@ -146,10 +143,11 @@
 
 ## 7. 지금 바로 이어서 할 작업
 
-1. `A-01 agent main 실제 runtime 연결`
-2. `A-02 process 상태 전이 event 생성`
+1. `A-03 retry/backoff 실동작 보강`
+2. `A-05 SSH 기반 Linux agent 테스트 실행 골격`
 3. `B-01 worker loop/service화`
 4. `L-01 Linux 실제 통합 시나리오`
+5. `F-01 실제 agent 결과 기반 monitoring 최종 점검`
 
 ## 8. 요약
 

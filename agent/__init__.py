@@ -6,7 +6,7 @@ from .payloads import OutboxItem
 from .runner import AgentRunner, RunnerCycleResult, RunnerServices
 from .services import AgentRuntimeServices, CollectedCycleSummary
 from .selector import ProcessMatch, ProcfsSelector
-from .storage import AgentStorage, StoredOutboxRow
+from .storage import AgentStorage, StoredOutboxRow, TargetRuntimeState
 
 __all__ = [
     "AgentConfig",
@@ -32,6 +32,7 @@ __all__ = [
     "RunnerCycleResult",
     "RunnerServices",
     "StoredOutboxRow",
+    "TargetRuntimeState",
     "TransportResult",
     "load_config",
 ]

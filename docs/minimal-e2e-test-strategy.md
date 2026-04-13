@@ -17,6 +17,8 @@
 - [필수] 구조 refactoring 이 발생하더라도 핵심 회귀 테스트 세트는 유지되어야 한다.
 - [필수] coverage report 는 실행 시마다 남겨 증적 자료로 활용할 수 있어야 한다.
 - [필수] coverage 는 제품 코드 기준으로 `app` 패키지에 대해 분리 측정하고, `tests` 와 Playwright 시나리오 코드는 coverage 계산에서 분리한다.
+- [필수] Windows 개발 환경에서 실행하는 기본 테스트와, SSH 를 통해 Linux agent test server 에서 실행하는 실제 통합 테스트는 별도 실행 세트로 분리해야 한다.
+- [필수] SSH 기반 Linux 테스트는 기본 `pytest` 세트에 섞지 않고 별도 marker 또는 별도 실행 단계로 운영해야 한다.
 
 ## 2. 도구 선택 기준
 
@@ -70,7 +72,17 @@
 - target 종료/재시작 감지
 - backend 비가용 후 outbox 복구 전송
 
-### 3.5 Playwright 범위
+### 3.5 SSH 기반 Linux agent 테스트 운영 방식
+
+- 테스트 시작 시 Windows 테스트 러너가 SSH 로 Linux agent test server 에 접속한다.
+- 원격 작업 디렉토리와 테스트용 config, storage path, 로그 경로를 준비한다.
+- 원격 서버에서 agent 를 백그라운드로 실행하거나 동등한 방식으로 기동한다.
+- Windows 쪽 테스트는 backend/API/monitoring 상태를 검증하고, 필요 시 원격 dummy process 를 제어한다.
+- 테스트 종료 시 agent 프로세스를 종료하고, 원격 로그, outbox SQLite, stdout/stderr 를 수집한 뒤 SSH 세션을 종료한다.
+- 동일 서버를 반복 사용하더라도 테스트별로 고유 작업 디렉토리 또는 고유 config 를 사용해 상태 오염을 줄여야 한다.
+- SSH 기반 테스트는 네트워크 문제와 코드 문제를 구분할 수 있도록 별도 로그와 종료 코드를 남겨야 한다.
+
+### 3.6 Playwright 범위
 
 - 로그인 성공 후 view 목록 진입
 - 최소 editor 화면에서 node 배치 및 저장
@@ -113,6 +125,7 @@
 - `linux-agent-selector-smoke`
 - `linux-agent-process-stop-detect`
 - `linux-agent-outbox-recovery-smoke`
+- `linux-agent-ssh-launch-and-stop`
 
 ## 5. 테스트 데이터와 환경
 
@@ -121,6 +134,8 @@
 - [필수] pytest 는 독립 SQLite DB 를 사용해야 한다.
 - [필수] Playwright 실행 시 backend 와 frontend 는 테스트용 설정으로 기동되어야 한다.
 - [필수] coverage 결과는 파일 또는 HTML/XML report 형태로 저장되어 나중에 증적 자료로 확인 가능해야 한다.
+- [필수] Linux 실제 통합 테스트용 SSH 접속 정보, 원격 작업 디렉토리 정책, agent 로그 저장 위치는 테스트 환경 문서에 명시되어야 한다.
+- [필수] SSH 기반 테스트는 테스트 종료 후 원격 agent 종료와 임시 파일 정리를 보장해야 한다.
 
 ## 6. 실행 순서
 
@@ -128,7 +143,7 @@
 2. agent-backend 계약 테스트 실행
 3. Flask 앱 및 필요한 프로세스 기동
 4. `Playwright` 브라우저 테스트 실행
-5. Linux 실제 통합 테스트 실행 또는 체크리스트 수행
+5. SSH 기반 Linux 실제 통합 테스트 실행 또는 동등한 체크리스트 수행
 6. 실패 시 로그, debug payload, outbox 상태 확인
 
 ## 7. 게이트 기준
@@ -139,6 +154,7 @@
 - [필수] Linux 실제 통합 테스트 또는 동등한 수동 통합 테스트가 1회 이상 성공해야 한다.
 - [필수] backend 와 agent 의 branch coverage report 가 `app` 기준으로 생성되어야 한다.
 - [필수] 초기 단계에서는 coverage 수치 자체를 강한 합격 기준으로 두기보다, 측정과 추적 자체를 필수 게이트로 본다.
+- [필수] Linux 실제 통합 테스트를 자동화하는 경우, SSH 접속부터 agent 종료까지의 전 과정이 실패 시에도 cleanup 되도록 보장해야 한다.
 
 ## 8. 후속 확장
 
@@ -155,3 +171,4 @@
 - backend 와 agent 는 초기부터 branch coverage 측정과 report 축적을 시작하고, 이후 단계에서 coverage 게이트를 점진적으로 강화한다.
 - Playwright 는 coverage 수치 계산 대상이 아니라 최소 E2E 사용자 흐름의 pass/fail 과 실행 증적을 담당한다.
 - 최소 E2E 게이트는 두 계층 테스트가 함께 통과할 때만 완료로 본다.
+- Linux 실제 통합 테스트는 SSH 기반 별도 stage 로 운영하는 것이 가장 안정적이며, 기본 로컬 테스트와 분리해야 한다.

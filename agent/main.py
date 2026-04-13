@@ -37,12 +37,14 @@ def print_service_summary(services) -> None:
 
     print(
         "heartbeat_seq={heartbeat_seq} host_snapshot_seq={host_snapshot_seq} "
-        "process_snapshot_count={process_count} flush_sent_count={flush_sent_count} "
+        "process_snapshot_count={process_count} process_event_count={event_count} "
+        "flush_sent_count={flush_sent_count} "
         "flush_ack_seq={flush_ack_seq} purged_acked_count={purged_acked_count} "
         "backend_status={backend_status} flush_error={flush_error}".format(
             heartbeat_seq=last_cycle.heartbeat_seq,
             host_snapshot_seq=last_cycle.host_snapshot_seq,
             process_count=len(last_cycle.process_snapshot_seqs),
+            event_count=len(getattr(last_cycle, "process_event_seqs", [])),
             flush_sent_count=last_cycle.flush_sent_count,
             flush_ack_seq=last_cycle.flush_ack_seq,
             purged_acked_count=last_cycle.purged_acked_count,
