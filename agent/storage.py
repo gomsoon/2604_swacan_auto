@@ -194,6 +194,13 @@ class AgentStorage:
             ).fetchone()
         return 0 if row is None else int(row["count"])
 
+    def acked_count(self) -> int:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) AS count FROM outbox WHERE acked_at IS NOT NULL"
+            ).fetchone()
+        return 0 if row is None else int(row["count"])
+
     def mark_acked(self, ack_seq: int, *, acked_at: str | None = None) -> None:
         acked_value = acked_at or _now_iso()
         with self.connect() as connection:
@@ -231,6 +238,33 @@ class AgentStorage:
                 (attempt_value, *seq_values),
             )
             connection.commit()
+
+    def purge_acked_rows(self, *, keep_latest: int, delete_limit: int) -> int:
+        if keep_latest < 0 or delete_limit <= 0:
+            raise ValueError("keep_latest must be >= 0 and delete_limit must be > 0")
+
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT seq
+                FROM outbox
+                WHERE acked_at IS NOT NULL
+                ORDER BY seq DESC
+                LIMIT ? OFFSET ?
+                """,
+                (delete_limit, keep_latest),
+            ).fetchall()
+            seq_values = [int(row["seq"]) for row in rows]
+            if not seq_values:
+                return 0
+
+            placeholders = ", ".join("?" for _ in seq_values)
+            connection.execute(
+                f"DELETE FROM outbox WHERE seq IN ({placeholders})",
+                tuple(seq_values),
+            )
+            connection.commit()
+        return len(seq_values)
 
     def load_host_cpu_sample(self) -> HostCpuSample | None:
         idle_value = self._get_meta("host_idle_ticks")

@@ -25,6 +25,7 @@ class CollectedCycleSummary:
     flush_sent_count: int = 0
     flush_ack_seq: int | None = None
     flush_error: str | None = None
+    purged_acked_count: int = 0
 
 
 class AgentRuntimeServices:
@@ -55,6 +56,7 @@ class AgentRuntimeServices:
         self.last_cycle = CollectedCycleSummary()
 
     def emit_heartbeat(self, occurred_at: datetime) -> None:
+        pending_count = self.storage.pending_count()
         item = OutboxItem(
             payload_type="agent_state",
             target_id=self.config.agent_id,
@@ -66,7 +68,9 @@ class AgentRuntimeServices:
                 "start_time": _iso(self.started_at),
                 "heartbeat_time": _iso(occurred_at),
                 "backend_connection_status": self.backend_connection_status,
-                "outbox_queue_depth": self.storage.pending_count(),
+                "outbox_queue_depth": pending_count,
+                "outbox_pending_warning_rows": self.config.storage.pending_warning_rows,
+                "outbox_warning_threshold_exceeded": pending_count >= self.config.storage.pending_warning_rows,
                 "last_sent_seq": self.storage.last_seq(),
                 "last_ack_seq": self.storage.last_ack_seq(),
                 "monitored_target_count": len(self.config.targets),
@@ -127,11 +131,20 @@ class AgentRuntimeServices:
             self.last_cycle.flush_sent_count = 0
             self.last_cycle.flush_ack_seq = None
             self.last_cycle.flush_error = str(exc)
+            self.last_cycle.purged_acked_count = 0
             return
 
         if result.sent_count > 0:
             self.backend_connection_status = "connected"
 
+        purged_count = 0
+        if result.ack_seq is not None:
+            purged_count = self.storage.purge_acked_rows(
+                keep_latest=self.config.storage.keep_acked_rows,
+                delete_limit=self.config.storage.cleanup_batch_size,
+            )
+
         self.last_cycle.flush_sent_count = result.sent_count
         self.last_cycle.flush_ack_seq = result.ack_seq
         self.last_cycle.flush_error = None
+        self.last_cycle.purged_acked_count = purged_count

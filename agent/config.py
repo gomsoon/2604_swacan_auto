@@ -33,9 +33,17 @@ class AgentTarget:
 
 
 @dataclass(frozen=True)
+class AgentStoragePolicy:
+    keep_acked_rows: int
+    cleanup_batch_size: int
+    pending_warning_rows: int
+
+
+@dataclass(frozen=True)
 class AgentConfig:
     config_path: Path
     storage_path: Path
+    storage: AgentStoragePolicy
     agent_id: str
     backend_endpoint: str
     token: str
@@ -71,6 +79,32 @@ def _load_intervals(section: dict[str, Any]) -> AgentIntervals:
         snapshot_seconds=_require_positive_int(section, "snapshot_seconds"),
         flush_seconds=_require_positive_int(section, "flush_seconds"),
         retry_backoff_seconds=_require_positive_int(section, "retry_backoff_seconds"),
+    )
+
+
+def _load_storage_policy(raw: dict[str, Any]) -> AgentStoragePolicy:
+    storage_section = raw.get("storage", {})
+    if storage_section is not None and not isinstance(storage_section, dict):
+        raise AgentConfigError("'storage' section must be an object when provided")
+
+    section = storage_section if isinstance(storage_section, dict) else {}
+
+    keep_acked_rows = section.get("keep_acked_rows", 500)
+    cleanup_batch_size = section.get("cleanup_batch_size", 250)
+    pending_warning_rows = section.get("pending_warning_rows", 1000)
+
+    for key, value in {
+        "keep_acked_rows": keep_acked_rows,
+        "cleanup_batch_size": cleanup_batch_size,
+        "pending_warning_rows": pending_warning_rows,
+    }.items():
+        if not isinstance(value, int) or value <= 0:
+            raise AgentConfigError(f"'storage.{key}' must be a positive integer when provided")
+
+    return AgentStoragePolicy(
+        keep_acked_rows=keep_acked_rows,
+        cleanup_batch_size=cleanup_batch_size,
+        pending_warning_rows=pending_warning_rows,
     )
 
 
@@ -152,6 +186,7 @@ def load_config(config_path: str | Path) -> AgentConfig:
 
     targets = tuple(_load_target(raw_target) for raw_target in raw_targets)
     intervals = _load_intervals(intervals_section)
+    storage_policy = _load_storage_policy(raw)
 
     debug_mode = agent_section.get("debug_mode", False)
     if not isinstance(debug_mode, bool):
@@ -160,6 +195,7 @@ def load_config(config_path: str | Path) -> AgentConfig:
     return AgentConfig(
         config_path=path,
         storage_path=_resolve_storage_path(raw, path),
+        storage=storage_policy,
         agent_id=_require_text(agent_section, "agent_id"),
         backend_endpoint=_require_text(backend_section, "endpoint"),
         token=_require_text(agent_section, "token"),

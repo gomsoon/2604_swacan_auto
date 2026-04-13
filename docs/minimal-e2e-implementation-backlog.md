@@ -255,6 +255,17 @@
 - 선행 조건: B-205, B-206
 - 연결 테스트: outbox 저장/복구 테스트
 
+### B-207B ack 반영과 outbox cleanup 정책 구현
+
+- 우선순위: `필수`
+- 설명: ack 수신 시 outbox row 를 즉시 hard delete 하지 않고 상태만 반영한 뒤, 별도 cleanup 으로 acked row 를 정리하는 정책을 구현한다.
+- 완료 기준:
+- ack 수신 시 `acked_at` 과 마지막 ack 상태가 즉시 반영되어야 한다.
+- cleanup 은 최근 acked row 일부를 남기고 오래된 acked row 부터 정리해야 한다.
+- pending row 증가가 경고 임계치를 넘으면 self-state 에 queue pressure 정보가 포함되어야 한다.
+- 선행 조건: B-207
+- 연결 테스트: outbox ack/cleanup 테스트
+
 ### B-207A backend 계약 테스트 1차 세트 구축
 
 - 우선순위: `필수`

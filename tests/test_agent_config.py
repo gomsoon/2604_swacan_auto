@@ -50,6 +50,9 @@ def test_load_config_reads_valid_toml(tmp_path) -> None:
     assert config.backend_endpoint == "https://backend.example.com/api/agents/ingest"
     assert config.debug_mode is True
     assert config.storage_path.name == "agent.agent.sqlite3"
+    assert config.storage.keep_acked_rows == 500
+    assert config.storage.cleanup_batch_size == 250
+    assert config.storage.pending_warning_rows == 1000
     assert config.intervals.heartbeat_seconds == 5
     assert len(config.targets) == 2
     assert config.targets[0].process_name == "python"
@@ -138,3 +141,39 @@ def test_load_config_resolves_relative_storage_path(tmp_path) -> None:
     config = load_config(config_path)
 
     assert config.storage_path == (config_path.parent / "runtime" / "agent-outbox.sqlite3").resolve()
+
+
+def test_load_config_reads_storage_policy_values(tmp_path) -> None:
+    config_path = write_config(
+        tmp_path,
+        """
+        [agent]
+        agent_id = "agent_local"
+        token = "dev-agent-token"
+
+        [backend]
+        endpoint = "https://backend.example.com/api/agents/ingest"
+
+        [storage]
+        database_path = "runtime/agent-outbox.sqlite3"
+        keep_acked_rows = 50
+        cleanup_batch_size = 20
+        pending_warning_rows = 75
+
+        [intervals]
+        heartbeat_seconds = 5
+        snapshot_seconds = 5
+        flush_seconds = 2
+        retry_backoff_seconds = 10
+
+        [[targets]]
+        target_id = "app_main"
+        process_name = "python"
+        """,
+    )
+
+    config = load_config(config_path)
+
+    assert config.storage.keep_acked_rows == 50
+    assert config.storage.cleanup_batch_size == 20
+    assert config.storage.pending_warning_rows == 75

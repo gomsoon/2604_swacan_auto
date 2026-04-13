@@ -48,6 +48,8 @@
 - [필수] agent 는 최소한 host resource 정보로 `stat`, `loadavg`, `meminfo` 기반 snapshot 을 생성할 수 있어야 한다.
 - [필수] agent 는 outbox 에 item 단위로 저장된 heartbeat, host snapshot, process snapshot 을 여러 개 묶어 batch 로 backend ingest 에 전송할 수 있어야 한다.
 - [필수] 이 단계의 `ack_seq` 는 batch 가 backend `ingest_inbox` 에 안전하게 저장되었다는 의미이며, 각 item 의 후처리 성공/실패를 직접 뜻하지는 않는다.
+- [필수] 이 단계에서도 agent 의 로컬 durable store 는 SQLite 를 사용하며, 이 원칙은 이후 MVP 와 product 단계까지 유지된다.
+- [필수] ack 수신 후에는 row 를 즉시 hard delete 하지 않고, ack 상태를 먼저 반영한 뒤 cleanup 단계에서 정리할 수 있어야 한다.
 - [필수] latest state: process up/down 과 agent heartbeat 상태가 latest state 에 반영되어야 한다.
 - [필수] event 기록: 최소한 `process started`, `process stopped`, `agent heartbeat lost` 수준의 event 를 기록할 수 있어야 한다.
 - [필수] monitoring view: polling 기반으로 상태 변화를 표시할 수 있어야 한다.

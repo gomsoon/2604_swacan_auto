@@ -222,6 +222,8 @@
 - [필수] agent 는 backend 연결 실패 또는 일시 오류 시 payload 를 SQLite outbox 에 저장해야 한다.
 - [필수] outbox 의 목적은 데이터 유실 방지와 순차 재전송이다.
 - [필수] outbox 는 agent 재시작 후에도 복구 가능해야 한다.
+- [필수] agent 의 로컬 durable store 는 minimal E2E, MVP, product 단계 전체에서 일관되게 SQLite 기반으로 유지해야 한다.
+- [필수] backend 저장소가 PostgreSQL 등으로 확장되더라도, agent 로컬 저장소는 독립적인 SQLite outbox 원칙을 유지해야 한다.
 
 ### 11.2 로컬 SQLite 구조
 
@@ -243,6 +245,12 @@
 - [필수] outbox 는 seq 순서대로 읽고 전송해야 한다.
 - [필수] agent 는 재시작 후 미처리 outbox 부터 재전송해야 한다.
 - [필수] outbox 의 저장 단위는 item 이고, transport 의 전송 단위는 batch 임을 구조적으로 분리해야 한다.
+- [필수] ack 수신 시에는 outbox row 를 즉시 hard delete 하지 않고, 최소한 `acked_at` 과 마지막 ack 상태를 먼저 갱신하는 방식으로 반영해야 한다.
+- [필수] ack 된 row 의 실제 삭제는 전송 hot path 와 분리된 cleanup 단계에서 수행해야 한다.
+- [필수] cleanup 은 ack 되지 않은 pending row 를 삭제 대상으로 삼아서는 안 된다.
+- [필수] ack 된 row 는 최근 일부를 디버깅과 재현을 위해 유지하고, 오래된 acked row 부터 점진적으로 정리해야 한다.
+- [필수] pending row 가 경고 임계치를 넘으면 self-state 에 queue pressure 정보를 포함해 backend 와 관리자 화면이 이를 인지할 수 있어야 한다.
+- [필수] product 단계에서도 outbox 증가 억제는 `acked row cleanup`, `warning threshold`, `수집량 조절` 순서로 해결하고, 미전송 데이터를 임의 삭제하는 정책은 기본값으로 두지 않는다.
 
 ## 12. 장애 복구와 stale 대응 지원 요구사항
 

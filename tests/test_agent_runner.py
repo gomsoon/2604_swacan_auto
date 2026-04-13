@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from agent.config import AgentConfig, AgentIntervals, AgentTarget
+from agent.config import AgentConfig, AgentIntervals, AgentStoragePolicy, AgentTarget
 from agent.main import main
 from agent.runner import AgentRunner
 
@@ -13,6 +13,11 @@ def sample_config() -> AgentConfig:
     return AgentConfig(
         config_path=Path("agent.toml"),
         storage_path=Path("agent.agent.sqlite3"),
+        storage=AgentStoragePolicy(
+            keep_acked_rows=500,
+            cleanup_batch_size=250,
+            pending_warning_rows=1000,
+        ),
         agent_id="agent_local",
         backend_endpoint="https://backend.example.com/api/agents/ingest",
         token="dev-agent-token",

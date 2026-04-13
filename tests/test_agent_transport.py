@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agent.config import AgentConfig, AgentIntervals, AgentTarget
+from agent.config import AgentConfig, AgentIntervals, AgentStoragePolicy, AgentTarget
 from agent.payloads import OutboxItem
 from agent.storage import AgentStorage
 from agent.transport import AgentTransport, build_batch_payload
@@ -14,6 +14,11 @@ def sample_config(tmp_path: Path) -> AgentConfig:
     return AgentConfig(
         config_path=tmp_path / "agent.toml",
         storage_path=tmp_path / "agent.sqlite3",
+        storage=AgentStoragePolicy(
+            keep_acked_rows=500,
+            cleanup_batch_size=250,
+            pending_warning_rows=1000,
+        ),
         agent_id="agent_local",
         backend_endpoint="https://backend.example.com/api/agents/ingest",
         token="dev-agent-token",
