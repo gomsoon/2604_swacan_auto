@@ -41,6 +41,8 @@
 - [필수] MVP 에서는 Kafka, MQTT, Redis 와 같은 별도 외부 broker 또는 queue 서비스를 필수 구성요소로 두지 않는다.
 - [필수] queue 역할이 필요한 경우 backend 내부의 SQLite 테이블을 사용한 `inbox` 또는 `work queue` 구조로 처리해야 한다.
 - [필수] agent ingest 에 대한 backend ack 는 화면 반영 완료가 아니라, backend 가 payload 를 내구성 있게 접수했다는 의미로 정의해야 한다.
+- [필수] 현재 `ack_seq` 는 batch 내 각 item 의 처리 성공을 뜻하는 것이 아니라, 해당 batch 가 `ingest_inbox` 에 영속 저장되었다는 receipt ack 로 해석해야 한다.
+- [필수] 따라서 `ack_seq` 가 반환되더라도 worker 후처리 완료, latest state 반영 완료, raw event 생성 완료까지 보장하는 것은 아니다.
 - [선택] 후속 단계에서는 처리량, 재생성, 다중 consumer 요구가 커질 경우 Redis Streams 또는 동등한 외부 메시징 계층을 검토할 수 있다.
 
 ### 4.3 동시성 및 쓰기 정책
@@ -236,6 +238,8 @@
 - [필수] 각 item 은 최소한 `agent_id`, `boot_id`, `seq`, `occurred_at`, `sent_at`, `payload type` 을 포함해야 한다.
 - [필수] backend 는 `(agent_id, boot_id, seq)` 기준으로 중복 처리 정책을 수행해야 한다.
 - [필수] backend 응답은 최소한 `ack_seq`, `accepted_count`, `server_time` 을 포함해야 한다.
+- [필수] MVP 최소 구조에서 backend 응답의 `ack_seq` 는 inbox receipt ack 를 의미하며, item 단위 처리 성공/실패 결과를 직접 반환하지 않아도 된다.
+- [필수] item 단위 처리 결과는 worker 가 별도로 판단하며, 필요 시 관리자 화면이나 후속 결과 테이블을 통해 조회하는 구조로 분리할 수 있어야 한다.
 
 ### 10.3 MonitoringAgent 모델 연동
 
@@ -329,6 +333,7 @@
 - [후속] WebSocket 기반의 고급 양방향 agent 제어
 - [후속] VirtualMachine 내부 상세 수집과 하이퍼바이저 연동 심화
 - [후속] ExecutionThread 의 상세 thread-level 계측
+- [후속] item 단위 처리 결과 저장 테이블, per-item ack 응답, batch worker 처리의 원자성/rollback 정책 고도화
 
 ## 15. 다음 설계 단계 입력 항목
 

@@ -208,9 +208,12 @@
 
 - [필수] `seq` 는 agent boot 단위에서 단조 증가해야 한다.
 - [필수] agent 는 backend 응답의 `ack_seq` 를 기준으로 outbox 정리 여부를 판단해야 한다.
+- [필수] 현재 `ack_seq` 는 batch 내 각 item 의 처리 성공 여부가 아니라, 해당 batch 가 backend `ingest_inbox` 에 영속 저장되었다는 receipt ack 로 해석해야 한다.
+- [필수] agent 는 `ack_seq` 를 worker 후처리 완료 신호로 오해해서는 안 되며, outbox 정리 기준으로만 사용해야 한다.
 - [필수] 동일 payload 의 중복 전송이 발생하더라도 backend 가 중복 제거할 수 있도록 동일 `seq` 를 유지해야 한다.
 - [필수] backend 응답에는 최소한 `ack_seq`, `accepted_count`, `server_time` 이 포함된다고 가정해야 한다.
 - [필수] agent 는 부분 수용 응답에도 대응할 수 있어야 하며, ack 되지 않은 항목은 outbox 에 남겨 재전송해야 한다.
+- [후속] MVP 고도화 단계에서는 item 단위 처리 결과 조회, per-item ack, partial accept 상세 정책을 진지하게 검토해야 한다.
 
 ## 11. SQLite outbox 요구사항
 

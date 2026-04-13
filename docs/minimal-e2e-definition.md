@@ -47,6 +47,7 @@
 - [필수] backend ingest: agent payload 를 수신하고 durable write 후 처리할 수 있어야 한다.
 - [필수] agent 는 최소한 host resource 정보로 `stat`, `loadavg`, `meminfo` 기반 snapshot 을 생성할 수 있어야 한다.
 - [필수] agent 는 outbox 에 item 단위로 저장된 heartbeat, host snapshot, process snapshot 을 여러 개 묶어 batch 로 backend ingest 에 전송할 수 있어야 한다.
+- [필수] 이 단계의 `ack_seq` 는 batch 가 backend `ingest_inbox` 에 안전하게 저장되었다는 의미이며, 각 item 의 후처리 성공/실패를 직접 뜻하지는 않는다.
 - [필수] latest state: process up/down 과 agent heartbeat 상태가 latest state 에 반영되어야 한다.
 - [필수] event 기록: 최소한 `process started`, `process stopped`, `agent heartbeat lost` 수준의 event 를 기록할 수 있어야 한다.
 - [필수] monitoring view: polling 기반으로 상태 변화를 표시할 수 있어야 한다.
@@ -67,6 +68,7 @@
 - [후속] view 복사, diagram 복사
 - [후속] 다중 사용자 편집 잠금
 - [후속] backend 와 연계된 agent 자동 업데이트
+- [후속] item 단위 처리 결과 저장, per-item ack, worker batch rollback/원자성 고도화
 
 ## 5. 최소 E2E 시스템 구성
 
@@ -77,6 +79,7 @@
 - [필수] `web` 은 로그인, view 저장, monitoring 조회, agent ingest 를 담당한다.
 - [필수] `worker` 는 latest state 갱신과 단순 event 생성 정도의 최소 후처리를 담당한다.
 - [필수] queue 역할은 SQLite 기반 `inbox/work queue` 로 처리한다.
+- [필수] 이 단계에서 backend 응답은 receipt ack 중심으로 단순화하며, item 단위 처리 성공/실패 결과는 worker 내부 책임으로 둔다.
 
 ### 5.2 Agent
 
