@@ -142,6 +142,9 @@ CREATE INDEX IF NOT EXISTS idx_view_edges_target_node_id
 CREATE INDEX IF NOT EXISTS idx_ingest_inbox_status_received
     ON ingest_inbox(status, received_at);
 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ingest_inbox_agent_boot_seq_range
+    ON ingest_inbox(agent_id, boot_id, seq_start, seq_end);
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_latest_states_target_state_type
     ON latest_states(target_id, state_type);
 

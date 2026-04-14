@@ -101,6 +101,7 @@ def test_ingest_persists_inbox_and_returns_ack(seeded_app, seeded_client) -> Non
     payload = response.get_json()
     assert payload["ack_seq"] == 13
     assert payload["accepted_count"] == 4
+    assert payload["duplicate"] is False
 
     with seeded_app.app_context():
         db_conn = get_db()
@@ -113,6 +114,38 @@ def test_ingest_persists_inbox_and_returns_ack(seeded_app, seeded_client) -> Non
     assert row["seq_start"] == 10
     assert row["seq_end"] == 13
     assert row["status"] == "pending"
+
+
+def test_ingest_duplicate_batch_returns_same_ack_without_new_inbox_row(seeded_app, seeded_client) -> None:
+    first_response = seeded_client.post(
+        "/api/agents/ingest",
+        headers=agent_headers(),
+        json=sample_batch(),
+    )
+    second_response = seeded_client.post(
+        "/api/agents/ingest",
+        headers=agent_headers(),
+        json=sample_batch(),
+    )
+
+    assert first_response.status_code == 202
+    assert second_response.status_code == 202
+    assert second_response.get_json()["ack_seq"] == 13
+    assert second_response.get_json()["accepted_count"] == 4
+    assert second_response.get_json()["duplicate"] is True
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        row = db_conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM ingest_inbox
+            WHERE agent_id = ? AND boot_id = ? AND seq_start = ? AND seq_end = ?
+            """,
+            ("agent_local", "boot_001", 10, 13),
+        ).fetchone()
+
+    assert row["count"] == 1
 
 
 def test_process_pending_ingest_updates_states_and_events(seeded_app, seeded_client) -> None:
@@ -151,6 +184,35 @@ def test_process_pending_ingest_updates_states_and_events(seeded_app, seeded_cli
     assert [(row["target_id"], row["event_type"], row["severity"]) for row in event_rows] == [
         ("app_main", "process_stopped", "warning"),
     ]
+
+
+def test_duplicate_batch_is_processed_only_once(seeded_app, seeded_client) -> None:
+    first_response = seeded_client.post(
+        "/api/agents/ingest",
+        headers=agent_headers(),
+        json=sample_batch(),
+    )
+    second_response = seeded_client.post(
+        "/api/agents/ingest",
+        headers=agent_headers(),
+        json=sample_batch(),
+    )
+    assert first_response.status_code == 202
+    assert second_response.status_code == 202
+
+    with seeded_app.app_context():
+        result = process_pending_ingest(limit=10)
+        db_conn = get_db()
+        inbox_count = db_conn.execute("SELECT COUNT(*) AS count FROM ingest_inbox").fetchone()["count"]
+        event_count = db_conn.execute("SELECT COUNT(*) AS count FROM raw_events").fetchone()["count"]
+
+    assert result == {
+        "processed_batches": 1,
+        "failed_batches": 0,
+        "processed_items": 4,
+    }
+    assert inbox_count == 1
+    assert event_count == 1
 
 
 def test_process_ingest_cli_command(seeded_client, seeded_runner) -> None:

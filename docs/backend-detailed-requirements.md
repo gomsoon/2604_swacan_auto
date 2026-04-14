@@ -237,6 +237,8 @@
 - [필수] backend 는 batch payload 에 대해 순서 확인, 중복 제거, 일부 수용, 전체 수용을 처리할 수 있어야 한다.
 - [필수] 각 item 은 최소한 `agent_id`, `boot_id`, `seq`, `occurred_at`, `sent_at`, `payload type` 을 포함해야 한다.
 - [필수] backend 는 `(agent_id, boot_id, seq)` 기준으로 중복 처리 정책을 수행해야 한다.
+- [필수] MVP 최소 구조에서는 먼저 `(agent_id, boot_id, seq_start, seq_end)` 기준의 batch receipt 중복 방지를 지원해야 한다.
+- [필수] 동일 batch 가 재전송되면 backend 는 새로운 inbox row 를 만들지 않고, 기존 receipt 기준으로 동일 `ack_seq` 를 반환할 수 있어야 한다.
 - [필수] backend 응답은 최소한 `ack_seq`, `accepted_count`, `server_time` 을 포함해야 한다.
 - [필수] MVP 최소 구조에서 backend 응답의 `ack_seq` 는 inbox receipt ack 를 의미하며, item 단위 처리 성공/실패 결과를 직접 반환하지 않아도 된다.
 - [필수] item 단위 처리 결과는 worker 가 별도로 판단하며, 필요 시 관리자 화면이나 후속 결과 테이블을 통해 조회하는 구조로 분리할 수 있어야 한다.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime
 from typing import Any
 
@@ -104,21 +105,40 @@ def ingest_batch():
     payload_json = json.dumps(payload, ensure_ascii=False)
 
     db_conn = get_db()
-    db_conn.execute(
-        """
-        INSERT INTO ingest_inbox (
-            agent_id, boot_id, seq_start, seq_end, received_at, payload_json, status, processed_at, error_message
-        ) VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL, NULL)
-        """,
-        (
-            payload["agent_id"],
-            payload["boot_id"],
-            payload["seq_start"],
-            payload["seq_end"],
-            received_at,
-            payload_json,
-        ),
-    )
+    is_duplicate = False
+    try:
+        db_conn.execute(
+            """
+            INSERT INTO ingest_inbox (
+                agent_id, boot_id, seq_start, seq_end, received_at, payload_json, status, processed_at, error_message
+            ) VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL, NULL)
+            """,
+            (
+                payload["agent_id"],
+                payload["boot_id"],
+                payload["seq_start"],
+                payload["seq_end"],
+                received_at,
+                payload_json,
+            ),
+        )
+    except sqlite3.IntegrityError:
+        existing = db_conn.execute(
+            """
+            SELECT id
+            FROM ingest_inbox
+            WHERE agent_id = ? AND boot_id = ? AND seq_start = ? AND seq_end = ?
+            """,
+            (
+                payload["agent_id"],
+                payload["boot_id"],
+                payload["seq_start"],
+                payload["seq_end"],
+            ),
+        ).fetchone()
+        if existing is None:
+            raise
+        is_duplicate = True
 
     log_debug_payload(
         channel="agent_backend",
@@ -133,6 +153,7 @@ def ingest_batch():
         "ack_seq": payload["seq_end"],
         "accepted_count": len(payload["items"]),
         "server_time": received_at,
+        "duplicate": is_duplicate,
     }
     response_json = json.dumps(response, ensure_ascii=False)
     log_debug_payload(
