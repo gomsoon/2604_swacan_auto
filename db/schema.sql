@@ -130,6 +130,15 @@ CREATE TABLE IF NOT EXISTS debug_payload_logs (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS cleanup_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL,
+    raw_events_deleted INTEGER NOT NULL,
+    debug_payload_logs_deleted INTEGER NOT NULL,
+    ingest_inbox_deleted INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_views_owner_updated
     ON views(owner_user_id, updated_at DESC);
 
@@ -177,3 +186,6 @@ CREATE INDEX IF NOT EXISTS idx_debug_payload_logs_channel_occurred
 
 CREATE INDEX IF NOT EXISTS idx_debug_payload_logs_trace_id_occurred
     ON debug_payload_logs(trace_id, occurred_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_cleanup_runs_finished_at
+    ON cleanup_runs(finished_at DESC);

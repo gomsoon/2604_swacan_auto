@@ -193,11 +193,23 @@ def test_cleanup_runtime_data_removes_only_expired_rows(app) -> None:
         receipt_ids = {
             row["id"] for row in db_conn.execute("SELECT id FROM processed_item_receipts").fetchall()
         }
+        cleanup_runs = db_conn.execute(
+            """
+            SELECT raw_events_deleted, debug_payload_logs_deleted, ingest_inbox_deleted
+            FROM cleanup_runs
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
 
         assert raw_ids == {202}
         assert debug_ids == {302}
         assert inbox_ids == {402, 403}
         assert receipt_ids == set()
+        assert cleanup_runs is not None
+        assert cleanup_runs["raw_events_deleted"] == 1
+        assert cleanup_runs["debug_payload_logs_deleted"] == 1
+        assert cleanup_runs["ingest_inbox_deleted"] == 1
 
 
 def test_cleanup_runtime_data_command_uses_app_config(app, runner) -> None:

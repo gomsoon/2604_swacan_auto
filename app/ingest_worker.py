@@ -42,6 +42,8 @@ class RetentionCleanupSummary:
     raw_events_deleted: int
     debug_payload_logs_deleted: int
     ingest_inbox_deleted: int
+    started_at: str | None = None
+    finished_at: str | None = None
 
 
 def now_iso() -> str:
@@ -55,6 +57,10 @@ def now_dt() -> datetime:
         if isinstance(value, datetime):
             return value if value.tzinfo is not None else value.astimezone()
     return datetime.now().astimezone()
+
+
+def format_iso(value: datetime) -> str:
+    return value.astimezone().isoformat(timespec="milliseconds")
 
 
 def is_older_than(timestamp: str | None, cutoff: datetime) -> bool:
@@ -352,6 +358,7 @@ def cleanup_runtime_data(
 ) -> RetentionCleanupSummary:
     db_conn = get_db()
     now = current_time or now_dt()
+    started_at = format_iso(now)
     raw_days = int(
         raw_event_retention_days
         if raw_event_retention_days is not None
@@ -403,11 +410,28 @@ def cleanup_runtime_data(
         placeholders = ", ".join("?" for _ in inbox_delete_ids)
         db_conn.execute(f"DELETE FROM ingest_inbox WHERE id IN ({placeholders})", tuple(inbox_delete_ids))
 
+    finished_at = format_iso(current_time or now_dt())
+    db_conn.execute(
+        """
+        INSERT INTO cleanup_runs (
+            started_at, finished_at, raw_events_deleted, debug_payload_logs_deleted, ingest_inbox_deleted
+        ) VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            started_at,
+            finished_at,
+            len(raw_delete_ids),
+            len(debug_delete_ids),
+            len(inbox_delete_ids),
+        ),
+    )
     db_conn.commit()
     return RetentionCleanupSummary(
         raw_events_deleted=len(raw_delete_ids),
         debug_payload_logs_deleted=len(debug_delete_ids),
         ingest_inbox_deleted=len(inbox_delete_ids),
+        started_at=started_at,
+        finished_at=finished_at,
     )
 
 
@@ -419,11 +443,15 @@ class IngestWorkerLoop:
         idle_sleep_seconds: float = 1.0,
         error_backoff_seconds: float = 5.0,
         processor=process_pending_ingest,
+        cleanup_every_cycles: int | None = None,
+        cleanup_func=cleanup_runtime_data,
     ) -> None:
         self.limit = limit
         self.idle_sleep_seconds = idle_sleep_seconds
         self.error_backoff_seconds = error_backoff_seconds
         self.processor = processor
+        self.cleanup_every_cycles = cleanup_every_cycles if cleanup_every_cycles and cleanup_every_cycles > 0 else None
+        self.cleanup_func = cleanup_func
 
     def run_cycle(self) -> IngestWorkerCycleResult:
         try:
@@ -463,6 +491,9 @@ class IngestWorkerLoop:
             total_failed_batches += cycle.failed_batches
             total_processed_items += cycle.processed_items
 
+            if self.cleanup_every_cycles and cycles % self.cleanup_every_cycles == 0:
+                self.cleanup_func()
+
             if max_cycles is not None and cycles >= max_cycles:
                 break
 
@@ -492,17 +523,20 @@ def process_ingest_command(limit: int) -> None:
 @click.option("--max-cycles", default=None, type=int)
 @click.option("--idle-sleep", default=1.0, show_default=True, type=float)
 @click.option("--error-backoff", default=5.0, show_default=True, type=float)
+@click.option("--cleanup-every-cycles", default=0, show_default=True, type=int)
 @with_appcontext
 def run_ingest_worker_command(
     limit: int,
     max_cycles: int | None,
     idle_sleep: float,
     error_backoff: float,
+    cleanup_every_cycles: int,
 ) -> None:
     worker = IngestWorkerLoop(
         limit=limit,
         idle_sleep_seconds=idle_sleep,
         error_backoff_seconds=error_backoff,
+        cleanup_every_cycles=cleanup_every_cycles,
     )
     summary = worker.run_forever(max_cycles=max_cycles)
     click.echo(

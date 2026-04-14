@@ -86,3 +86,25 @@ def test_ingest_worker_loop_run_forever_aggregates_cycle_counts() -> None:
     assert summary.failed_batches == 0
     assert summary.processed_items == 3
     assert sleeps == [2.5]
+
+
+def test_ingest_worker_loop_runs_cleanup_on_interval() -> None:
+    cleanup_calls: list[str] = []
+
+    worker = IngestWorkerLoop(
+        limit=10,
+        idle_sleep_seconds=0.0,
+        error_backoff_seconds=4.0,
+        processor=lambda limit: {
+            "processed_batches": 0,
+            "failed_batches": 0,
+            "processed_items": 0,
+        },
+        cleanup_every_cycles=2,
+        cleanup_func=lambda: cleanup_calls.append("cleanup"),
+    )
+
+    summary = worker.run_forever(max_cycles=5, sleep_func=lambda seconds: None)
+
+    assert summary.cycles == 5
+    assert cleanup_calls == ["cleanup", "cleanup"]

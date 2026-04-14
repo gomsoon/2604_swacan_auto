@@ -8,6 +8,7 @@ from flask import Blueprint, current_app, request
 
 from .auth import admin_required, error_response
 from .db import get_db
+from .runtime_state import derive_latest_state
 
 bp = Blueprint("admin_api", __name__, url_prefix="/api/admin")
 
@@ -15,6 +16,8 @@ DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
 ALLOWED_INGEST_STATUSES = {"pending", "processing", "processed", "failed"}
 ALLOWED_DEBUG_DIRECTIONS = {"request", "response"}
+ALLOWED_STATE_TYPES = {"agent", "host", "process"}
+ALLOWED_STATE_STATUSES = {"up", "warning", "down"}
 
 
 def now_iso() -> str:
@@ -111,6 +114,44 @@ def serialize_debug_payload(row) -> dict[str, Any]:
     }
 
 
+def serialize_latest_state_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "target_id": payload["target_id"],
+        "state_type": payload["state_type"],
+        "status": payload["status"],
+        "severity": payload["severity"],
+        "occurred_at": payload["occurred_at"],
+        "received_at": payload["received_at"],
+        "state": payload["state"],
+    }
+
+
+def serialize_cleanup_run(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "started_at": row["started_at"],
+        "finished_at": row["finished_at"],
+        "raw_events_deleted": row["raw_events_deleted"],
+        "debug_payload_logs_deleted": row["debug_payload_logs_deleted"],
+        "ingest_inbox_deleted": row["ingest_inbox_deleted"],
+    }
+
+
+def load_derived_latest_states(state_type: str | None = None) -> list[dict[str, Any]]:
+    sql = """
+        SELECT target_id, state_type, status, severity, state_json, occurred_at, received_at
+        FROM latest_states
+    """
+    params: list[Any] = []
+    if state_type:
+        sql += " WHERE state_type = ?"
+        params.append(state_type)
+    sql += " ORDER BY received_at DESC, id DESC"
+
+    rows = get_db().execute(sql, tuple(params)).fetchall()
+    return [derive_latest_state(row) for row in rows]
+
+
 @bp.get("/summary")
 @admin_required
 def get_summary():
@@ -123,13 +164,14 @@ def get_summary():
         "latest_states": fetch_count("SELECT COUNT(*) FROM latest_states"),
         "raw_events": fetch_count("SELECT COUNT(*) FROM raw_events"),
         "debug_payload_logs": fetch_count("SELECT COUNT(*) FROM debug_payload_logs"),
+        "cleanup_runs": fetch_count("SELECT COUNT(*) FROM cleanup_runs"),
     }
 
-    status_counts = {status: 0 for status in sorted(ALLOWED_INGEST_STATUSES)}
+    ingest_status_counts = {status: 0 for status in sorted(ALLOWED_INGEST_STATUSES)}
     for row in db_conn.execute(
         "SELECT status, COUNT(*) AS count FROM ingest_inbox GROUP BY status ORDER BY status"
     ).fetchall():
-        status_counts[row["status"]] = row["count"]
+        ingest_status_counts[row["status"]] = row["count"]
 
     failed_rows = db_conn.execute(
         """
@@ -141,15 +183,52 @@ def get_summary():
         """
     ).fetchall()
 
+    derived_latest_states = load_derived_latest_states()
+    state_type_counts = {state_type: 0 for state_type in sorted(ALLOWED_STATE_TYPES)}
+    runtime_status_counts = {status: 0 for status in sorted(ALLOWED_STATE_STATUSES)}
+    runtime_status_counts["other"] = 0
+    stale_agents: list[dict[str, Any]] = []
+
+    for payload in derived_latest_states:
+        state_type_counts[payload["state_type"]] = state_type_counts.get(payload["state_type"], 0) + 1
+        if payload["status"] in runtime_status_counts:
+            runtime_status_counts[payload["status"]] += 1
+        else:
+            runtime_status_counts["other"] += 1
+
+        if payload["state_type"] == "agent" and payload["status"] in {"warning", "down"}:
+            stale_agents.append(serialize_latest_state_payload(payload))
+
+    last_cleanup_row = db_conn.execute(
+        """
+        SELECT id, started_at, finished_at, raw_events_deleted, debug_payload_logs_deleted, ingest_inbox_deleted
+        FROM cleanup_runs
+        ORDER BY finished_at DESC, id DESC
+        LIMIT 1
+        """
+    ).fetchone()
+
     return {
         "service_status": "ok",
         "generated_at": now_iso(),
         "debug_payload_logging_enabled": bool(current_app.config.get("DEBUG_PAYLOAD_LOGGING", False)),
         "counts": counts,
         "ingest_inbox": {
-            "status_counts": status_counts,
+            "status_counts": ingest_status_counts,
             "recent_failed": [serialize_ingest_row(row) for row in failed_rows],
         },
+        "runtime": {
+            "state_type_counts": state_type_counts,
+            "status_counts": runtime_status_counts,
+            "stale_agent_count": len(stale_agents),
+        },
+        "stale_agents": stale_agents[:5],
+        "retention_policy": {
+            "raw_events_days": int(current_app.config.get("RAW_EVENT_RETENTION_DAYS", 7)),
+            "debug_payload_hours": int(current_app.config.get("DEBUG_PAYLOAD_RETENTION_HOURS", 24)),
+            "ingest_inbox_days": int(current_app.config.get("INGEST_INBOX_RETENTION_DAYS", 7)),
+        },
+        "last_cleanup": serialize_cleanup_run(last_cleanup_row) if last_cleanup_row else None,
     }
 
 
@@ -200,6 +279,32 @@ def list_raw_events():
         (limit,),
     ).fetchall()
     return {"items": [serialize_raw_event(row) for row in rows]}
+
+
+@bp.get("/latest-states")
+@admin_required
+def list_latest_states():
+    limit, error = parse_limit()
+    if error:
+        return error
+
+    state_type = request.args.get("state_type")
+    if state_type and state_type not in ALLOWED_STATE_TYPES:
+        return error_response("validation_error", "invalid state_type filter", 400)
+
+    status = request.args.get("status")
+    if status and status not in ALLOWED_STATE_STATUSES:
+        return error_response("validation_error", "invalid status filter", 400)
+
+    target_id = request.args.get("target_id")
+
+    items = load_derived_latest_states(state_type=state_type)
+    if target_id:
+        items = [item for item in items if item["target_id"] == target_id]
+    if status:
+        items = [item for item in items if item["status"] == status]
+
+    return {"items": [serialize_latest_state_payload(item) for item in items[:limit]]}
 
 
 @bp.get("/debug-payloads")
@@ -266,3 +371,22 @@ def list_debug_payloads():
         "debug_payload_logging_enabled": bool(current_app.config.get("DEBUG_PAYLOAD_LOGGING", False)),
         "items": [serialize_debug_payload(row) for row in rows],
     }
+
+
+@bp.get("/cleanup-runs")
+@admin_required
+def list_cleanup_runs():
+    limit, error = parse_limit()
+    if error:
+        return error
+
+    rows = get_db().execute(
+        """
+        SELECT id, started_at, finished_at, raw_events_deleted, debug_payload_logs_deleted, ingest_inbox_deleted
+        FROM cleanup_runs
+        ORDER BY finished_at DESC, id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    return {"items": [serialize_cleanup_run(row) for row in rows]}

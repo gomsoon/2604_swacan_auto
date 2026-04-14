@@ -661,6 +661,17 @@ a {
     margin-top: 16px;
 }
 
+.summary-stack {
+    display: grid;
+    gap: 18px;
+    margin-top: 20px;
+}
+
+.summary-section-title {
+    margin: 0 0 10px;
+    font-size: 1rem;
+}
+
 .section-header-stack {
     align-items: flex-start;
 }
@@ -679,6 +690,10 @@ a {
 
 .admin-item h3 {
     margin: 0;
+}
+
+.compact-admin-list .admin-item {
+    padding: 12px 14px;
 }
 
 .admin-meta {

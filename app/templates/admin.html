@@ -6,11 +6,11 @@
         <div>
             <p class="eyebrow">Admin Console</p>
             <h1>기본 관리자 화면</h1>
-            <p class="section-copy">backend 운영 상태와 inbox, 최근 event, debug payload를 운영용으로 확인합니다.</p>
+            <p class="section-copy">백엔드 운영 상태, ingest inbox, 최신 상태, 최근 이벤트, debug payload를 한 화면에서 확인합니다.</p>
         </div>
         <div class="toolbar-inline">
             <span id="admin-debug-status" class="meta-pill">debug mode 확인 중</span>
-            <button id="refresh-admin-button" class="button ghost" type="button">새로고침</button>
+            <button id="refresh-admin-button" class="button ghost" type="button">전체 새로고침</button>
         </div>
     </div>
 
@@ -20,7 +20,33 @@
             <span id="admin-generated-at" class="meta-pill">-</span>
         </div>
         <div id="admin-summary-cards" class="stat-grid"></div>
-        <div id="admin-ingest-status" class="summary-metrics"></div>
+
+        <div class="summary-stack">
+            <section>
+                <h3 class="summary-section-title">Ingest 상태</h3>
+                <div id="admin-ingest-status" class="summary-metrics"></div>
+            </section>
+
+            <section>
+                <h3 class="summary-section-title">런타임 상태</h3>
+                <div id="admin-runtime-status" class="summary-metrics"></div>
+            </section>
+
+            <section>
+                <h3 class="summary-section-title">보존 정책</h3>
+                <div id="admin-retention-policy" class="summary-metrics"></div>
+            </section>
+
+            <section>
+                <h3 class="summary-section-title">주의가 필요한 Agent</h3>
+                <div id="admin-stale-agents" class="admin-list compact-admin-list"></div>
+            </section>
+
+            <section>
+                <h3 class="summary-section-title">최근 Cleanup</h3>
+                <div id="admin-cleanup-summary" class="admin-list compact-admin-list"></div>
+            </section>
+        </div>
     </section>
 
     <div class="admin-grid">
@@ -45,6 +71,37 @@
                 </div>
             </div>
             <div id="admin-ingest-list" class="admin-list"></div>
+        </section>
+
+        <section class="card">
+            <div class="section-header section-header-stack">
+                <div>
+                    <h2>Latest State</h2>
+                    <p class="section-copy">agent, host, process의 최신 상태를 유형과 상태별로 빠르게 확인합니다.</p>
+                </div>
+                <div class="toolbar-inline filter-row">
+                    <label class="field compact-field">
+                        <span>유형</span>
+                        <select id="latest-state-type-filter">
+                            <option value="">전체</option>
+                            <option value="agent">agent</option>
+                            <option value="host">host</option>
+                            <option value="process">process</option>
+                        </select>
+                    </label>
+                    <label class="field compact-field">
+                        <span>상태</span>
+                        <select id="latest-state-status-filter">
+                            <option value="">전체</option>
+                            <option value="up">up</option>
+                            <option value="warning">warning</option>
+                            <option value="down">down</option>
+                        </select>
+                    </label>
+                    <button id="refresh-latest-state-button" class="button ghost small" type="button">갱신</button>
+                </div>
+            </div>
+            <div id="admin-latest-state-list" class="admin-list"></div>
         </section>
 
         <section class="card">
@@ -77,6 +134,17 @@
                 </div>
             </div>
             <div id="admin-debug-list" class="admin-list"></div>
+        </section>
+
+        <section class="card">
+            <div class="section-header section-header-stack">
+                <div>
+                    <h2>Cleanup 기록</h2>
+                    <p class="section-copy">최근 runtime cleanup 실행 결과를 시간순으로 확인합니다.</p>
+                </div>
+                <button id="refresh-cleanup-button" class="button ghost small" type="button">갱신</button>
+            </div>
+            <div id="admin-cleanup-list" class="admin-list"></div>
         </section>
     </div>
 </section>

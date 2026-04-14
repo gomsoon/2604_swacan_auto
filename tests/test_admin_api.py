@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 from werkzeug.security import generate_password_hash
 
@@ -54,6 +55,62 @@ def seed_admin_dashboard_rows(app) -> None:
                 "2026-04-12T11:00:00.100+09:00",
                 "2026-04-12T11:00:00.200+09:00",
                 "2026-04-12T11:00:00.200+09:00",
+            ),
+        )
+        db_conn.execute(
+            """
+            INSERT INTO latest_states (
+                id, view_node_id, target_id, state_type, status, severity,
+                state_json, occurred_at, received_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                11,
+                103,
+                "agent_local",
+                "agent",
+                "up",
+                "normal",
+                json.dumps(
+                    {
+                        "heartbeat_time": "2026-04-12T11:00:20.000+09:00",
+                        "backend_connection_status": "connected",
+                        "outbox_queue_depth": 3,
+                        "last_ack_seq": 7,
+                    }
+                ),
+                "2026-04-12T11:00:20.000+09:00",
+                "2026-04-12T11:00:20.100+09:00",
+                "2026-04-12T11:00:20.100+09:00",
+            ),
+        )
+        db_conn.execute(
+            """
+            INSERT INTO latest_states (
+                id, view_node_id, target_id, state_type, status, severity,
+                state_json, occurred_at, received_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                12,
+                101,
+                "agent_local:host",
+                "host",
+                "up",
+                "normal",
+                json.dumps(
+                    {
+                        "hostname": "host-alpha",
+                        "cpu_usage": 18.4,
+                        "loadavg_1": 0.24,
+                        "loadavg_5": 0.31,
+                        "memory_total": 16777216,
+                        "memory_used": 10485760,
+                    }
+                ),
+                "2026-04-12T11:00:25.000+09:00",
+                "2026-04-12T11:00:25.100+09:00",
+                "2026-04-12T11:00:25.100+09:00",
             ),
         )
         db_conn.execute(
@@ -188,6 +245,20 @@ def seed_admin_dashboard_rows(app) -> None:
                 "2026-04-12T11:03:10.200+09:00",
             ),
         )
+        db_conn.execute(
+            """
+            INSERT INTO cleanup_runs (
+                started_at, finished_at, raw_events_deleted, debug_payload_logs_deleted, ingest_inbox_deleted
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-04-12T10:50:00.000+09:00",
+                "2026-04-12T10:50:05.000+09:00",
+                2,
+                1,
+                1,
+            ),
+        )
         db_conn.commit()
 
 
@@ -207,6 +278,7 @@ def test_admin_summary_requires_admin_role(seeded_app, seeded_client) -> None:
 
 def test_admin_summary_returns_counts_and_recent_failures(seeded_app, seeded_client) -> None:
     seed_admin_dashboard_rows(seeded_app)
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-12T11:01:10.000+09:00")
     login(seeded_client)
 
     response = seeded_client.get("/api/admin/summary")
@@ -220,9 +292,10 @@ def test_admin_summary_returns_counts_and_recent_failures(seeded_app, seeded_cli
         "views": 1,
         "view_nodes": 3,
         "view_edges": 1,
-        "latest_states": 1,
+        "latest_states": 3,
         "raw_events": 2,
         "debug_payload_logs": 2,
+        "cleanup_runs": 1,
     }
     assert payload["ingest_inbox"]["status_counts"] == {
         "failed": 1,
@@ -232,6 +305,17 @@ def test_admin_summary_returns_counts_and_recent_failures(seeded_app, seeded_cli
     }
     assert len(payload["ingest_inbox"]["recent_failed"]) == 1
     assert payload["ingest_inbox"]["recent_failed"][0]["error_message"] == "json parse error"
+    assert payload["runtime"]["state_type_counts"] == {"agent": 1, "host": 1, "process": 1}
+    assert payload["runtime"]["status_counts"]["down"] == 1
+    assert payload["runtime"]["stale_agent_count"] == 1
+    assert payload["stale_agents"][0]["target_id"] == "agent_local"
+    assert payload["retention_policy"] == {
+        "raw_events_days": 7,
+        "debug_payload_hours": 24,
+        "ingest_inbox_days": 7,
+    }
+    assert payload["last_cleanup"]["raw_events_deleted"] == 2
+    assert payload["last_cleanup"]["debug_payload_logs_deleted"] == 1
 
 
 def test_admin_ingest_inbox_filters_status_and_limit(seeded_app, seeded_client) -> None:
@@ -271,3 +355,30 @@ def test_admin_debug_payloads_support_filters(seeded_app, seeded_client) -> None
     assert payload["items"][0]["direction"] == "response"
     assert payload["items"][0]["username"] == "admin"
     assert payload["items"][0]["payload"]["ack_seq"] == 4
+
+
+def test_admin_latest_states_support_filters_and_derived_status(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-12T11:01:10.000+09:00")
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/latest-states?state_type=agent&status=down")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["target_id"] == "agent_local"
+    assert payload["items"][0]["state"]["heartbeat_timeout_level"] == "down"
+
+
+def test_admin_cleanup_runs_returns_recent_history(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/cleanup-runs?limit=1")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["raw_events_deleted"] == 2
+    assert payload["items"][0]["debug_payload_logs_deleted"] == 1
