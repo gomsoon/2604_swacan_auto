@@ -12,6 +12,140 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS metamodel_namespaces (
+    id INTEGER PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    description TEXT,
+    is_system INTEGER NOT NULL DEFAULT 0 CHECK (is_system IN (0, 1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS metamodel_versions (
+    id INTEGER PRIMARY KEY,
+    namespace_id INTEGER NOT NULL,
+    version_code TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('draft', 'published', 'deprecated')),
+    description TEXT,
+    based_on_version_id INTEGER,
+    published_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (namespace_id) REFERENCES metamodel_namespaces(id) ON DELETE CASCADE,
+    FOREIGN KEY (based_on_version_id) REFERENCES metamodel_versions(id),
+    UNIQUE (namespace_id, version_code)
+);
+
+CREATE TABLE IF NOT EXISTS semantic_types (
+    id INTEGER PRIMARY KEY,
+    metamodel_version_id INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    description TEXT,
+    kind TEXT NOT NULL CHECK (kind IN ('node', 'edge', 'container', 'runtime-only')),
+    runtime_kind TEXT,
+    is_groupable INTEGER NOT NULL DEFAULT 0 CHECK (is_groupable IN (0, 1)),
+    allows_runtime_binding INTEGER NOT NULL DEFAULT 1 CHECK (allows_runtime_binding IN (0, 1)),
+    default_notation_id INTEGER,
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (metamodel_version_id) REFERENCES metamodel_versions(id) ON DELETE CASCADE,
+    UNIQUE (metamodel_version_id, code)
+);
+
+CREATE TABLE IF NOT EXISTS property_definitions (
+    id INTEGER PRIMARY KEY,
+    semantic_type_id INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    description TEXT,
+    value_type TEXT NOT NULL CHECK (value_type IN ('string', 'integer', 'number', 'boolean', 'enum', 'json')),
+    unit TEXT,
+    default_value_json TEXT,
+    is_required INTEGER NOT NULL DEFAULT 0 CHECK (is_required IN (0, 1)),
+    is_runtime INTEGER NOT NULL DEFAULT 0 CHECK (is_runtime IN (0, 1)),
+    is_user_editable INTEGER NOT NULL DEFAULT 1 CHECK (is_user_editable IN (0, 1)),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (semantic_type_id) REFERENCES semantic_types(id) ON DELETE CASCADE,
+    UNIQUE (semantic_type_id, code)
+);
+
+CREATE TABLE IF NOT EXISTS association_definitions (
+    id INTEGER PRIMARY KEY,
+    metamodel_version_id INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    description TEXT,
+    source_type_id INTEGER NOT NULL,
+    target_type_id INTEGER NOT NULL,
+    direction TEXT NOT NULL CHECK (direction IN ('directed', 'undirected')),
+    multiplicity_source TEXT,
+    multiplicity_target TEXT,
+    semantics_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (metamodel_version_id) REFERENCES metamodel_versions(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_type_id) REFERENCES semantic_types(id) ON DELETE CASCADE,
+    FOREIGN KEY (target_type_id) REFERENCES semantic_types(id) ON DELETE CASCADE,
+    UNIQUE (metamodel_version_id, code)
+);
+
+CREATE TABLE IF NOT EXISTS containment_rules (
+    id INTEGER PRIMARY KEY,
+    metamodel_version_id INTEGER NOT NULL,
+    parent_type_id INTEGER NOT NULL,
+    child_type_id INTEGER NOT NULL,
+    min_count INTEGER,
+    max_count INTEGER,
+    cardinality_scope TEXT NOT NULL DEFAULT 'group_total'
+        CHECK (cardinality_scope IN ('group_total', 'per_member')),
+    is_required INTEGER NOT NULL DEFAULT 0 CHECK (is_required IN (0, 1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (metamodel_version_id) REFERENCES metamodel_versions(id) ON DELETE CASCADE,
+    FOREIGN KEY (parent_type_id) REFERENCES semantic_types(id) ON DELETE CASCADE,
+    FOREIGN KEY (child_type_id) REFERENCES semantic_types(id) ON DELETE CASCADE,
+    UNIQUE (metamodel_version_id, parent_type_id, child_type_id)
+);
+
+CREATE TABLE IF NOT EXISTS palette_groups (
+    id INTEGER PRIMARY KEY,
+    metamodel_version_id INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    label TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (metamodel_version_id) REFERENCES metamodel_versions(id) ON DELETE CASCADE,
+    UNIQUE (metamodel_version_id, code)
+);
+
+CREATE TABLE IF NOT EXISTS notation_definitions (
+    id INTEGER PRIMARY KEY,
+    metamodel_version_id INTEGER NOT NULL,
+    semantic_type_id INTEGER NOT NULL,
+    palette_group_id INTEGER,
+    code TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('node', 'edge')),
+    render_primitive TEXT NOT NULL CHECK (render_primitive IN ('rect', 'rounded_rect', 'line', 'badge', 'label')),
+    render_schema_json TEXT NOT NULL,
+    style_tokens_json TEXT,
+    is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1)),
+    is_visible_in_palette INTEGER NOT NULL DEFAULT 1 CHECK (is_visible_in_palette IN (0, 1)),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (metamodel_version_id) REFERENCES metamodel_versions(id) ON DELETE CASCADE,
+    FOREIGN KEY (semantic_type_id) REFERENCES semantic_types(id) ON DELETE CASCADE,
+    FOREIGN KEY (palette_group_id) REFERENCES palette_groups(id),
+    UNIQUE (metamodel_version_id, code)
+);
+
 CREATE TABLE IF NOT EXISTS views (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
@@ -143,6 +277,27 @@ CREATE TABLE IF NOT EXISTS cleanup_runs (
 
 CREATE INDEX IF NOT EXISTS idx_views_owner_updated
     ON views(owner_user_id, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_metamodel_versions_namespace_status
+    ON metamodel_versions(namespace_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_semantic_types_version_code
+    ON semantic_types(metamodel_version_id, code);
+
+CREATE INDEX IF NOT EXISTS idx_property_definitions_type_sort
+    ON property_definitions(semantic_type_id, sort_order, id);
+
+CREATE INDEX IF NOT EXISTS idx_association_definitions_version_code
+    ON association_definitions(metamodel_version_id, code);
+
+CREATE INDEX IF NOT EXISTS idx_containment_rules_version_parent
+    ON containment_rules(metamodel_version_id, parent_type_id, child_type_id);
+
+CREATE INDEX IF NOT EXISTS idx_palette_groups_version_sort
+    ON palette_groups(metamodel_version_id, sort_order, id);
+
+CREATE INDEX IF NOT EXISTS idx_notation_definitions_version_type_sort
+    ON notation_definitions(metamodel_version_id, semantic_type_id, sort_order, id);
 
 CREATE INDEX IF NOT EXISTS idx_view_nodes_view_id
     ON view_nodes(view_id);

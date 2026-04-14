@@ -18,6 +18,561 @@ INSERT INTO users (
     '2026-04-12T10:00:00.000+09:00'
 );
 
+INSERT INTO metamodel_namespaces (
+    id,
+    code,
+    name,
+    description,
+    is_system,
+    created_at,
+    updated_at
+) VALUES (
+    1,
+    'core',
+    'Core',
+    'Core metamodel namespace for MVP and minimal E2E',
+    1,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+);
+
+INSERT INTO metamodel_versions (
+    id,
+    namespace_id,
+    version_code,
+    status,
+    description,
+    based_on_version_id,
+    published_at,
+    created_at,
+    updated_at
+) VALUES (
+    1,
+    1,
+    'seed-v1',
+    'published',
+    'Seed metamodel for current MVP baseline',
+    NULL,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+);
+
+INSERT INTO palette_groups (
+    id,
+    metamodel_version_id,
+    code,
+    label,
+    sort_order,
+    created_at,
+    updated_at
+) VALUES
+(
+    1,
+    1,
+    'servers',
+    'Servers',
+    10,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    2,
+    1,
+    'processes',
+    'Processes',
+    20,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    3,
+    1,
+    'monitoring',
+    'Monitoring',
+    30,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    4,
+    1,
+    'communication',
+    'Communication',
+    40,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+);
+
+INSERT INTO semantic_types (
+    id,
+    metamodel_version_id,
+    code,
+    display_name,
+    description,
+    kind,
+    runtime_kind,
+    is_groupable,
+    allows_runtime_binding,
+    default_notation_id,
+    is_active,
+    created_at,
+    updated_at
+) VALUES
+(
+    101,
+    1,
+    'PhysicalServer',
+    'Physical Server',
+    'Physical execution host',
+    'node',
+    'host',
+    1,
+    1,
+    NULL,
+    1,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    102,
+    1,
+    'VirtualMachine',
+    'Virtual Machine',
+    'Logical server instance running inside a physical host',
+    'node',
+    'host',
+    1,
+    1,
+    NULL,
+    1,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    103,
+    1,
+    'SoftwareProcess',
+    'Software Process',
+    'Logical software process or process group',
+    'node',
+    'process',
+    1,
+    1,
+    NULL,
+    1,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    104,
+    1,
+    'MonitoringAgent',
+    'Monitoring Agent',
+    'Non-invasive monitoring agent running as a process-like component',
+    'node',
+    'agent',
+    0,
+    1,
+    NULL,
+    1,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    105,
+    1,
+    'CommunicationLink',
+    'Communication Link',
+    'Connection or communication edge between components',
+    'edge',
+    NULL,
+    0,
+    0,
+    NULL,
+    1,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+);
+
+INSERT INTO property_definitions (
+    id,
+    semantic_type_id,
+    code,
+    display_name,
+    description,
+    value_type,
+    unit,
+    default_value_json,
+    is_required,
+    is_runtime,
+    is_user_editable,
+    sort_order,
+    created_at,
+    updated_at
+) VALUES
+(
+    1001,
+    101,
+    'display_name',
+    'Display Name',
+    'User visible node label',
+    'string',
+    NULL,
+    NULL,
+    1,
+    0,
+    1,
+    10,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    1002,
+    101,
+    'target_id',
+    'Target ID',
+    'Runtime binding identifier',
+    'string',
+    NULL,
+    NULL,
+    0,
+    0,
+    1,
+    20,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    1003,
+    103,
+    'display_name',
+    'Display Name',
+    'User visible node label',
+    'string',
+    NULL,
+    NULL,
+    1,
+    0,
+    1,
+    10,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    1004,
+    103,
+    'target_id',
+    'Target ID',
+    'Runtime binding identifier',
+    'string',
+    NULL,
+    NULL,
+    0,
+    0,
+    1,
+    20,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    1005,
+    104,
+    'display_name',
+    'Display Name',
+    'User visible node label',
+    'string',
+    NULL,
+    NULL,
+    1,
+    0,
+    1,
+    10,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    1006,
+    104,
+    'target_id',
+    'Target ID',
+    'Runtime binding identifier',
+    'string',
+    NULL,
+    NULL,
+    0,
+    0,
+    1,
+    20,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    1007,
+    104,
+    'backend_connection_status',
+    'Backend Connection Status',
+    'Agent runtime connection status',
+    'string',
+    NULL,
+    NULL,
+    0,
+    1,
+    0,
+    30,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    1008,
+    105,
+    'label',
+    'Label',
+    'Edge label',
+    'string',
+    NULL,
+    NULL,
+    0,
+    0,
+    1,
+    10,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+);
+
+INSERT INTO association_definitions (
+    id,
+    metamodel_version_id,
+    code,
+    display_name,
+    description,
+    source_type_id,
+    target_type_id,
+    direction,
+    multiplicity_source,
+    multiplicity_target,
+    semantics_json,
+    created_at,
+    updated_at
+) VALUES
+(
+    2001,
+    1,
+    'communicates_with',
+    'Communicates With',
+    'Communication relationship between software components',
+    103,
+    103,
+    'directed',
+    '1',
+    '0..n',
+    '{"default_edge_type":"CommunicationLink"}',
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    2002,
+    1,
+    'monitors',
+    'Monitors',
+    'Monitoring agent observes runtime state of a process',
+    104,
+    103,
+    'directed',
+    '1',
+    '0..n',
+    '{"default_edge_type":"CommunicationLink"}',
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+);
+
+INSERT INTO containment_rules (
+    id,
+    metamodel_version_id,
+    parent_type_id,
+    child_type_id,
+    min_count,
+    max_count,
+    cardinality_scope,
+    is_required,
+    created_at,
+    updated_at
+) VALUES
+(
+    3001,
+    1,
+    101,
+    102,
+    0,
+    NULL,
+    'group_total',
+    0,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    3002,
+    1,
+    101,
+    103,
+    0,
+    NULL,
+    'group_total',
+    0,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    3003,
+    1,
+    101,
+    104,
+    0,
+    NULL,
+    'group_total',
+    0,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    3004,
+    1,
+    102,
+    103,
+    0,
+    NULL,
+    'group_total',
+    0,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    3005,
+    1,
+    102,
+    104,
+    0,
+    NULL,
+    'group_total',
+    0,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+);
+
+INSERT INTO notation_definitions (
+    id,
+    metamodel_version_id,
+    semantic_type_id,
+    palette_group_id,
+    code,
+    display_name,
+    kind,
+    render_primitive,
+    render_schema_json,
+    style_tokens_json,
+    is_default,
+    is_visible_in_palette,
+    sort_order,
+    created_at,
+    updated_at
+) VALUES
+(
+    4001,
+    1,
+    101,
+    1,
+    'server.physical.rect',
+    'Physical Server',
+    'node',
+    'rect',
+    '{"primitive":"rect","default_size":{"width":520,"height":280},"label_slots":[{"code":"title","source":"display_name"}],"anchors":["top","right","bottom","left"],"interaction":{"draggable":true,"resizable":true}}',
+    '{"fill":"server-fill","stroke":"server-stroke","label":"server-label"}',
+    1,
+    1,
+    10,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    4002,
+    1,
+    102,
+    1,
+    'vm.logical.rect',
+    'Virtual Machine',
+    'node',
+    'rect',
+    '{"primitive":"rect","default_size":{"width":360,"height":220},"label_slots":[{"code":"title","source":"display_name"}],"anchors":["top","right","bottom","left"],"modifiers":{"dashed_border":true},"interaction":{"draggable":true,"resizable":true}}',
+    '{"fill":"vm-fill","stroke":"vm-stroke","label":"vm-label"}',
+    1,
+    1,
+    20,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    4003,
+    1,
+    103,
+    2,
+    'process.rounded_rect',
+    'Software Process',
+    'node',
+    'rounded_rect',
+    '{"primitive":"rounded_rect","default_size":{"width":180,"height":72},"label_slots":[{"code":"title","source":"display_name"}],"anchors":["top","right","bottom","left"],"interaction":{"draggable":true,"resizable":true}}',
+    '{"fill":"process-fill","stroke":"process-stroke","label":"process-label"}',
+    1,
+    1,
+    10,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    4004,
+    1,
+    104,
+    3,
+    'agent.rounded_rect.double_border',
+    'Monitoring Agent',
+    'node',
+    'rounded_rect',
+    '{"primitive":"rounded_rect","default_size":{"width":180,"height":72},"label_slots":[{"code":"title","source":"display_name"}],"badge_slots":[{"code":"status","source":"runtime.status"}],"anchors":["top","right","bottom","left"],"modifiers":{"double_border":true},"interaction":{"draggable":true,"resizable":true}}',
+    '{"fill":"agent-fill","stroke":"agent-stroke","label":"agent-label"}',
+    1,
+    1,
+    10,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
+    4005,
+    1,
+    105,
+    4,
+    'communication.line',
+    'Communication Link',
+    'edge',
+    'line',
+    '{"primitive":"line","anchors":["top","right","bottom","left"],"label_slots":[{"code":"title","source":"label"}]}',
+    '{"stroke":"edge-stroke","label":"edge-label"}',
+    1,
+    1,
+    10,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+);
+
+UPDATE semantic_types
+SET default_notation_id = CASE id
+    WHEN 101 THEN 4001
+    WHEN 102 THEN 4002
+    WHEN 103 THEN 4003
+    WHEN 104 THEN 4004
+    WHEN 105 THEN 4005
+    ELSE default_notation_id
+END
+WHERE id IN (101, 102, 103, 104, 105);
+
 INSERT INTO views (
     id,
     name,
