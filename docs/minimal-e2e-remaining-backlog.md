@@ -29,7 +29,7 @@
 - `A-02 process 상태 전이 event 생성` 완료
 - `A-03 retry/backoff 실동작 보강` 완료
 - `A-06 대규모 process 환경 discovery 최적화` 1차 완료
-- `A-05 SSH 기반 Linux agent 테스트 실행 골격` 1차 완료
+- `A-05 SSH 기반 Linux agent 테스트 실행 골격` 완료
 - `B-01 worker loop/service화` 1차 완료
 
 ### A-04 실행 운영 보조
@@ -45,7 +45,7 @@
 ### B-02 duplicate/idempotency 보강
 
 - 우선순위: `최우선`
-- 설명: agent 재전송이 발생해도 `(agent_id, boot_id, seq)` 기준으로 중복 반영을 방지해야 한다.
+- 설명: agent 재전송이 발생해도 `(agent_id, boot_id, seq)` 기준으로 중복 반영을 방지해야 한다. 현재 `receipt batch` 기준 중복 수신 방지는 1차 반영되었고, 남은 범위는 worker 처리 결과 기준의 idempotency 보강이다.
 - 완료 기준:
 - 동일 batch 재전송 시 latest state/raw event 가 중복 반영되지 않아야 한다.
 - 테스트 기준: duplicate ingest 테스트
@@ -107,10 +107,12 @@
 
 - 우선순위: `최우선`
 - 설명: Linux 에서 dummy target process 를 띄우고, `발견 -> snapshot -> 전송 -> 종료 감지 -> event -> 재시작` 흐름을 실제로 검증한다.
+- 현재 상태:
+- 2026-04-14 기준 SSH 기반 자동화 smoke test 1회 성공 후, 동일 시나리오 3회 반복 재실행도 모두 성공했다.
 - 완료 기준:
-- 최소 1회 이상 end-to-end 성공 증적이 있어야 한다.
-- 가능하면 동일 시나리오를 3회 반복해도 안정적으로 성공해야 한다.
-- SSH 기반 자동화가 가능하다면 Windows 테스트 러너에서 원격 agent 기동/종료까지 포함한 시나리오로 남겨야 한다.
+- 최소 1회 이상 end-to-end 성공 증적이 있어야 한다. 완료
+- 가능하면 동일 시나리오를 3회 반복해도 안정적으로 성공해야 한다. 완료
+- SSH 기반 자동화가 가능하다면 Windows 테스트 러너에서 원격 agent 기동/종료까지 포함한 시나리오로 남겨야 한다. 완료
 
 ### L-02 운영 증적 정리
 
@@ -121,14 +123,14 @@
 
 ## 7. 지금 바로 이어서 할 작업
 
-1. `L-01 Linux 실제 통합 시나리오`
+1. `F-01 실제 agent 결과 기반 monitoring 최종 점검`
 2. `B-02 duplicate/idempotency 보강`
-3. `F-01 실제 agent 결과 기반 monitoring 최종 점검`
-4. `A-04 실행 운영 보조`
-5. `B-03 batch 처리 원자성/rollback 정책`
+3. `A-04 실행 운영 보조`
+4. `B-03 batch 처리 원자성/rollback 정책`
+5. `L-02 운영 증적 정리`
 
 ## 8. 요약
 
-- frontend 는 minimal E2E 관점에서 큰 뼈대가 거의 닫혔다.
+- frontend 는 minimal E2E 관점에서 큰 뼈대가 거의 닫혔고, 다음 초점은 실제 agent 결과를 자연스럽게 보여주는 최종 점검이다.
 - backend 는 안정성 보강 항목이 남아 있고, 특히 duplicate 처리와 worker 정책이 중요하다.
-- agent 는 현재 가장 중요한 남은 축이며, 실제 실행 흐름 완성과 Linux 통합 검증이 minimal E2E 완료의 핵심이다.
+- agent 는 실제 Linux 서버 기반 L-01 통합 시나리오를 3회 반복 성공한 상태이며, 이제 운영 보조와 product 방향 보강이 남아 있다.

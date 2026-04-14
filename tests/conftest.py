@@ -2,7 +2,7 @@
 
 import socket
 import threading
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
 from uuid import uuid4
 
@@ -35,16 +35,20 @@ class LiveServerThread(threading.Thread):
         self._server.shutdown()
 
 
-def _build_app(db_name: str, include_seed: bool):
+def _build_app(db_name: str, include_seed: bool, extra_config: dict | None = None):
     db_path = ARTIFACTS_DIR / db_name
     if db_path.exists():
         db_path.unlink()
 
+    app_config = {
+        "TESTING": True,
+        "DATABASE": str(db_path),
+    }
+    if extra_config:
+        app_config.update(extra_config)
+
     app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE": str(db_path),
-        }
+        app_config
     )
 
     with app.app_context():
@@ -58,6 +62,12 @@ def _find_free_port() -> int:
         sock.bind(("127.0.0.1", 0))
         sock.listen(1)
         return int(sock.getsockname()[1])
+
+
+def _detect_local_ip_for_remote(remote_host: str) -> str:
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_DGRAM)) as sock:
+        sock.connect((remote_host, 1))
+        return str(sock.getsockname()[0])
 
 
 @pytest.fixture()
@@ -133,6 +143,32 @@ def live_server(seeded_app):
     finally:
         server_thread.shutdown()
         server_thread.join(timeout=5)
+
+
+@pytest.fixture()
+def network_live_server():
+    @contextmanager
+    def _start(remote_host: str, *, app_config: dict | None = None):
+        app, db_path = _build_app(
+            f"network_seeded_{uuid4().hex}.sqlite3",
+            include_seed=True,
+            extra_config=app_config,
+        )
+        host = "0.0.0.0"
+        port = _find_free_port()
+        server_thread = LiveServerThread(app, host, port)
+        server_thread.start()
+        endpoint_host = _detect_local_ip_for_remote(remote_host)
+
+        try:
+            yield f"http://{endpoint_host}:{port}", app, db_path
+        finally:
+            server_thread.shutdown()
+            server_thread.join(timeout=5)
+            if db_path.exists():
+                db_path.unlink()
+
+    return _start
 
 
 @pytest.fixture()

@@ -30,15 +30,16 @@ def test_linux_agent_ssh_config_reads_defaults_from_env() -> None:
         {
             "LINUX_AGENT_SSH_HOST": "192.0.2.10",
             "LINUX_AGENT_SSH_USER": "tester",
-            "LINUX_AGENT_REMOTE_REPO_DIR": "/opt/swacan",
+            "LINUX_AGENT_SSH_PASSWORD": "secret",
         }
     )
 
     assert config.host == "192.0.2.10"
     assert config.user == "tester"
     assert config.port == 22
+    assert config.password == "secret"
     assert config.remote_work_base_dir == "/tmp/swacan_agent_tests"
-    assert config.remote_python == "python3"
+    assert config.remote_python == "auto"
     assert config.backend_endpoint == "http://127.0.0.1:9/api/agents/ingest"
 
 
@@ -57,7 +58,7 @@ def test_linux_agent_ssh_session_prepare_start_stop_and_collect(tmp_path: Path) 
         host="192.0.2.10",
         user="tester",
         port=22,
-        remote_repo_dir="/opt/swacan",
+        password="secret",
         remote_work_base_dir="/tmp/swacan_agent_tests",
         remote_python="python3",
         backend_endpoint="http://127.0.0.1:9/api/agents/ingest",
@@ -89,3 +90,33 @@ def test_linux_agent_ssh_session_prepare_start_stop_and_collect(tmp_path: Path) 
     assert any("kill" in " ".join(call[0]) for call in runner.calls)
     assert any("rm -rf" in " ".join(call[0]) for call in runner.calls)
     assert (tmp_path / "artifacts" / "agent.toml") in artifacts
+
+
+def test_linux_agent_ssh_session_resolves_newer_python_before_python3() -> None:
+    config = LinuxAgentSshConfig(
+        host="192.0.2.10",
+        user="tester",
+        port=22,
+        password="secret",
+        remote_work_base_dir="/tmp/swacan_agent_tests",
+        remote_python="auto",
+        backend_endpoint="http://127.0.0.1:9/api/agents/ingest",
+    )
+
+    responses = {
+        "command -v /usr/bin/python3.12 >/dev/null 2>&1 && echo /usr/bin/python3.12": "",
+        "command -v /usr/bin/python3.11 >/dev/null 2>&1 && echo /usr/bin/python3.11": "/usr/bin/python3.11\n",
+    }
+
+    class PythonRunner(FakeRunner):
+        def __call__(self, args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+            self.calls.append((args, check))
+            remote_command = args[-1]
+            if remote_command in responses:
+                return subprocess.CompletedProcess(args, 0, stdout=responses[remote_command], stderr="")
+            return super().__call__(args, check=check)
+
+    runner = PythonRunner()
+    session = LinuxAgentSshSession(config, runner=runner)
+
+    assert session.resolve_remote_python() == "/usr/bin/python3.11"
