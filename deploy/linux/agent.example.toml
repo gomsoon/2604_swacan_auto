@@ -1,0 +1,29 @@
+[agent]
+agent_id = "agent_prod_01"
+token = "replace-with-real-token"
+debug_mode = false
+
+[backend]
+endpoint = "https://backend.example.com/api/agents/ingest"
+
+[storage]
+database_path = "/opt/swacan-agent/agent.sqlite3"
+keep_acked_rows = 500
+cleanup_batch_size = 250
+pending_warning_rows = 1000
+
+[intervals]
+heartbeat_seconds = 5
+snapshot_seconds = 5
+flush_seconds = 5
+retry_backoff_seconds = 10
+
+[[targets]]
+target_id = "apache_httpd"
+mode = "multi"
+process_name = "httpd"
+
+[[targets]]
+target_id = "app_main"
+mode = "single"
+command_line_regex = "python.*app.py"
