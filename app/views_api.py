@@ -8,6 +8,7 @@ from flask import Blueprint, g, request
 
 from .auth import error_response, login_required
 from .db import get_db
+from .runtime_state import derive_latest_state
 
 bp = Blueprint("views_api", __name__, url_prefix="/api/views")
 
@@ -72,18 +73,6 @@ def serialize_edge(edge_row) -> dict[str, Any]:
     if edge_row["style_json"]:
         payload["style"] = json.loads(edge_row["style_json"])
     return payload
-
-
-def serialize_latest_state(state_row) -> dict[str, Any]:
-    return {
-        "target_id": state_row["target_id"],
-        "state_type": state_row["state_type"],
-        "status": state_row["status"],
-        "severity": state_row["severity"],
-        "occurred_at": state_row["occurred_at"],
-        "received_at": state_row["received_at"],
-        "state": json.loads(state_row["state_json"]),
-    }
 
 
 def serialize_raw_event(event_row) -> dict[str, Any]:
@@ -354,7 +343,7 @@ def get_latest_state(view_id: int):
     order = {target_id: index for index, target_id in enumerate(target_ids)}
     sorted_rows = sorted(rows, key=lambda row: (order.get(row["target_id"], 10**9), row["state_type"]))
 
-    return {"items": [serialize_latest_state(row) for row in sorted_rows]}
+    return {"items": [derive_latest_state(row) for row in sorted_rows]}
 
 
 @bp.get("/<int:view_id>/events")

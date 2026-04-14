@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from urllib import request
 
 from playwright.sync_api import Page, expect
@@ -40,6 +41,7 @@ def post_ingest(base_url: str, payload: dict) -> None:
 
 def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     base_url, seeded_app = live_server
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-12T20:10:05.000+09:00")
 
     browser_login(page, base_url)
 

@@ -51,16 +51,18 @@
 - `B-01 worker loop/service 1차` 완료
 - `B-02 duplicate/idempotency 보강` 완료
 - `B-03 batch transaction/rollback 1차` 완료
+- `B-04 agent heartbeat timeout/stale 처리 1차` 완료
+  - latest-state API가 agent heartbeat age를 계산해 `warning/down` 상태를 파생시킨다.
+  - monitoring UI에서 MonitoringAgent self-state에 timeout 결과가 바로 반영된다.
 
-### B-04 agent heartbeat timeout/stale 처리
+### B-04 후속 보강
 
-- 우선순위: `높음`
-- 설명: agent self-state가 더 이상 들어오지 않을 때 backend가 stale 또는 heartbeat lost 상태를 판단해야 한다.
+- 우선순위: `중간`
+- 설명: 현재는 read-time stale 파생만 구현되어 있으므로, 후속으로 `agent_heartbeat_lost` event 생성과 admin 화면 반영을 보강한다.
 - 완료 기준:
-  - heartbeat 기준 시각을 넘기면 agent latest state가 warning 또는 down으로 전이되어야 한다.
-  - 필요 시 `agent_heartbeat_lost` event가 raw event에 기록되어야 한다.
-  - monitoring/admin 화면에서 stale 상태가 구분되어 보여야 한다.
-- 테스트 기준: timeout/stale 테스트
+  - stale 감지 결과를 raw event 또는 운영 요약으로 남길 수 있어야 한다.
+  - admin 화면에서도 stale agent를 빠르게 확인할 수 있어야 한다.
+- 테스트 기준: timeout/stale 보강 테스트
 
 ### B-05 retention/cleanup 보강
 
@@ -114,9 +116,9 @@
 
 1. `A-04 실행 운영 보조`
 2. `L-02 운영 증적 정리`
-3. `B-04 agent heartbeat timeout/stale 처리`
-4. `B-05 retention/cleanup 보강`
-5. `F-03 관리자 화면 운영성 보강`
+3. `B-05 retention/cleanup 보강`
+4. `F-03 관리자 화면 운영성 보강`
+5. `B-04 후속 보강`
 
 ## 8. 요약
 

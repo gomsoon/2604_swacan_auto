@@ -15,6 +15,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         TESTING=False,
         AGENT_TOKENS={"agent_local": "dev-agent-token"},
         DEBUG_PAYLOAD_LOGGING=False,
+        AGENT_HEARTBEAT_WARNING_SECONDS=15,
+        AGENT_HEARTBEAT_DOWN_SECONDS=30,
     )
 
     if test_config is not None:

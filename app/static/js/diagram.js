@@ -60,6 +60,12 @@ function agentBadgeTextForNode(node, latestStatesByTargetId) {
     }
 
     const payload = state.state || {};
+    if (payload.heartbeat_timeout_level === "down") {
+        return "heartbeat 끊김";
+    }
+    if (payload.heartbeat_timeout_level === "warning") {
+        return "heartbeat 지연";
+    }
     const connection = payload.backend_connection_status || state.status || "unknown";
     const queueDepth = Number(payload.outbox_queue_depth);
     if (Number.isFinite(queueDepth) && queueDepth > 0) {

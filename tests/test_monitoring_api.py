@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 from app.db import get_db
 
@@ -140,6 +141,7 @@ def test_latest_state_requires_login(seeded_client) -> None:
 
 
 def test_latest_state_returns_only_view_targets_in_view_order(seeded_app, seeded_client) -> None:
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T10:20:05.000+09:00")
     seed_monitoring_rows(seeded_app)
     login(seeded_client)
 
@@ -150,6 +152,46 @@ def test_latest_state_returns_only_view_targets_in_view_order(seeded_app, seeded
     assert [item["target_id"] for item in payload["items"]] == ["app_main", "agent_local"]
     assert payload["items"][0]["state"]["pid"] == 1234
     assert payload["items"][1]["state"]["outbox_queue_depth"] == 0
+    assert payload["items"][1]["status"] == "up"
+    assert payload["items"][1]["state"]["heartbeat_timeout_level"] == "normal"
+
+
+def test_latest_state_marks_agent_warning_when_heartbeat_is_delayed(seeded_app, seeded_client) -> None:
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T10:20:20.000+09:00")
+    seeded_app.config["AGENT_HEARTBEAT_WARNING_SECONDS"] = 10
+    seeded_app.config["AGENT_HEARTBEAT_DOWN_SECONDS"] = 30
+    seed_monitoring_rows(seeded_app)
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/1/latest-state")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    agent_state = payload["items"][1]
+    assert agent_state["target_id"] == "agent_local"
+    assert agent_state["status"] == "warning"
+    assert agent_state["severity"] == "warning"
+    assert agent_state["state"]["heartbeat_timeout_level"] == "warning"
+    assert agent_state["state"]["heartbeat_timeout_message"] == "heartbeat delayed"
+
+
+def test_latest_state_marks_agent_down_when_heartbeat_times_out(seeded_app, seeded_client) -> None:
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T10:21:00.000+09:00")
+    seeded_app.config["AGENT_HEARTBEAT_WARNING_SECONDS"] = 10
+    seeded_app.config["AGENT_HEARTBEAT_DOWN_SECONDS"] = 30
+    seed_monitoring_rows(seeded_app)
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/1/latest-state")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    agent_state = payload["items"][1]
+    assert agent_state["target_id"] == "agent_local"
+    assert agent_state["status"] == "down"
+    assert agent_state["severity"] == "critical"
+    assert agent_state["state"]["heartbeat_timeout_level"] == "down"
+    assert agent_state["state"]["heartbeat_timeout_message"] == "heartbeat timeout"
 
 
 def test_events_returns_recent_items_filtered_by_view_targets(seeded_app, seeded_client) -> None:

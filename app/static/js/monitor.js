@@ -76,7 +76,12 @@ function runtimeLevel(stateRow) {
     if (stateRow.status === "warning" || stateRow.severity === "warning") {
         return "warning";
     }
-    if (stateRow.status === "up" || stateRow.status === "healthy" || stateRow.severity === "info" || stateRow.severity === "normal") {
+    if (
+        stateRow.status === "up" ||
+        stateRow.status === "healthy" ||
+        stateRow.severity === "info" ||
+        stateRow.severity === "normal"
+    ) {
         return "up";
     }
     return "neutral";
@@ -95,6 +100,23 @@ function renderDetailRows(rows) {
         .join("");
 }
 
+function formatHeartbeatAge(payload) {
+    if (payload.heartbeat_age_seconds === undefined) {
+        return "-";
+    }
+    return `${formatNumber(payload.heartbeat_age_seconds, 1)}초`;
+}
+
+function agentStatusText(payload, stateRow) {
+    if (payload.heartbeat_timeout_level === "down") {
+        return "heartbeat 끊김";
+    }
+    if (payload.heartbeat_timeout_level === "warning") {
+        return "heartbeat 지연";
+    }
+    return payload.backend_connection_status || stateRow?.status || "미수신";
+}
+
 function buildStateDetailRows(node, stateRow) {
     const payload = stateRow.state || {};
     const rows = [
@@ -110,6 +132,8 @@ function buildStateDetailRows(node, stateRow) {
     if (stateRow.state_type === "agent") {
         rows.push(
             { label: "백엔드 연결", value: payload.backend_connection_status || "-" },
+            { label: "heartbeat 상태", value: payload.heartbeat_timeout_level || "normal" },
+            { label: "heartbeat 경과", value: formatHeartbeatAge(payload) },
             { label: "outbox depth", value: formatNumber(payload.outbox_queue_depth, 0) },
             { label: "경고 임계치", value: formatNumber(payload.outbox_pending_warning_rows, 0) },
             { label: "last sent seq", value: formatNumber(payload.last_sent_seq, 0) },
@@ -179,10 +203,11 @@ function renderAgentSummary() {
             const stateRow = state.latestStates.find((item) => item.target_id === node.target_id);
             const payload = stateRow?.state || {};
             const level = runtimeLevel(stateRow);
-            const statusText = payload.backend_connection_status || stateRow?.status || "미수신";
+            const statusText = agentStatusText(payload, stateRow);
             const queueDepth = formatNumber(payload.outbox_queue_depth, 0);
             const lastAckSeq = formatNumber(payload.last_ack_seq, 0);
             const heartbeat = formatTimestamp(payload.heartbeat_time || stateRow?.occurred_at);
+            const heartbeatAge = formatHeartbeatAge(payload);
             const selectedClass = state.selectedNodeId === node.id ? " is-selected" : "";
 
             return `
@@ -195,7 +220,7 @@ function renderAgentSummary() {
                         <span>outbox ${escapeHtml(queueDepth)}</span>
                         <span>ack ${escapeHtml(lastAckSeq)}</span>
                     </div>
-                    <p class="agent-state-meta">최근 heartbeat ${escapeHtml(heartbeat)}</p>
+                    <p class="agent-state-meta">최근 heartbeat ${escapeHtml(heartbeat)} · 경과 ${escapeHtml(heartbeatAge)}</p>
                 </article>
             `;
         })
