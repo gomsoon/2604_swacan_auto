@@ -54,6 +54,9 @@
 - `B-04 agent heartbeat timeout/stale 처리 1차` 완료
   - latest-state API가 agent heartbeat age를 계산해 `warning/down` 상태를 파생시킨다.
   - monitoring UI에서 MonitoringAgent self-state에 timeout 결과가 바로 반영된다.
+- `B-05 retention/cleanup 1차` 완료
+  - raw event 1주, debug payload 24시간, processed/failed ingest inbox 1주 정리 함수와 CLI를 추가했다.
+  - processed inbox 삭제 시 item receipt도 함께 정리된다.
 
 ### B-04 후속 보강
 
@@ -64,14 +67,13 @@
   - admin 화면에서도 stale agent를 빠르게 확인할 수 있어야 한다.
 - 테스트 기준: timeout/stale 보강 테스트
 
-### B-05 retention/cleanup 보강
+### B-05 후속 보강
 
-- 우선순위: `높음`
-- 설명: ingest inbox, raw events, debug payload, latest state 정리 정책을 worker 또는 관리 작업으로 연결한다.
+- 우선순위: `중간`
+- 설명: 현재는 CLI 기반 cleanup 1차만 있으므로, 후속으로 worker 주기 작업 또는 관리 화면에서의 운영 연결을 보강한다.
 - 완료 기준:
-  - 최근 1주 보존 정책이 raw event/debug payload에 적용되어야 한다.
-  - 오래된 ingest inbox와 debug payload를 정리하는 cleanup 경로가 있어야 한다.
-  - cleanup 이후에도 최신 상태 조회는 깨지지 않아야 한다.
+  - cleanup이 worker 주기 작업 또는 관리 작업 흐름에 자연스럽게 연결되어야 한다.
+  - 필요 시 cleanup 실행 결과를 관리자 화면에서 확인할 수 있어야 한다.
 - 테스트 기준: retention cleanup 테스트
 
 ## 5. Frontend 남은 구현
@@ -116,12 +118,12 @@
 
 1. `A-04 실행 운영 보조`
 2. `L-02 운영 증적 정리`
-3. `B-05 retention/cleanup 보강`
-4. `F-03 관리자 화면 운영성 보강`
-5. `B-04 후속 보강`
+3. `F-03 관리자 화면 운영성 보강`
+4. `B-04 후속 보강`
+5. `B-05 후속 보강`
 
 ## 8. 요약
 
 - minimal E2E는 실제 Linux agent와 monitoring UI 확인까지 완료된 상태다.
-- 현재 남은 핵심은 “운영 안정성”과 “운영 문서화” 쪽이다.
-- 다음 단계는 agent 실행 운영 보조, 운영 증적 정리, heartbeat/stale, retention/cleanup을 먼저 닫는 것이 가장 자연스럽다.
+- 현재 남은 핵심은 “운영 문서화”, “운영 가시성”, “stale/cleanup 후속 연결” 쪽이다.
+- 다음 단계는 agent 실행 운영 보조, 운영 증적 정리, 관리자 화면 운영성 보강을 먼저 닫는 것이 가장 자연스럽다.

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from time import sleep
 
 import click
+from flask import current_app
 from flask.cli import with_appcontext
 
 from .db import get_db
@@ -36,8 +37,36 @@ class IngestWorkerRunSummary:
     processed_items: int
 
 
+@dataclass(frozen=True)
+class RetentionCleanupSummary:
+    raw_events_deleted: int
+    debug_payload_logs_deleted: int
+    ingest_inbox_deleted: int
+
+
 def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="milliseconds")
+
+
+def now_dt() -> datetime:
+    provider = current_app.config.get("CURRENT_TIME_PROVIDER")
+    if callable(provider):
+        value = provider()
+        if isinstance(value, datetime):
+            return value if value.tzinfo is not None else value.astimezone()
+    return datetime.now().astimezone()
+
+
+def is_older_than(timestamp: str | None, cutoff: datetime) -> bool:
+    if not timestamp:
+        return False
+    try:
+        parsed = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.astimezone()
+    return parsed < cutoff
 
 
 def resolve_view_node_id(target_id: str):
@@ -314,6 +343,74 @@ def process_pending_ingest(limit: int = 100) -> dict[str, int]:
     }
 
 
+def cleanup_runtime_data(
+    *,
+    current_time: datetime | None = None,
+    raw_event_retention_days: int | None = None,
+    debug_payload_retention_hours: int | None = None,
+    ingest_inbox_retention_days: int | None = None,
+) -> RetentionCleanupSummary:
+    db_conn = get_db()
+    now = current_time or now_dt()
+    raw_days = int(
+        raw_event_retention_days
+        if raw_event_retention_days is not None
+        else current_app.config.get("RAW_EVENT_RETENTION_DAYS", 7)
+    )
+    debug_hours = int(
+        debug_payload_retention_hours
+        if debug_payload_retention_hours is not None
+        else current_app.config.get("DEBUG_PAYLOAD_RETENTION_HOURS", 24)
+    )
+    inbox_days = int(
+        ingest_inbox_retention_days
+        if ingest_inbox_retention_days is not None
+        else current_app.config.get("INGEST_INBOX_RETENTION_DAYS", 7)
+    )
+
+    raw_cutoff = now - timedelta(days=raw_days)
+    debug_cutoff = now - timedelta(hours=debug_hours)
+    inbox_cutoff = now - timedelta(days=inbox_days)
+
+    raw_rows = db_conn.execute("SELECT id, occurred_at FROM raw_events").fetchall()
+    raw_delete_ids = [row["id"] for row in raw_rows if is_older_than(row["occurred_at"], raw_cutoff)]
+
+    debug_rows = db_conn.execute("SELECT id, occurred_at FROM debug_payload_logs").fetchall()
+    debug_delete_ids = [row["id"] for row in debug_rows if is_older_than(row["occurred_at"], debug_cutoff)]
+
+    inbox_rows = db_conn.execute(
+        """
+        SELECT id, status, received_at, processed_at
+        FROM ingest_inbox
+        WHERE status IN ('processed', 'failed')
+        """
+    ).fetchall()
+    inbox_delete_ids = []
+    for row in inbox_rows:
+        reference_time = row["processed_at"] or row["received_at"]
+        if is_older_than(reference_time, inbox_cutoff):
+            inbox_delete_ids.append(row["id"])
+
+    if raw_delete_ids:
+        placeholders = ", ".join("?" for _ in raw_delete_ids)
+        db_conn.execute(f"DELETE FROM raw_events WHERE id IN ({placeholders})", tuple(raw_delete_ids))
+
+    if debug_delete_ids:
+        placeholders = ", ".join("?" for _ in debug_delete_ids)
+        db_conn.execute(f"DELETE FROM debug_payload_logs WHERE id IN ({placeholders})", tuple(debug_delete_ids))
+
+    if inbox_delete_ids:
+        placeholders = ", ".join("?" for _ in inbox_delete_ids)
+        db_conn.execute(f"DELETE FROM ingest_inbox WHERE id IN ({placeholders})", tuple(inbox_delete_ids))
+
+    db_conn.commit()
+    return RetentionCleanupSummary(
+        raw_events_deleted=len(raw_delete_ids),
+        debug_payload_logs_deleted=len(debug_delete_ids),
+        ingest_inbox_deleted=len(inbox_delete_ids),
+    )
+
+
 class IngestWorkerLoop:
     def __init__(
         self,
@@ -414,6 +511,20 @@ def run_ingest_worker_command(
     )
 
 
+@click.command("cleanup-runtime-data")
+@with_appcontext
+def cleanup_runtime_data_command() -> None:
+    summary = cleanup_runtime_data()
+    click.echo(
+        "raw_events_deleted={0} debug_payload_logs_deleted={1} ingest_inbox_deleted={2}".format(
+            summary.raw_events_deleted,
+            summary.debug_payload_logs_deleted,
+            summary.ingest_inbox_deleted,
+        )
+    )
+
+
 def init_app(app) -> None:
     app.cli.add_command(process_ingest_command)
     app.cli.add_command(run_ingest_worker_command)
+    app.cli.add_command(cleanup_runtime_data_command)

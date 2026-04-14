@@ -17,6 +17,9 @@ def create_app(test_config: dict | None = None) -> Flask:
         DEBUG_PAYLOAD_LOGGING=False,
         AGENT_HEARTBEAT_WARNING_SECONDS=15,
         AGENT_HEARTBEAT_DOWN_SECONDS=30,
+        RAW_EVENT_RETENTION_DAYS=7,
+        DEBUG_PAYLOAD_RETENTION_HOURS=24,
+        INGEST_INBOX_RETENTION_DAYS=7,
     )
 
     if test_config is not None:
