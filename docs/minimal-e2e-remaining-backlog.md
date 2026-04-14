@@ -81,8 +81,10 @@
 
 - 우선순위: `높음`
 - 설명: simulated payload 가 아니라 실제 Linux agent 가 보낸 결과가 monitoring 화면에 자연스럽게 보이는지 점검하고 필요시 보정한다.
+- 현재 상태:
+- 2026-04-14 기준 실제 Linux SSH agent 결과를 monitoring UI 에 표시하는 browser integration test 가 추가되었고 통과했다.
 - 완료 기준:
-- process 상태 변화, event, MonitoringAgent 상태가 실제 agent 기준으로 보이는지 확인되어야 한다.
+- process 상태 변화, MonitoringAgent 상태, host 상태가 실제 agent 기준으로 보이는지 확인되어야 한다. 완료
 - 테스트 기준: Linux 통합 시나리오, Playwright 보조 확인
 
 ### F-02 MonitoringAgent/self-state 시각화 보강
@@ -123,14 +125,14 @@
 
 ## 7. 지금 바로 이어서 할 작업
 
-1. `F-01 실제 agent 결과 기반 monitoring 최종 점검`
-2. `B-02 duplicate/idempotency 보강`
-3. `A-04 실행 운영 보조`
-4. `B-03 batch 처리 원자성/rollback 정책`
+1. `B-02 duplicate/idempotency 보강`
+2. `A-04 실행 운영 보조`
+3. `B-03 batch 처리 원자성/rollback 정책`
+4. `F-02 MonitoringAgent/self-state 시각화 보강`
 5. `L-02 운영 증적 정리`
 
 ## 8. 요약
 
-- frontend 는 minimal E2E 관점에서 큰 뼈대가 거의 닫혔고, 다음 초점은 실제 agent 결과를 자연스럽게 보여주는 최종 점검이다.
+- frontend 는 minimal E2E 관점에서 실제 Linux agent 결과 기반 monitoring 확인까지 완료되었다.
 - backend 는 안정성 보강 항목이 남아 있고, 특히 duplicate 처리와 worker 정책이 중요하다.
 - agent 는 실제 Linux 서버 기반 L-01 통합 시나리오를 3회 반복 성공한 상태이며, 이제 운영 보조와 product 방향 보강이 남아 있다.

@@ -6,6 +6,7 @@ from urllib import request
 
 from playwright.sync_api import Page, expect
 
+from app.db import get_db
 from app.ingest_worker import process_pending_ingest
 
 
@@ -62,6 +63,8 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     page.get_by_role("button", name="에이전트 추가").click()
     expect(page.locator('g.diagram-node[data-node-type="MonitoringAgent"]')).to_have_count(1)
 
+    view_id = int(re.search(r"/views/(\d+)/edit$", page.url).group(1))
+
     process_shape = page.locator('g.diagram-node[data-node-type="SoftwareProcess"] .node-shape').first
     agent_shape = page.locator('g.diagram-node[data-node-type="MonitoringAgent"] .node-shape').first
 
@@ -76,16 +79,64 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     agent_shape.click(force=True)
     expect(page.locator("path.diagram-edge")).to_have_count(1)
 
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE view_nodes
+            SET display_name = ?, target_id = ?
+            WHERE view_id = ? AND node_type = 'PhysicalServer'
+            """,
+            ("Host Alpha", "agent_local:host", view_id),
+        )
+        db_conn.execute(
+            """
+            UPDATE view_nodes
+            SET display_name = ?, target_id = ?
+            WHERE view_id = ? AND node_type = 'MonitoringAgent'
+            """,
+            ("Agent Alpha", "agent_local", view_id),
+        )
+        db_conn.commit()
+
     post_ingest(
         base_url,
         {
             "agent_id": "agent_local",
             "boot_id": "boot-playwright",
             "seq_start": 1,
-            "seq_end": 2,
+            "seq_end": 4,
             "items": [
                 {
                     "seq": 1,
+                    "payload_type": "agent_state",
+                    "occurred_at": "2026-04-12T20:09:59.000+09:00",
+                    "target_id": "agent_local",
+                    "payload": {
+                        "heartbeat_time": "2026-04-12T20:09:59.000+09:00",
+                        "backend_connection_status": "connected",
+                        "outbox_queue_depth": 0,
+                        "last_ack_seq": 4,
+                    },
+                },
+                {
+                    "seq": 2,
+                    "payload_type": "host_snapshot",
+                    "occurred_at": "2026-04-12T20:09:59.000+09:00",
+                    "target_id": "agent_local:host",
+                    "payload": {
+                        "hostname": "host-alpha",
+                        "cpu_usage": 18.4,
+                        "loadavg_1": 0.24,
+                        "loadavg_5": 0.31,
+                        "loadavg_15": 0.4,
+                        "memory_total": 16777216,
+                        "memory_available": 6291456,
+                        "memory_used": 10485760,
+                    },
+                },
+                {
+                    "seq": 3,
                     "payload_type": "process_snapshot",
                     "occurred_at": "2026-04-12T20:10:00.000+09:00",
                     "target_id": process_target_id,
@@ -97,7 +148,7 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
                     },
                 },
                 {
-                    "seq": 2,
+                    "seq": 4,
                     "payload_type": "process_event",
                     "occurred_at": "2026-04-12T20:10:01.000+09:00",
                     "target_id": process_target_id,
@@ -120,11 +171,27 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     page.wait_for_url(re.compile(r".*/views/\d+/monitor$"))
     expect(page.get_by_role("heading", name="최근 이벤트")).to_be_visible()
 
+    monitor_server_node = page.locator('g.diagram-node[data-node-type="PhysicalServer"]').first
+    monitor_agent_shape = page.locator('g.diagram-node[data-node-type="MonitoringAgent"] .node-shape').first
     monitor_process_shape = page.locator('g.diagram-node[data-node-type="SoftwareProcess"] .node-shape').first
+
+    monitor_server_node.click(force=True, position={"x": 24, "y": 24})
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("Host Alpha")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("host-alpha")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("CPU 사용률")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("Load Average")
+
+    monitor_agent_shape.click(force=True)
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("Agent Alpha")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("connected")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("last ack seq")
+
     monitor_process_shape.click(force=True)
 
     expect(page.locator("#monitor-selection-summary")).to_contain_text("Worker Alpha")
-    expect(page.locator("#monitor-selection-summary")).to_contain_text("상태: up")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("프로세스 상태")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("최근 이벤트")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("process_started")
     expect(page.locator("#events-list")).to_contain_text("process_started")
     expect(page.locator("#events-list")).to_contain_text("Playwright process started")
 

@@ -33,6 +33,7 @@
 
 - 2026-04-14 기준 SSH 기반 smoke test 1회 성공
 - 동일 시나리오 3회 반복 재실행 성공
+- 실제 Linux agent 결과를 monitoring UI 에 표시하는 browser integration test 성공
 - 확인된 핵심 상태:
 - `agent_ssh_smoke / agent / up`
 - `agent_ssh_smoke:host / host / up`
