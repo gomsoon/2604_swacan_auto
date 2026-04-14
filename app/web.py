@@ -113,6 +113,6 @@ def monitor_page(view_id: int):
 def admin_page():
     return render_template(
         "admin.html",
-        page_title="???",
+        page_title="관리 화면",
         page_key="admin",
     )

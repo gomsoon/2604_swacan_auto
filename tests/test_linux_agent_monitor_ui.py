@@ -169,6 +169,11 @@ def test_linux_agent_results_visible_in_monitor_ui(page, linux_agent_ssh_session
             agent_shape = page.locator('g.diagram-node[data-node-type="MonitoringAgent"] .node-shape').first
             process_shape = page.locator('g.diagram-node[data-node-type="SoftwareProcess"] .node-shape').first
 
+            expect(page.locator("#monitor-agent-summary")).to_contain_text("Remote Agent")
+            expect(page.locator("#monitor-agent-summary")).to_contain_text("connected")
+            expect(page.locator("#monitor-agent-summary")).to_contain_text("outbox")
+            expect(page.locator("#monitor-agent-summary")).to_contain_text("ack")
+
             server_node.click(force=True, position={"x": 24, "y": 24})
             expect(page.locator("#monitor-selection-summary")).to_contain_text("Remote Host")
             expect(page.locator("#monitor-selection-summary")).to_contain_text("호스트명")

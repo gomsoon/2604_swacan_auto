@@ -410,6 +410,70 @@ a {
     gap: 12px;
 }
 
+.agent-state-list {
+    display: grid;
+    gap: 12px;
+}
+
+.agent-state-card {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 16px;
+    border: 1px solid var(--line);
+    background: var(--panel-strong);
+    cursor: pointer;
+}
+
+.agent-state-card.is-selected {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px rgba(22, 93, 91, 0.2);
+}
+
+.agent-state-card.state-up {
+    background: var(--ok-soft);
+}
+
+.agent-state-card.state-warning {
+    background: var(--warning-soft);
+}
+
+.agent-state-card.state-down {
+    background: var(--danger-soft);
+}
+
+.agent-state-header,
+.agent-state-metrics {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.agent-state-pill {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 0 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(64, 81, 98, 0.12);
+    font-size: 0.84rem;
+    color: var(--ink);
+}
+
+.agent-state-metrics {
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.agent-state-meta {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
 .event-item {
     padding: 14px;
     border-radius: 16px;
@@ -478,6 +542,18 @@ a {
     fill: var(--muted);
 }
 
+.diagram-node .node-badge-shape {
+    fill: rgba(255, 255, 255, 0.88);
+    stroke: rgba(64, 81, 98, 0.14);
+    stroke-width: 1;
+}
+
+.diagram-node .node-badge-text {
+    font-size: 10px;
+    font-weight: 700;
+    fill: var(--ink);
+}
+
 .diagram-node.is-selected .node-shape {
     stroke: var(--accent);
     stroke-width: 3;
@@ -504,6 +580,21 @@ a {
 .diagram-node.status-warning .node-shape,
 .diagram-node.status-up .node-shape {
     stroke-width: 2.4;
+}
+
+.diagram-node.status-up .node-badge-shape {
+    fill: rgba(255, 255, 255, 0.9);
+    stroke: rgba(31, 122, 70, 0.2);
+}
+
+.diagram-node.status-warning .node-badge-shape {
+    fill: rgba(255, 255, 255, 0.92);
+    stroke: rgba(141, 100, 0, 0.22);
+}
+
+.diagram-node.status-down .node-badge-shape {
+    fill: rgba(255, 255, 255, 0.92);
+    stroke: rgba(180, 74, 60, 0.22);
 }
 
 @media (max-width: 960px) {

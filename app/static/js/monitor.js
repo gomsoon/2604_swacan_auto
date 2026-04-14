@@ -1,4 +1,4 @@
-﻿import { apiFetch, clearBanner, formatTimestamp, showBanner } from "./common.js";
+import { apiFetch, clearBanner, formatTimestamp, showBanner } from "./common.js";
 import { renderDiagram } from "./diagram.js";
 
 const POLL_INTERVAL_MS = 5000;
@@ -6,6 +6,7 @@ const POLL_INTERVAL_MS = 5000;
 const appRoot = document.getElementById("monitor-app");
 const svg = document.getElementById("monitor-canvas");
 const monitorStatus = document.getElementById("monitor-status");
+const agentSummary = document.getElementById("monitor-agent-summary");
 const eventsList = document.getElementById("events-list");
 const selectionSummary = document.getElementById("monitor-selection-summary");
 const refreshEventsButton = document.getElementById("refresh-events-button");
@@ -64,6 +65,23 @@ function formatBytes(value) {
     return `${formatNumber(size, size >= 10 ? 1 : 2)} ${units[unitIndex]}`;
 }
 
+function runtimeLevel(stateRow) {
+    if (!stateRow) {
+        return "neutral";
+    }
+
+    if (stateRow.status === "down" || stateRow.severity === "critical") {
+        return "down";
+    }
+    if (stateRow.status === "warning" || stateRow.severity === "warning") {
+        return "warning";
+    }
+    if (stateRow.status === "up" || stateRow.status === "healthy" || stateRow.severity === "info" || stateRow.severity === "normal") {
+        return "up";
+    }
+    return "neutral";
+}
+
 function renderDetailRows(rows) {
     return rows
         .map(
@@ -93,6 +111,8 @@ function buildStateDetailRows(node, stateRow) {
         rows.push(
             { label: "백엔드 연결", value: payload.backend_connection_status || "-" },
             { label: "outbox depth", value: formatNumber(payload.outbox_queue_depth, 0) },
+            { label: "경고 임계치", value: formatNumber(payload.outbox_pending_warning_rows, 0) },
+            { label: "last sent seq", value: formatNumber(payload.last_sent_seq, 0) },
             { label: "last ack seq", value: formatNumber(payload.last_ack_seq, 0) },
             { label: "heartbeat", value: formatTimestamp(payload.heartbeat_time) }
         );
@@ -110,7 +130,7 @@ function buildStateDetailRows(node, stateRow) {
         );
     } else if (stateRow.state_type === "process") {
         rows.push(
-            { label: "프로세스 상태", value: payload.state || "-" },
+            { label: "프로세스 상태", value: payload.state || stateRow.status || "-" },
             { label: "PID", value: formatNumber(payload.pid, 0) },
             { label: "CPU 사용률", value: formatPercent(payload.cpu_usage) },
             { label: "RSS 메모리", value: formatBytes(payload.memory_rss) },
@@ -138,12 +158,47 @@ function renderEvents() {
         .map(
             (event) => `
             <article class="event-item">
-                <h3>${event.event_type}</h3>
-                <p>${event.message || "메시지 없음"}</p>
-                <p>${event.target_id} · ${event.severity} · ${formatTimestamp(event.occurred_at)}</p>
+                <h3>${escapeHtml(event.event_type)}</h3>
+                <p>${escapeHtml(event.message || "메시지 없음")}</p>
+                <p>${escapeHtml(event.target_id)} · ${escapeHtml(event.severity)} · ${escapeHtml(formatTimestamp(event.occurred_at))}</p>
             </article>
         `
         )
+        .join("");
+}
+
+function renderAgentSummary() {
+    const agents = state.nodes.filter((node) => node.node_type === "MonitoringAgent");
+    if (agents.length === 0) {
+        agentSummary.innerHTML = '<p class="section-copy">현재 뷰에 MonitoringAgent가 없습니다.</p>';
+        return;
+    }
+
+    agentSummary.innerHTML = agents
+        .map((node) => {
+            const stateRow = state.latestStates.find((item) => item.target_id === node.target_id);
+            const payload = stateRow?.state || {};
+            const level = runtimeLevel(stateRow);
+            const statusText = payload.backend_connection_status || stateRow?.status || "미수신";
+            const queueDepth = formatNumber(payload.outbox_queue_depth, 0);
+            const lastAckSeq = formatNumber(payload.last_ack_seq, 0);
+            const heartbeat = formatTimestamp(payload.heartbeat_time || stateRow?.occurred_at);
+            const selectedClass = state.selectedNodeId === node.id ? " is-selected" : "";
+
+            return `
+                <article class="agent-state-card state-${level}${selectedClass}" data-node-id="${node.id}">
+                    <div class="agent-state-header">
+                        <strong>${escapeHtml(node.display_name)}</strong>
+                        <span class="agent-state-pill">${escapeHtml(statusText)}</span>
+                    </div>
+                    <div class="agent-state-metrics">
+                        <span>outbox ${escapeHtml(queueDepth)}</span>
+                        <span>ack ${escapeHtml(lastAckSeq)}</span>
+                    </div>
+                    <p class="agent-state-meta">최근 heartbeat ${escapeHtml(heartbeat)}</p>
+                </article>
+            `;
+        })
         .join("");
 }
 
@@ -189,6 +244,7 @@ function render() {
         },
         onEdgeClick: (_edge, event) => event.stopPropagation(),
     });
+    renderAgentSummary();
     renderEvents();
     renderSelection();
 }
@@ -222,6 +278,14 @@ async function refreshAll() {
 }
 
 refreshEventsButton?.addEventListener("click", refreshAll);
+agentSummary?.addEventListener("click", (event) => {
+    const card = event.target.closest("[data-node-id]");
+    if (!card) {
+        return;
+    }
+    state.selectedNodeId = Number(card.dataset.nodeId);
+    render();
+});
 svg.addEventListener("click", () => {
     state.selectedNodeId = null;
     renderSelection();

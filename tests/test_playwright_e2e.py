@@ -19,9 +19,9 @@ AGENT_HEADERS = {
 
 def browser_login(page: Page, base_url: str) -> None:
     page.goto(f"{base_url}/login")
-    page.get_by_label("사용자 이름").fill("admin")
-    page.get_by_label("비밀번호").fill("admin123!")
-    page.get_by_role("button", name="로그인").click()
+    page.locator("#username").fill("admin")
+    page.locator("#password").fill("admin123!")
+    page.locator("#login-form button[type='submit']").click()
     page.wait_for_url(f"{base_url}/views")
     expect(page.get_by_role("heading", name="뷰 목록")).to_be_visible()
 
@@ -175,19 +175,24 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     monitor_agent_shape = page.locator('g.diagram-node[data-node-type="MonitoringAgent"] .node-shape').first
     monitor_process_shape = page.locator('g.diagram-node[data-node-type="SoftwareProcess"] .node-shape').first
 
+    expect(page.locator("#monitor-agent-summary")).to_contain_text("Agent Alpha")
+    expect(page.locator("#monitor-agent-summary")).to_contain_text("connected")
+    expect(page.locator("#monitor-agent-summary")).to_contain_text("outbox 0")
+    expect(page.locator("#monitor-agent-summary")).to_contain_text("ack 4")
+
     monitor_server_node.click(force=True, position={"x": 24, "y": 24})
     expect(page.locator("#monitor-selection-summary")).to_contain_text("Host Alpha")
-    expect(page.locator("#monitor-selection-summary")).to_contain_text("host-alpha")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("호스트명")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("CPU 사용률")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("Load Average")
 
     monitor_agent_shape.click(force=True)
     expect(page.locator("#monitor-selection-summary")).to_contain_text("Agent Alpha")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("백엔드 연결")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("connected")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("last ack seq")
 
     monitor_process_shape.click(force=True)
-
     expect(page.locator("#monitor-selection-summary")).to_contain_text("Worker Alpha")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("프로세스 상태")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("최근 이벤트")

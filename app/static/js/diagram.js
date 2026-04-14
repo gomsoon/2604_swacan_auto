@@ -49,6 +49,25 @@ function statusClassForNode(node, latestStatesByTargetId) {
     return "";
 }
 
+function agentBadgeTextForNode(node, latestStatesByTargetId) {
+    if (node.node_type !== "MonitoringAgent" || !node.target_id) {
+        return null;
+    }
+
+    const state = latestStatesByTargetId.get(node.target_id);
+    if (!state) {
+        return "미수신";
+    }
+
+    const payload = state.state || {};
+    const connection = payload.backend_connection_status || state.status || "unknown";
+    const queueDepth = Number(payload.outbox_queue_depth);
+    if (Number.isFinite(queueDepth) && queueDepth > 0) {
+        return `${connection} · q${queueDepth}`;
+    }
+    return connection;
+}
+
 function buildViewBox(nodes) {
     if (nodes.length === 0) {
         return "0 0 1200 800";
@@ -201,6 +220,35 @@ export function renderDiagram(svg, options) {
         });
         meta.textContent = node.target_id || node.node_type;
         group.appendChild(meta);
+
+        const agentBadgeText = agentBadgeTextForNode(node, latestStatesByTargetId);
+        if (agentBadgeText) {
+            const badgeWidth = Math.min(Math.max(agentBadgeText.length * 7 + 18, 78), Math.max(node.width - 16, 78));
+            const badgeGroup = svgEl("g", {
+                class: "node-badge",
+                transform: `translate(${node.width - badgeWidth - 8}, 8)`,
+            });
+            badgeGroup.appendChild(
+                svgEl("rect", {
+                    class: "node-badge-shape",
+                    x: 0,
+                    y: 0,
+                    width: badgeWidth,
+                    height: 24,
+                    rx: 12,
+                    ry: 12,
+                })
+            );
+            const badgeText = svgEl("text", {
+                class: "node-badge-text",
+                x: badgeWidth / 2,
+                y: 16,
+                "text-anchor": "middle",
+            });
+            badgeText.textContent = agentBadgeText;
+            badgeGroup.appendChild(badgeText);
+            group.appendChild(badgeGroup);
+        }
 
         if (typeof onNodeClick === "function") {
             group.addEventListener("click", (event) => onNodeClick(node, event));
