@@ -62,7 +62,9 @@ def test_get_view_detail_returns_seed_nodes_and_edges(seeded_client) -> None:
         "SoftwareProcess",
         "MonitoringAgent",
     ]
+    assert [node["layer_order"] for node in payload["nodes"]] == [10, 20, 30]
     assert payload["edges"][0]["edge_type"] == "CommunicationLink"
+    assert payload["edges"][0]["layer_order"] == 10
 
 
 def test_create_view_creates_owned_view(seeded_client) -> None:
@@ -94,6 +96,7 @@ def test_update_view_updates_revision_and_layout(seeded_client) -> None:
     for node in nodes:
         if node["id"] == 102:
             node["display_name"] = "App Process Updated"
+            node["layer_order"] = 50
             node["x"] = 120
 
     response = seeded_client.put(
@@ -114,6 +117,7 @@ def test_update_view_updates_revision_and_layout(seeded_client) -> None:
     updated_node = next(node for node in updated_detail["nodes"] if node["id"] == 102)
     assert updated_detail["view"]["revision"] == 2
     assert updated_node["display_name"] == "App Process Updated"
+    assert updated_node["layer_order"] == 50
     assert updated_node["x"] == 120
 
 

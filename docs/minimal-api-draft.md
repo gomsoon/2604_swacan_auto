@@ -102,6 +102,7 @@ Response JSON 200:
       "node_type": "PhysicalServer",
       "display_name": "Host A",
       "target_id": null,
+      "layer_order": 10,
       "x": 40,
       "y": 40,
       "width": 480,
@@ -113,6 +114,7 @@ Response JSON 200:
       "node_type": "SoftwareProcess",
       "display_name": "App Process",
       "target_id": "app_main",
+      "layer_order": 20,
       "x": 80,
       "y": 90,
       "width": 160,
@@ -124,6 +126,7 @@ Response JSON 200:
       "node_type": "MonitoringAgent",
       "display_name": "Local Agent",
       "target_id": "agent_local",
+      "layer_order": 30,
       "x": 280,
       "y": 90,
       "width": 150,
@@ -136,6 +139,7 @@ Response JSON 200:
       "edge_type": "CommunicationLink",
       "source_node_id": 102,
       "target_node_id": 103,
+      "layer_order": 10,
       "source_anchor": "right",
       "target_anchor": "left",
       "control_points": []
@@ -179,6 +183,7 @@ Response JSON 201:
 - Path: `/api/views/{view_id}`
 - 목적: node layout, edge 연결, 최소 속성 저장
 - 비고: 새 node 와 edge 는 frontend 임시 ID가 아니라 backend 가 생성한 정수 ID를 사용한다고 가정한다.
+- 비고: `layer_order` 가 낮은 항목이 먼저 렌더링되며, 값이 없으면 backend 가 기본 계층 값을 부여할 수 있다.
 
 Request JSON:
 ```json
@@ -191,6 +196,7 @@ Request JSON:
       "node_type": "PhysicalServer",
       "display_name": "Host A",
       "target_id": null,
+      "layer_order": 10,
       "x": 40,
       "y": 40,
       "width": 480,
@@ -202,6 +208,7 @@ Request JSON:
       "node_type": "SoftwareProcess",
       "display_name": "App Process",
       "target_id": "app_main",
+      "layer_order": 20,
       "x": 80,
       "y": 90,
       "width": 160,
@@ -213,6 +220,7 @@ Request JSON:
       "node_type": "MonitoringAgent",
       "display_name": "Local Agent",
       "target_id": "agent_local",
+      "layer_order": 30,
       "x": 280,
       "y": 90,
       "width": 150,
@@ -225,6 +233,7 @@ Request JSON:
       "edge_type": "CommunicationLink",
       "source_node_id": 102,
       "target_node_id": 103,
+      "layer_order": 10,
       "source_anchor": "right",
       "target_anchor": "left",
       "control_points": []

@@ -17,6 +17,7 @@ NODE_MUTABLE_FIELDS = {
     "parent_node_id",
     "display_name",
     "target_id",
+    "layer_order",
     "x",
     "y",
     "width",
@@ -26,6 +27,7 @@ NODE_MUTABLE_FIELDS = {
 EDGE_MUTABLE_FIELDS = {
     "source_node_id",
     "target_node_id",
+    "layer_order",
     "source_anchor",
     "target_anchor",
     "control_points",
@@ -64,6 +66,7 @@ def serialize_node(node_row) -> dict[str, Any]:
         "node_type": node_row["node_type"],
         "display_name": node_row["display_name"],
         "target_id": node_row["target_id"],
+        "layer_order": node_row["layer_order"],
         "x": node_row["x"],
         "y": node_row["y"],
         "width": node_row["width"],
@@ -80,6 +83,7 @@ def serialize_edge(edge_row) -> dict[str, Any]:
         "edge_type": edge_row["edge_type"],
         "source_node_id": edge_row["source_node_id"],
         "target_node_id": edge_row["target_node_id"],
+        "layer_order": edge_row["layer_order"],
         "source_anchor": edge_row["source_anchor"],
         "target_anchor": edge_row["target_anchor"],
         "control_points": json.loads(edge_row["control_points_json"] or "[]"),
@@ -94,10 +98,10 @@ def serialize_edge(edge_row) -> dict[str, Any]:
 def get_current_nodes(view_id: int) -> list[dict[str, Any]]:
     rows = get_db().execute(
         """
-        SELECT id, parent_node_id, node_type, display_name, target_id, x, y, width, height, style_json
+        SELECT id, parent_node_id, node_type, display_name, target_id, layer_order, x, y, width, height, style_json
         FROM view_nodes
         WHERE view_id = ? AND is_deleted = 0
-        ORDER BY id
+        ORDER BY layer_order ASC, id ASC
         """,
         (view_id,),
     ).fetchall()
@@ -107,11 +111,11 @@ def get_current_nodes(view_id: int) -> list[dict[str, Any]]:
 def get_current_edges(view_id: int) -> list[dict[str, Any]]:
     rows = get_db().execute(
         """
-        SELECT id, edge_type, source_node_id, target_node_id, source_anchor, target_anchor,
+        SELECT id, edge_type, source_node_id, target_node_id, layer_order, source_anchor, target_anchor,
                control_points_json, label, style_json
         FROM view_edges
         WHERE view_id = ? AND is_deleted = 0
-        ORDER BY id
+        ORDER BY layer_order ASC, id ASC
         """,
         (view_id,),
     ).fetchall()
@@ -121,7 +125,7 @@ def get_current_edges(view_id: int) -> list[dict[str, Any]]:
 def get_node_row(view_id: int, node_id: int):
     return get_db().execute(
         """
-        SELECT id, parent_node_id, node_type, display_name, target_id, x, y, width, height, style_json
+        SELECT id, parent_node_id, node_type, display_name, target_id, layer_order, x, y, width, height, style_json
         FROM view_nodes
         WHERE view_id = ? AND id = ? AND is_deleted = 0
         """,
@@ -132,7 +136,7 @@ def get_node_row(view_id: int, node_id: int):
 def get_edge_row(view_id: int, edge_id: int):
     return get_db().execute(
         """
-        SELECT id, edge_type, source_node_id, target_node_id, source_anchor, target_anchor,
+        SELECT id, edge_type, source_node_id, target_node_id, layer_order, source_anchor, target_anchor,
                control_points_json, label, style_json
         FROM view_edges
         WHERE view_id = ? AND id = ? AND is_deleted = 0
@@ -148,6 +152,19 @@ def require_revision(view_row, payload: dict[str, Any]):
     if revision != view_row["revision"]:
         return error_response("revision_mismatch", "revision mismatch", 409)
     return None
+
+
+def next_layer_order(items: list[dict[str, Any]], step: int = 10) -> int:
+    current_max = max((int(item.get("layer_order", 0)) for item in items), default=0)
+    return current_max + step
+
+
+def resolve_layer_order(raw_value: Any, default_value: int) -> int:
+    if raw_value is None:
+        return default_value
+    if not isinstance(raw_value, int):
+        raise ValueError("layer_order must be an integer")
+    return raw_value
 
 
 def bump_view_revision(view_id: int) -> tuple[int, str]:
@@ -182,6 +199,9 @@ def validate_nodes(nodes: list[dict[str, Any]]) -> str | None:
 
         if node["id"] in node_map:
             return "duplicate node id is not allowed"
+
+        if "layer_order" in node and not isinstance(node["layer_order"], int):
+            return "layer_order must be an integer"
 
         node_map[node["id"]] = node
 
@@ -222,6 +242,9 @@ def validate_edges(edges: list[dict[str, Any]], node_ids: set[int]) -> str | Non
             return "duplicate edge id is not allowed"
         seen_ids.add(edge["id"])
 
+        if "layer_order" in edge and not isinstance(edge["layer_order"], int):
+            return "layer_order must be an integer"
+
         if edge["source_node_id"] not in node_ids or edge["target_node_id"] not in node_ids:
             return "edge must reference existing nodes"
 
@@ -249,12 +272,17 @@ def create_node(view_id: int):
 
     current_nodes = get_current_nodes(view_id)
     temp_id = -1 * (max((node["id"] for node in current_nodes), default=0) + 1)
+    try:
+        layer_order = resolve_layer_order(payload.get("layer_order"), next_layer_order(current_nodes))
+    except ValueError as exc:
+        return error_response("validation_error", str(exc), 400)
     candidate = {
         "id": temp_id,
         "parent_node_id": payload.get("parent_node_id"),
         "node_type": payload["node_type"],
         "display_name": payload["display_name"],
         "target_id": payload.get("target_id"),
+        "layer_order": layer_order,
         "x": payload["x"],
         "y": payload["y"],
         "width": payload["width"],
@@ -274,8 +302,8 @@ def create_node(view_id: int):
         """
         INSERT INTO view_nodes (
             view_id, parent_node_id, node_type, display_name, target_id,
-            x, y, width, height, is_deleted, style_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+            layer_order, x, y, width, height, is_deleted, style_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
         """,
         (
             view_id,
@@ -283,6 +311,7 @@ def create_node(view_id: int):
             payload["node_type"],
             payload["display_name"],
             payload.get("target_id"),
+            candidate["layer_order"],
             payload["x"],
             payload["y"],
             payload["width"],
@@ -338,13 +367,14 @@ def update_node(view_id: int, node_id: int):
     db_conn.execute(
         """
         UPDATE view_nodes
-        SET parent_node_id = ?, display_name = ?, target_id = ?, x = ?, y = ?, width = ?, height = ?, style_json = ?, updated_at = ?
+        SET parent_node_id = ?, display_name = ?, target_id = ?, layer_order = ?, x = ?, y = ?, width = ?, height = ?, style_json = ?, updated_at = ?
         WHERE id = ? AND view_id = ?
         """,
         (
             merged.get("parent_node_id"),
             merged["display_name"],
             merged.get("target_id"),
+            merged.get("layer_order", 0),
             merged["x"],
             merged["y"],
             merged["width"],
@@ -412,11 +442,16 @@ def create_edge(view_id: int):
     current_nodes = get_current_nodes(view_id)
     current_edges = get_current_edges(view_id)
     temp_id = -1 * (max((edge["id"] for edge in current_edges), default=0) + 1)
+    try:
+        layer_order = resolve_layer_order(payload.get("layer_order"), next_layer_order(current_edges))
+    except ValueError as exc:
+        return error_response("validation_error", str(exc), 400)
     candidate = {
         "id": temp_id,
         "edge_type": payload["edge_type"],
         "source_node_id": payload["source_node_id"],
         "target_node_id": payload["target_node_id"],
+        "layer_order": layer_order,
         "source_anchor": payload.get("source_anchor"),
         "target_anchor": payload.get("target_anchor"),
         "control_points": payload.get("control_points", []),
@@ -436,15 +471,16 @@ def create_edge(view_id: int):
         """
         INSERT INTO view_edges (
             view_id, edge_type, source_node_id, target_node_id,
-            source_anchor, target_anchor, control_points_json, label, style_json,
+            layer_order, source_anchor, target_anchor, control_points_json, label, style_json,
             is_deleted, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
         """,
         (
             view_id,
             payload["edge_type"],
             payload["source_node_id"],
             payload["target_node_id"],
+            candidate["layer_order"],
             payload.get("source_anchor"),
             payload.get("target_anchor"),
             json.dumps(payload.get("control_points", [])),
@@ -500,13 +536,14 @@ def update_edge(view_id: int, edge_id: int):
     db_conn.execute(
         """
         UPDATE view_edges
-        SET source_node_id = ?, target_node_id = ?, source_anchor = ?, target_anchor = ?,
+        SET source_node_id = ?, target_node_id = ?, layer_order = ?, source_anchor = ?, target_anchor = ?,
             control_points_json = ?, label = ?, style_json = ?, updated_at = ?
         WHERE id = ? AND view_id = ?
         """,
         (
             merged["source_node_id"],
             merged["target_node_id"],
+            merged.get("layer_order", 0),
             merged.get("source_anchor"),
             merged.get("target_anchor"),
             json.dumps(merged.get("control_points", [])),

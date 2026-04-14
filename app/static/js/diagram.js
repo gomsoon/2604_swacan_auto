@@ -100,7 +100,14 @@ export function renderDiagram(svg, options) {
     } = options;
 
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+    const sortedEdges = [...edges].sort((left, right) => {
+        return (left.layer_order ?? 0) - (right.layer_order ?? 0) || left.id - right.id;
+    });
     const sortedNodes = [...nodes].sort((left, right) => {
+        const layerDiff = (left.layer_order ?? 0) - (right.layer_order ?? 0);
+        if (layerDiff !== 0) {
+            return layerDiff;
+        }
         const leftRank = left.parent_node_id === null ? 0 : 1;
         const rightRank = right.parent_node_id === null ? 0 : 1;
         return leftRank - rightRank || left.id - right.id;
@@ -126,7 +133,7 @@ export function renderDiagram(svg, options) {
     const edgeLayer = svgEl("g");
     const nodeLayer = svgEl("g");
 
-    for (const edge of edges) {
+    for (const edge of sortedEdges) {
         const sourceNode = nodeMap.get(edge.source_node_id);
         const targetNode = nodeMap.get(edge.target_node_id);
         if (!sourceNode || !targetNode) {

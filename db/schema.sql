@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS view_nodes (
     node_type TEXT NOT NULL CHECK (node_type IN ('PhysicalServer', 'SoftwareProcess', 'MonitoringAgent')),
     display_name TEXT NOT NULL,
     target_id TEXT,
+    layer_order INTEGER NOT NULL DEFAULT 0,
     x REAL NOT NULL,
     y REAL NOT NULL,
     width REAL NOT NULL,
@@ -49,6 +50,7 @@ CREATE TABLE IF NOT EXISTS view_edges (
     edge_type TEXT NOT NULL CHECK (edge_type IN ('CommunicationLink')),
     source_node_id INTEGER NOT NULL,
     target_node_id INTEGER NOT NULL,
+    layer_order INTEGER NOT NULL DEFAULT 0,
     source_anchor TEXT,
     target_anchor TEXT,
     control_points_json TEXT,
@@ -151,6 +153,9 @@ CREATE INDEX IF NOT EXISTS idx_view_nodes_parent_node_id
 CREATE INDEX IF NOT EXISTS idx_view_nodes_target_id
     ON view_nodes(target_id);
 
+CREATE INDEX IF NOT EXISTS idx_view_nodes_view_layer
+    ON view_nodes(view_id, layer_order, id);
+
 CREATE INDEX IF NOT EXISTS idx_view_edges_view_id
     ON view_edges(view_id);
 
@@ -159,6 +164,9 @@ CREATE INDEX IF NOT EXISTS idx_view_edges_source_node_id
 
 CREATE INDEX IF NOT EXISTS idx_view_edges_target_node_id
     ON view_edges(target_node_id);
+
+CREATE INDEX IF NOT EXISTS idx_view_edges_view_layer
+    ON view_edges(view_id, layer_order, id);
 
 CREATE INDEX IF NOT EXISTS idx_ingest_inbox_status_received
     ON ingest_inbox(status, received_at);

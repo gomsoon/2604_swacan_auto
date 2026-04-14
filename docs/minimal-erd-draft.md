@@ -77,6 +77,7 @@
 - `node_type` TEXT NOT NULL
 - `display_name` TEXT NOT NULL
 - `target_id` TEXT NULL
+- `layer_order` INTEGER NOT NULL DEFAULT 0
 - `x` REAL NOT NULL
 - `y` REAL NOT NULL
 - `width` REAL NOT NULL
@@ -96,6 +97,7 @@
 - `view_nodes.id` 는 frontend 임시 문자열이 아니라 backend 에서 일관되게 생성하고 반환하는 정수 PK 를 사용하는 것이 바람직하다.
 - 이 정책은 이후 라이선스, 감사, 정책 적용, soft delete, background cleanup 기능을 붙일 때 유리하다.
 - 최소 E2E 단계에서는 `is_deleted` 를 기본 0으로 두고, 실제 soft delete 처리는 후속 단계에서 활성화할 수 있다.
+- `layer_order` 는 canvas 에서 낮은 값부터 먼저 그리기 위한 기본 계층 값이다.
 
 ### 3.4 view_edges
 
@@ -108,6 +110,7 @@
 - `edge_type` TEXT NOT NULL
 - `source_node_id` INTEGER NOT NULL
 - `target_node_id` INTEGER NOT NULL
+- `layer_order` INTEGER NOT NULL DEFAULT 0
 - `source_anchor` TEXT NULL
 - `target_anchor` TEXT NULL
 - `control_points_json` TEXT NULL
@@ -126,6 +129,7 @@
 - 최소 E2E 에서는 `edge_type=CommunicationLink` 하나만 지원해도 된다.
 - 단순 직선은 node 좌표와 anchor 정보만으로 계산 가능하므로, `x`, `y` 컬럼을 직접 두기보다 `control_points_json` 을 선택적으로 사용한다.
 - `view_edges` 도 backend 가 생성/관리하는 정수 PK 를 사용하는 것이 바람직하다.
+- `layer_order` 는 edge 간 렌더 순서를 조정하기 위한 기본 계층 값이다.
 
 ### 3.5 ingest_inbox
 

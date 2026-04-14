@@ -48,6 +48,7 @@ def serialize_node(node_row) -> dict[str, Any]:
         "node_type": node_row["node_type"],
         "display_name": node_row["display_name"],
         "target_id": node_row["target_id"],
+        "layer_order": node_row["layer_order"],
         "x": node_row["x"],
         "y": node_row["y"],
         "width": node_row["width"],
@@ -64,6 +65,7 @@ def serialize_edge(edge_row) -> dict[str, Any]:
         "edge_type": edge_row["edge_type"],
         "source_node_id": edge_row["source_node_id"],
         "target_node_id": edge_row["target_node_id"],
+        "layer_order": edge_row["layer_order"],
         "source_anchor": edge_row["source_anchor"],
         "target_anchor": edge_row["target_anchor"],
         "control_points": json.loads(edge_row["control_points_json"] or "[]"),
@@ -96,7 +98,7 @@ def get_view_target_rows(view_id: int):
         SELECT id, target_id
         FROM view_nodes
         WHERE view_id = ? AND is_deleted = 0 AND target_id IS NOT NULL
-        ORDER BY id
+        ORDER BY layer_order ASC, id ASC
         """,
         (view_id,),
     ).fetchall()
@@ -134,6 +136,9 @@ def validate_nodes(nodes: list[dict[str, Any]]) -> str | None:
         node_type = node.get("node_type")
         if node_type not in ALLOWED_NODE_TYPES:
             return "invalid node_type"
+
+        if "layer_order" in node and not isinstance(node["layer_order"], int):
+            return "layer_order must be an integer"
 
         node_map[node_id] = node
 
@@ -182,6 +187,9 @@ def validate_edges(edges: list[dict[str, Any]], node_ids: set[int]) -> str | Non
         if edge["edge_type"] not in ALLOWED_EDGE_TYPES:
             return "invalid edge_type"
 
+        if "layer_order" in edge and not isinstance(edge["layer_order"], int):
+            return "layer_order must be an integer"
+
         source_id = edge["source_node_id"]
         target_id = edge["target_node_id"]
         if source_id not in node_ids or target_id not in node_ids:
@@ -197,15 +205,22 @@ def replace_view_layout(view_id: int, nodes: list[dict[str, Any]], edges: list[d
     db_conn.execute("DELETE FROM view_edges WHERE view_id = ?", (view_id,))
     db_conn.execute("DELETE FROM view_nodes WHERE view_id = ?", (view_id,))
 
-    sorted_nodes = sorted(nodes, key=lambda item: (item.get("parent_node_id") is not None, item["id"]))
+    sorted_nodes = sorted(
+        nodes,
+        key=lambda item: (
+            item.get("parent_node_id") is not None,
+            int(item.get("layer_order", 0)),
+            item["id"],
+        ),
+    )
     for node in sorted_nodes:
         style_json = json.dumps(node.get("style")) if "style" in node else None
         db_conn.execute(
             """
             INSERT INTO view_nodes (
                 id, view_id, parent_node_id, node_type, display_name, target_id,
-                x, y, width, height, is_deleted, style_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                layer_order, x, y, width, height, is_deleted, style_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
             """,
             (
                 node["id"],
@@ -214,6 +229,7 @@ def replace_view_layout(view_id: int, nodes: list[dict[str, Any]], edges: list[d
                 node["node_type"],
                 node["display_name"],
                 node.get("target_id"),
+                node.get("layer_order", 0),
                 node["x"],
                 node["y"],
                 node["width"],
@@ -231,9 +247,9 @@ def replace_view_layout(view_id: int, nodes: list[dict[str, Any]], edges: list[d
             """
             INSERT INTO view_edges (
                 id, view_id, edge_type, source_node_id, target_node_id,
-                source_anchor, target_anchor, control_points_json, label, style_json,
+                layer_order, source_anchor, target_anchor, control_points_json, label, style_json,
                 is_deleted, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
             """,
             (
                 edge["id"],
@@ -241,6 +257,7 @@ def replace_view_layout(view_id: int, nodes: list[dict[str, Any]], edges: list[d
                 edge["edge_type"],
                 edge["source_node_id"],
                 edge["target_node_id"],
+                edge.get("layer_order", 0),
                 edge.get("source_anchor"),
                 edge.get("target_anchor"),
                 control_points_json,
@@ -289,20 +306,20 @@ def get_view_detail(view_id: int):
     db_conn = get_db()
     node_rows = db_conn.execute(
         """
-        SELECT id, parent_node_id, node_type, display_name, target_id, x, y, width, height, style_json
+        SELECT id, parent_node_id, node_type, display_name, target_id, layer_order, x, y, width, height, style_json
         FROM view_nodes
         WHERE view_id = ? AND is_deleted = 0
-        ORDER BY id
+        ORDER BY layer_order ASC, id ASC
         """,
         (view_id,),
     ).fetchall()
     edge_rows = db_conn.execute(
         """
-        SELECT id, edge_type, source_node_id, target_node_id, source_anchor, target_anchor,
+        SELECT id, edge_type, source_node_id, target_node_id, layer_order, source_anchor, target_anchor,
                control_points_json, label, style_json
         FROM view_edges
         WHERE view_id = ? AND is_deleted = 0
-        ORDER BY id
+        ORDER BY layer_order ASC, id ASC
         """,
         (view_id,),
     ).fetchall()

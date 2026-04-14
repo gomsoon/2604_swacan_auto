@@ -112,7 +112,7 @@
 
 ### 8.3 layout 저장 요구사항
 
-- [필수] view layout 은 최소한 `x`, `y`, `width`, `height`, `z_index`, `collapsed_state` 를 저장할 수 있어야 한다.
+- [필수] view layout 은 최소한 `x`, `y`, `width`, `height`, `layer_order`, `collapsed_state` 를 저장할 수 있어야 한다.
 - [필수] containment 자식 요소의 좌표는 부모 기준 좌표계로 해석되어야 한다.
 - [필수] edge 는 최소한 source_node_id, target_node_id, source anchor, target anchor, control point 또는 동등한 경로 정보를 저장할 수 있어야 한다.
 - [필수] 이동과 크기 변경 후의 최신 배치 정보는 view 저장 시 backend 로 전송되어야 한다.

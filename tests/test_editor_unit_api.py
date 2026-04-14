@@ -35,6 +35,7 @@ def test_create_node_returns_backend_generated_id_and_revision(seeded_client) ->
     payload = response.get_json()
     assert payload["node"]["id"] > 103
     assert payload["node"]["node_type"] == "SoftwareProcess"
+    assert payload["node"]["layer_order"] == 40
     assert payload["revision"] == 2
 
     detail = get_view_detail(seeded_client)
@@ -64,6 +65,28 @@ def test_create_node_rejects_invalid_containment(seeded_client) -> None:
     assert response.get_json()["error"]["code"] == "validation_error"
 
 
+def test_create_node_rejects_non_integer_layer_order(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/views/1/nodes",
+        json={
+            "revision": 1,
+            "node_type": "SoftwareProcess",
+            "parent_node_id": 101,
+            "display_name": "Bad Layer",
+            "layer_order": "front",
+            "x": 10,
+            "y": 10,
+            "width": 100,
+            "height": 50,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+
+
 def test_update_node_updates_layout_and_revision(seeded_client) -> None:
     login(seeded_client)
 
@@ -72,6 +95,7 @@ def test_update_node_updates_layout_and_revision(seeded_client) -> None:
         json={
             "revision": 1,
             "display_name": "App Process Patched",
+            "layer_order": 60,
             "x": 140,
             "y": 110,
         },
@@ -80,6 +104,7 @@ def test_update_node_updates_layout_and_revision(seeded_client) -> None:
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["node"]["display_name"] == "App Process Patched"
+    assert payload["node"]["layer_order"] == 60
     assert payload["node"]["x"] == 140
     assert payload["revision"] == 2
 
@@ -140,6 +165,7 @@ def test_create_edge_returns_backend_generated_id(seeded_client) -> None:
     payload = response.get_json()
     assert payload["edge"]["id"] > 201
     assert payload["edge"]["target_node_id"] == node_id
+    assert payload["edge"]["layer_order"] == 20
     assert payload["revision"] == next_revision + 1
 
 
@@ -151,6 +177,7 @@ def test_update_edge_updates_label_and_control_points(seeded_client) -> None:
         json={
             "revision": 1,
             "label": "updated edge",
+            "layer_order": 30,
             "control_points": [{"x": 200, "y": 120}],
         },
     )
@@ -158,6 +185,7 @@ def test_update_edge_updates_label_and_control_points(seeded_client) -> None:
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["edge"]["label"] == "updated edge"
+    assert payload["edge"]["layer_order"] == 30
     assert payload["edge"]["control_points"] == [{"x": 200, "y": 120}]
     assert payload["revision"] == 2
 
