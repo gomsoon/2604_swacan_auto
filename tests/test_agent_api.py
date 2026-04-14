@@ -166,3 +166,21 @@ def test_process_ingest_cli_command(seeded_client, seeded_runner) -> None:
     assert result.exit_code == 0
     assert "processed_batches=1" in result.output
     assert "processed_items=4" in result.output
+
+
+def test_run_ingest_worker_cli_command(seeded_client, seeded_runner) -> None:
+    ingest_response = seeded_client.post(
+        "/api/agents/ingest",
+        headers=agent_headers(),
+        json=sample_batch(),
+    )
+    assert ingest_response.status_code == 202
+
+    result = seeded_runner.invoke(
+        args=["run-ingest-worker", "--limit", "10", "--max-cycles", "1", "--idle-sleep", "0.1"]
+    )
+
+    assert result.exit_code == 0
+    assert "cycles=1" in result.output
+    assert "processed_batches=1" in result.output
+    assert "processed_items=4" in result.output

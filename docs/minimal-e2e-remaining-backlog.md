@@ -12,7 +12,7 @@
 - editor, monitoring, admin 기본 화면과 backend API, ingest pipeline, SQLite schema, pytest/Playwright 기반 자동화 테스트가 준비되어 있다.
 - agent 는 설정 로딩, runner, selector, host/process snapshot, process 상태 전이 event, SQLite outbox, batch transport, ack 반영, acked row cleanup 정책까지 최소 골격이 구현되어 있다.
 - selector 는 target 마다 `/proc` 를 반복 순회하지 않도록 한 번의 discovery 결과를 여러 target 에 재사용하는 구조로 1차 최적화되었다.
-- 현재 가장 큰 남은 공백은 `SSH 기반 Linux agent 테스트 골격`, `worker 안정성 보강`, `실제 Linux 통합 테스트` 이다.
+- 현재 가장 큰 남은 공백은 `실제 Linux 통합 테스트`, `중복/idempotency 보강`, `실제 agent 결과 기반 화면 점검` 이다.
 
 ## 2. 우선순위 개요
 
@@ -29,6 +29,8 @@
 - `A-02 process 상태 전이 event 생성` 완료
 - `A-03 retry/backoff 실동작 보강` 완료
 - `A-06 대규모 process 환경 discovery 최적화` 1차 완료
+- `A-05 SSH 기반 Linux agent 테스트 실행 골격` 1차 완료
+- `B-01 worker loop/service화` 1차 완료
 
 ### A-04 실행 운영 보조
 
@@ -38,25 +40,7 @@
 - Linux 환경에서 agent 실행 절차가 문서만으로 재현 가능해야 한다.
 - 테스트 기준: 수동 운영 점검
 
-### A-05 SSH 기반 Linux agent 테스트 실행 골격
-
-- 우선순위: `높음`
-- 설명: Windows 개발 환경에서 SSH 로 Linux agent test server 에 접속해 agent 를 원격 실행/종료하는 테스트 실행 골격을 만든다.
-- 완료 기준:
-- 테스트 시작 시 SSH 접속, 원격 작업 디렉토리 준비, agent 실행이 가능해야 한다.
-- 테스트 종료 시 agent 종료, 로그/outbox 수집, SSH 세션 종료가 자동화되어야 한다.
-- 테스트 기준: SSH integration smoke test
-
 ## 4. Backend 남은 구현
-
-### B-01 worker loop/service화
-
-- 우선순위: `최우선`
-- 설명: 현재 CLI 기반 worker 처리 함수를 실제 loop/service 실행 구조로 연결한다.
-- 완료 기준:
-- `pending -> processing -> processed/failed` 흐름이 지속적으로 동작해야 한다.
-- polling sleep/backoff 가 포함되어야 한다.
-- 테스트 기준: worker loop 통합 테스트
 
 ### B-02 duplicate/idempotency 보강
 
@@ -137,11 +121,11 @@
 
 ## 7. 지금 바로 이어서 할 작업
 
-1. `A-05 SSH 기반 Linux agent 테스트 실행 골격`
-2. `B-01 worker loop/service화`
-3. `L-01 Linux 실제 통합 시나리오`
-4. `F-01 실제 agent 결과 기반 monitoring 최종 점검`
-5. `A-04 실행 운영 보조`
+1. `L-01 Linux 실제 통합 시나리오`
+2. `B-02 duplicate/idempotency 보강`
+3. `F-01 실제 agent 결과 기반 monitoring 최종 점검`
+4. `A-04 실행 운영 보조`
+5. `B-03 batch 처리 원자성/rollback 정책`
 
 ## 8. 요약
 

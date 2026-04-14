@@ -101,9 +101,12 @@
 
 - [필수] 하나의 selector 가 여러 PID 를 찾을 수 있어야 한다.
 - [필수] agent 는 이러한 다중 PID 집합을 하나의 논리 target 에 연결할 수 있어야 한다.
+- [필수] Apache, Nginx, Gunicorn 처럼 동일 이름의 PID 여러 개로 실행되는 daemon 은 개별 PID 집합이 아니라 하나의 `Process Group` 또는 논리 서비스 단위로 해석해야 한다.
+- [필수] multi-process daemon 의 기본 모니터링 단위는 개별 PID 나열보다 group summary 여야 하며, 개별 PID 정보는 drill-down 용 상세 데이터로 사용해야 한다.
 - [필수] agent 는 group summary 와 instance detail 을 모두 생성할 수 있어야 한다.
 - [필수] group summary 는 최소한 `actual_count`, `running_count`, `cpu_total`, `cpu_avg`, `memory_total`, `restart_detected` 정보를 포함해야 한다.
 - [필수] instance detail 은 최소한 `pid`, `state`, `start_time`, `cpu_usage`, `memory_rss` 를 포함해야 한다.
+- [후속] Linux 실환경에서 가능하면 `systemd unit`, `cgroup`, `master-child process tree` 기반 grouping 을 우선 지원하고, `process name` 단독 grouping 은 최후 fallback 으로 취급한다.
 
 ## 7. 수집 대상 요구사항
 

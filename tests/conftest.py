@@ -12,6 +12,11 @@ from werkzeug.serving import make_server
 
 from app import create_app
 from app.db import init_db
+from linux_agent_ssh_support import (
+    LinuxAgentSshConfig,
+    LinuxAgentSshConfigError,
+    LinuxAgentSshSession,
+)
 
 
 ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "test_artifacts"
@@ -128,3 +133,12 @@ def live_server(seeded_app):
     finally:
         server_thread.shutdown()
         server_thread.join(timeout=5)
+
+
+@pytest.fixture()
+def linux_agent_ssh_session():
+    try:
+        config = LinuxAgentSshConfig.from_env()
+    except LinuxAgentSshConfigError as exc:
+        pytest.skip(f"linux agent ssh test env not configured: {exc}")
+    return LinuxAgentSshSession(config)

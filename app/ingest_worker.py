@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime
+from time import sleep
 
 import click
 from flask.cli import with_appcontext
@@ -14,6 +16,24 @@ VALID_EVENT_TYPES = {
     "process_restarted",
     "agent_heartbeat_lost",
 }
+
+
+@dataclass(frozen=True)
+class IngestWorkerCycleResult:
+    processed_batches: int
+    failed_batches: int
+    processed_items: int
+    sleep_seconds: float
+    had_error: bool
+    error_message: str | None = None
+
+
+@dataclass(frozen=True)
+class IngestWorkerRunSummary:
+    cycles: int
+    processed_batches: int
+    failed_batches: int
+    processed_items: int
 
 
 def now_iso() -> str:
@@ -257,6 +277,72 @@ def process_pending_ingest(limit: int = 100) -> dict[str, int]:
     }
 
 
+class IngestWorkerLoop:
+    def __init__(
+        self,
+        *,
+        limit: int = 100,
+        idle_sleep_seconds: float = 1.0,
+        error_backoff_seconds: float = 5.0,
+        processor=process_pending_ingest,
+    ) -> None:
+        self.limit = limit
+        self.idle_sleep_seconds = idle_sleep_seconds
+        self.error_backoff_seconds = error_backoff_seconds
+        self.processor = processor
+
+    def run_cycle(self) -> IngestWorkerCycleResult:
+        try:
+            result = self.processor(limit=self.limit)
+        except Exception as exc:
+            return IngestWorkerCycleResult(
+                processed_batches=0,
+                failed_batches=0,
+                processed_items=0,
+                sleep_seconds=self.error_backoff_seconds,
+                had_error=True,
+                error_message=str(exc),
+            )
+
+        processed_batches = int(result["processed_batches"])
+        failed_batches = int(result["failed_batches"])
+        processed_items = int(result["processed_items"])
+        should_idle = processed_batches == 0 and failed_batches == 0 and processed_items == 0
+        return IngestWorkerCycleResult(
+            processed_batches=processed_batches,
+            failed_batches=failed_batches,
+            processed_items=processed_items,
+            sleep_seconds=self.idle_sleep_seconds if should_idle else 0.0,
+            had_error=False,
+        )
+
+    def run_forever(self, *, max_cycles: int | None = None, sleep_func=sleep) -> IngestWorkerRunSummary:
+        cycles = 0
+        total_processed_batches = 0
+        total_failed_batches = 0
+        total_processed_items = 0
+
+        while True:
+            cycle = self.run_cycle()
+            cycles += 1
+            total_processed_batches += cycle.processed_batches
+            total_failed_batches += cycle.failed_batches
+            total_processed_items += cycle.processed_items
+
+            if max_cycles is not None and cycles >= max_cycles:
+                break
+
+            if cycle.sleep_seconds > 0:
+                sleep_func(cycle.sleep_seconds)
+
+        return IngestWorkerRunSummary(
+            cycles=cycles,
+            processed_batches=total_processed_batches,
+            failed_batches=total_failed_batches,
+            processed_items=total_processed_items,
+        )
+
+
 @click.command("process-ingest")
 @click.option("--limit", default=100, show_default=True, type=int)
 @with_appcontext
@@ -267,5 +353,30 @@ def process_ingest_command(limit: int) -> None:
     )
 
 
+@click.command("run-ingest-worker")
+@click.option("--limit", default=100, show_default=True, type=int)
+@click.option("--max-cycles", default=None, type=int)
+@click.option("--idle-sleep", default=1.0, show_default=True, type=float)
+@click.option("--error-backoff", default=5.0, show_default=True, type=float)
+@with_appcontext
+def run_ingest_worker_command(
+    limit: int,
+    max_cycles: int | None,
+    idle_sleep: float,
+    error_backoff: float,
+) -> None:
+    worker = IngestWorkerLoop(
+        limit=limit,
+        idle_sleep_seconds=idle_sleep,
+        error_backoff_seconds=error_backoff,
+    )
+    summary = worker.run_forever(max_cycles=max_cycles)
+    click.echo(
+        f"cycles={summary.cycles} processed_batches={summary.processed_batches} "
+        f"failed_batches={summary.failed_batches} processed_items={summary.processed_items}"
+    )
+
+
 def init_app(app) -> None:
     app.cli.add_command(process_ingest_command)
+    app.cli.add_command(run_ingest_worker_command)

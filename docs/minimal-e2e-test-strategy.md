@@ -136,6 +136,7 @@
 - [필수] coverage 결과는 파일 또는 HTML/XML report 형태로 저장되어 나중에 증적 자료로 확인 가능해야 한다.
 - [필수] Linux 실제 통합 테스트용 SSH 접속 정보, 원격 작업 디렉토리 정책, agent 로그 저장 위치는 테스트 환경 문서에 명시되어야 한다.
 - [필수] SSH 기반 테스트는 테스트 종료 후 원격 agent 종료와 임시 파일 정리를 보장해야 한다.
+- [필수] SSH 기반 테스트를 자동화할 때는 최소한 `LINUX_AGENT_SSH_HOST`, `LINUX_AGENT_SSH_USER`, `LINUX_AGENT_REMOTE_REPO_DIR` 와 동등한 환경 설정값이 준비되어야 한다.
 
 ## 6. 실행 순서
 
