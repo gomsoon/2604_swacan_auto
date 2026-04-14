@@ -126,6 +126,32 @@ def insert_raw_event(*, agent_id: str, target_id: str, event_type: str, severity
     )
 
 
+def process_item_if_new(*, inbox_id: int, agent_id: str, boot_id: str, item: dict, received_at: str) -> bool:
+    db_conn = get_db()
+    item_seq = int(item["seq"])
+    cursor = db_conn.execute(
+        """
+        INSERT OR IGNORE INTO processed_item_receipts (
+            agent_id, boot_id, item_seq, payload_type, target_id, inbox_id, processed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            agent_id,
+            boot_id,
+            item_seq,
+            item["payload_type"],
+            item["target_id"],
+            inbox_id,
+            received_at,
+        ),
+    )
+    if cursor.rowcount == 0:
+        return False
+
+    process_item(agent_id, item, received_at)
+    return True
+
+
 def process_item(agent_id: str, item: dict, received_at: str) -> None:
     payload_type = item["payload_type"]
     target_id = item["target_id"]
@@ -231,7 +257,7 @@ def process_pending_ingest(limit: int = 100) -> dict[str, int]:
     db_conn = get_db()
     rows = db_conn.execute(
         """
-        SELECT id, agent_id, received_at, payload_json
+        SELECT id, agent_id, boot_id, received_at, payload_json
         FROM ingest_inbox
         WHERE status = 'pending'
         ORDER BY id
@@ -253,16 +279,27 @@ def process_pending_ingest(limit: int = 100) -> dict[str, int]:
 
         try:
             payload = json.loads(row["payload_json"])
+            db_conn.execute("BEGIN")
+            batch_processed_items = 0
             for item in payload["items"]:
-                process_item(row["agent_id"], item, row["received_at"])
-                processed_items += 1
+                if process_item_if_new(
+                    inbox_id=row["id"],
+                    agent_id=row["agent_id"],
+                    boot_id=row["boot_id"],
+                    item=item,
+                    received_at=row["received_at"],
+                ):
+                    batch_processed_items += 1
             db_conn.execute(
                 "UPDATE ingest_inbox SET status = 'processed', processed_at = ?, error_message = NULL WHERE id = ?",
                 (now_iso(), row["id"]),
             )
             db_conn.commit()
             processed_batches += 1
+            processed_items += batch_processed_items
         except Exception as exc:
+            if db_conn.in_transaction:
+                db_conn.rollback()
             db_conn.execute(
                 "UPDATE ingest_inbox SET status = 'failed', error_message = ? WHERE id = ?",
                 (str(exc), row["id"]),

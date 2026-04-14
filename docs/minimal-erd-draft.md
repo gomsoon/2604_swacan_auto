@@ -20,6 +20,7 @@
 - `view_nodes`
 - `view_edges`
 - `ingest_inbox`
+- `processed_item_receipts`
 - `latest_states`
 - `raw_events`
 - `debug_payload_logs`
@@ -147,7 +148,29 @@
 - request path 는 이 테이블까지 durable write 한 뒤 ack 를 반환한다.
 - worker 가 `status=pending` 레코드를 읽어 후처리한다.
 
-### 3.6 latest_states
+### 3.6 processed_item_receipts
+
+목적:
+- worker 가 `(agent_id, boot_id, item_seq)` 기준으로 item 단위 중복 반영을 방지하기 위한 처리 영수증 저장
+
+주요 컬럼:
+- `id` INTEGER PK AUTOINCREMENT
+- `agent_id` TEXT NOT NULL
+- `boot_id` TEXT NOT NULL
+- `item_seq` INTEGER NOT NULL
+- `payload_type` TEXT NOT NULL
+- `target_id` TEXT NOT NULL
+- `inbox_id` INTEGER NOT NULL
+- `processed_at` TEXT NOT NULL
+
+관계:
+- `inbox_id -> ingest_inbox.id`
+
+비고:
+- batch receipt 중복 방지와 별도로 worker-level idempotency 를 담당한다.
+- 동일 item 이 다른 batch range 로 다시 들어와도 이 테이블 기준으로 side effect 를 한 번만 적용한다.
+
+### 3.7 latest_states
 
 목적:
 - monitoring 화면 조회용 최신 상태 저장
@@ -172,7 +195,7 @@
 - `state_json` 에는 cpu, memory, pid, heartbeat 등 최소 overlay 정보가 들어간다.
 - 같은 `target_id + state_type` 조합에 대해 upsert 중심으로 관리한다.
 
-### 3.7 raw_events
+### 3.8 raw_events
 
 목적:
 - 최소 event panel 에 표시할 원시 이벤트 저장
@@ -192,7 +215,7 @@
 - 최소 E2E 에서는 `process_started`, `process_stopped`, `process_restarted`, `agent_heartbeat_lost` 정도면 충분하다.
 - grouped event 는 이후 확장에서 별도 테이블 또는 파생 구조로 추가한다.
 
-### 3.8 debug_payload_logs
+### 3.9 debug_payload_logs
 
 목적:
 - backend debug mode 에서만 저장되는 통신 payload 기록
@@ -229,6 +252,7 @@
 - `view_nodes 1:N view_edges` by source/target reference
 - `users 1:N debug_payload_logs` optional
 - `ingest_inbox` 는 다른 테이블의 직접 FK 없이 ingest/work queue 역할을 수행
+- `ingest_inbox 1:N processed_item_receipts`
 - `raw_events` 와 `latest_states` 는 `target_id` 중심으로 연결됨
 
 ## 5. 최소 인덱스 제안
@@ -242,6 +266,7 @@
 - `view_edges(source_node_id)`
 - `view_edges(target_node_id)`
 - `ingest_inbox(status, received_at)`
+- `processed_item_receipts(agent_id, boot_id, item_seq)` UNIQUE
 - `latest_states(target_id, state_type)` UNIQUE 또는 동등 인덱스
 - `raw_events(target_id, occurred_at)`
 - `raw_events(event_type, occurred_at)`

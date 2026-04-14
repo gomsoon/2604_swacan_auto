@@ -45,18 +45,25 @@
 ### B-02 duplicate/idempotency 보강
 
 - 우선순위: `최우선`
-- 설명: agent 재전송이 발생해도 `(agent_id, boot_id, seq)` 기준으로 중복 반영을 방지해야 한다. 현재 `receipt batch` 기준 중복 수신 방지는 1차 반영되었고, 남은 범위는 worker 처리 결과 기준의 idempotency 보강이다.
+- 설명: agent 재전송이 발생해도 `(agent_id, boot_id, seq)` 기준으로 중복 반영을 방지해야 한다.
+- 현재 상태:
+- `receipt batch` 기준 중복 수신 방지는 이미 반영되었다.
+- worker 는 `processed_item_receipts` 기준으로 item(seq) 단위 idempotency 를 적용하여, 겹치는 batch 가 다시 들어와도 새 item 만 반영한다.
 - 완료 기준:
-- 동일 batch 재전송 시 latest state/raw event 가 중복 반영되지 않아야 한다.
+- 동일 batch 재전송 시 latest state/raw event 가 중복 반영되지 않아야 한다. 완료
+- 겹치는 seq 를 포함하는 batch 재전송 시 새 item 만 반영되어야 한다. 완료
 - 테스트 기준: duplicate ingest 테스트
 
 ### B-03 batch 처리 원자성/rollback 정책
 
 - 우선순위: `높음`
 - 설명: 현재 ack 의미는 receipt ack 로 정리됐으므로, worker 쪽에서는 batch 처리 중 실패 시 어느 범위까지 rollback 할지 정책을 더 명확히 해야 한다.
+- 현재 상태:
+- worker 는 batch 단위 transaction 안에서 item 처리와 `processed_item_receipts` 기록을 함께 수행한다.
+- batch 중간 실패 시 latest state, raw event, item receipt 변경은 rollback 되고 해당 inbox row 만 `failed` 로 남는다.
 - 완료 기준:
-- batch 단위 commit/rollback 정책이 문서와 코드에서 일치해야 한다.
-- 운영자가 failed batch 와 partial effect 가능성을 구분할 수 있어야 한다.
+- batch 단위 commit/rollback 정책이 문서와 코드에서 일치해야 한다. 완료
+- 운영자가 failed batch 와 partial effect 가능성을 구분할 수 있어야 한다. 1차 완료
 - 테스트 기준: batch failure/rollback 테스트
 
 ### B-04 agent heartbeat timeout/stale 처리
@@ -125,14 +132,14 @@
 
 ## 7. 지금 바로 이어서 할 작업
 
-1. `B-02 duplicate/idempotency 보강`
-2. `A-04 실행 운영 보조`
-3. `B-03 batch 처리 원자성/rollback 정책`
-4. `F-02 MonitoringAgent/self-state 시각화 보강`
-5. `L-02 운영 증적 정리`
+1. `A-04 실행 운영 보조`
+2. `F-02 MonitoringAgent/self-state 시각화 보강`
+3. `L-02 운영 증적 정리`
+4. `B-04 agent heartbeat timeout/stale 처리`
+5. `B-05 retention/cleanup 보강`
 
 ## 8. 요약
 
 - frontend 는 minimal E2E 관점에서 실제 Linux agent 결과 기반 monitoring 확인까지 완료되었다.
-- backend 는 안정성 보강 항목이 남아 있고, 특히 duplicate 처리와 worker 정책이 중요하다.
+- backend 는 worker-level duplicate/idempotency 와 batch rollback 1차 보강까지 반영되었고, 이제 heartbeat/stale 및 retention 정책이 더 중요하다.
 - agent 는 실제 Linux 서버 기반 L-01 통합 시나리오를 3회 반복 성공한 상태이며, 이제 운영 보조와 product 방향 보강이 남아 있다.

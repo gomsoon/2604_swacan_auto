@@ -239,6 +239,9 @@
 - [필수] backend 는 `(agent_id, boot_id, seq)` 기준으로 중복 처리 정책을 수행해야 한다.
 - [필수] MVP 최소 구조에서는 먼저 `(agent_id, boot_id, seq_start, seq_end)` 기준의 batch receipt 중복 방지를 지원해야 한다.
 - [필수] 동일 batch 가 재전송되면 backend 는 새로운 inbox row 를 만들지 않고, 기존 receipt 기준으로 동일 `ack_seq` 를 반환할 수 있어야 한다.
+- [필수] worker 는 `processed_item_receipts` 또는 동등한 item receipt 저장 구조를 사용해 `(agent_id, boot_id, seq)` 기준의 item-level idempotency 를 수행해야 한다.
+- [필수] 겹치는 seq 를 포함하는 다른 batch 가 다시 들어오더라도 이미 처리한 item 의 side effect 는 재적용하지 않고, 새 item 만 반영해야 한다.
+- [필수] worker 는 batch 단위 transaction 안에서 item 처리와 item receipt 기록을 함께 수행하여, 중간 실패 시 해당 batch 의 side effect 를 rollback 할 수 있어야 한다.
 - [필수] backend 응답은 최소한 `ack_seq`, `accepted_count`, `server_time` 을 포함해야 한다.
 - [필수] MVP 최소 구조에서 backend 응답의 `ack_seq` 는 inbox receipt ack 를 의미하며, item 단위 처리 성공/실패 결과를 직접 반환하지 않아도 된다.
 - [필수] item 단위 처리 결과는 worker 가 별도로 판단하며, 필요 시 관리자 화면이나 후속 결과 테이블을 통해 조회하는 구조로 분리할 수 있어야 한다.

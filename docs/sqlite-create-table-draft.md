@@ -119,7 +119,23 @@ CREATE TABLE IF NOT EXISTS ingest_inbox (
 );
 ```
 
-### 3.6 latest_states
+### 3.6 processed_item_receipts
+
+```sql
+CREATE TABLE IF NOT EXISTS processed_item_receipts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id TEXT NOT NULL,
+    boot_id TEXT NOT NULL,
+    item_seq INTEGER NOT NULL,
+    payload_type TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    inbox_id INTEGER NOT NULL,
+    processed_at TEXT NOT NULL,
+    FOREIGN KEY (inbox_id) REFERENCES ingest_inbox(id) ON DELETE CASCADE
+);
+```
+
+### 3.7 latest_states
 
 ```sql
 CREATE TABLE IF NOT EXISTS latest_states (
@@ -138,7 +154,7 @@ CREATE TABLE IF NOT EXISTS latest_states (
 );
 ```
 
-### 3.7 raw_events
+### 3.8 raw_events
 
 ```sql
 CREATE TABLE IF NOT EXISTS raw_events (
@@ -155,7 +171,7 @@ CREATE TABLE IF NOT EXISTS raw_events (
 );
 ```
 
-### 3.8 debug_payload_logs
+### 3.9 debug_payload_logs
 
 ```sql
 CREATE TABLE IF NOT EXISTS debug_payload_logs (
@@ -204,6 +220,9 @@ CREATE INDEX IF NOT EXISTS idx_view_edges_target_node_id
 CREATE INDEX IF NOT EXISTS idx_ingest_inbox_status_received
     ON ingest_inbox(status, received_at);
 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_processed_item_receipts_agent_boot_seq
+    ON processed_item_receipts(agent_id, boot_id, item_seq);
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_latest_states_target_state_type
     ON latest_states(target_id, state_type);
 
@@ -226,11 +245,12 @@ CREATE INDEX IF NOT EXISTS idx_debug_payload_logs_trace_id_occurred
 - 기본 seed 로그인 예시는 `admin / admin123!` 로 둔다.
 - `views` 와 `view_nodes` 는 demo view 1개와 `PhysicalServer`, `SoftwareProcess`, `MonitoringAgent` 노드 3개를 seed 할 수 있다.
 - `view_nodes.id` 는 backend 가 생성해서 frontend 에 반환하는 정수 PK 로 사용한다.
-- `latest_states`, `raw_events`, `ingest_inbox`, `debug_payload_logs` 는 기본적으로 빈 상태로 시작한다.
+- `latest_states`, `raw_events`, `ingest_inbox`, `processed_item_receipts`, `debug_payload_logs` 는 기본적으로 빈 상태로 시작한다.
 
 ## 6. 구현 시 주의사항
 
 - `latest_states.id` 는 단순 PK 용 내부 식별자이지만, 실제 upsert 키는 `target_id + state_type` 를 사용한다.
+- `processed_item_receipts` 는 `(agent_id, boot_id, item_seq)` 를 worker idempotency 키로 사용한다.
 - `view_nodes` 생성과 삭제는 frontend 임시 ID 기반이 아니라 backend 생성/관리 방식으로 진행하는 것을 전제로 한다.
 - 삭제는 즉시 hard delete 가 아니어도 되며, 필요 시 soft delete 후 background cleanup 정책으로 확장 가능하다.
 - 최소 E2E 에서는 `view_nodes.is_deleted` 를 0으로 유지하는 단순 정책으로 시작하고, 후속 단계에서 soft delete 활용을 확장할 수 있다.

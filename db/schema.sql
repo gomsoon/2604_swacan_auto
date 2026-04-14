@@ -75,6 +75,18 @@ CREATE TABLE IF NOT EXISTS ingest_inbox (
     error_message TEXT
 );
 
+CREATE TABLE IF NOT EXISTS processed_item_receipts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id TEXT NOT NULL,
+    boot_id TEXT NOT NULL,
+    item_seq INTEGER NOT NULL,
+    payload_type TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    inbox_id INTEGER NOT NULL,
+    processed_at TEXT NOT NULL,
+    FOREIGN KEY (inbox_id) REFERENCES ingest_inbox(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS latest_states (
     id INTEGER PRIMARY KEY,
     view_node_id INTEGER,
@@ -144,6 +156,12 @@ CREATE INDEX IF NOT EXISTS idx_ingest_inbox_status_received
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ingest_inbox_agent_boot_seq_range
     ON ingest_inbox(agent_id, boot_id, seq_start, seq_end);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_processed_item_receipts_agent_boot_seq
+    ON processed_item_receipts(agent_id, boot_id, item_seq);
+
+CREATE INDEX IF NOT EXISTS idx_processed_item_receipts_inbox_id
+    ON processed_item_receipts(inbox_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_latest_states_target_state_type
     ON latest_states(target_id, state_type);
