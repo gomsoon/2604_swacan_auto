@@ -17,6 +17,8 @@ VALID_EVENT_TYPES = {
     "process_restarted",
     "agent_heartbeat_lost",
 }
+ALERT_OPEN_STATUSES = {"warning", "down"}
+ALERT_OPEN_SEVERITIES = {"warning", "critical"}
 
 
 @dataclass(frozen=True)
@@ -103,6 +105,138 @@ def resolve_monitored_object_id(target_id: str):
     return row["id"] if row else None
 
 
+def normalize_alert_severity(severity: str | None, status: str) -> str:
+    if severity in {"critical", "warning", "normal", "info"}:
+        return severity
+    if status == "down":
+        return "critical"
+    return "warning"
+
+
+def alert_code_for_state(*, state_type: str, status: str, severity: str | None) -> str | None:
+    if status in ALERT_OPEN_STATUSES:
+        return f"{state_type}.{status}"
+    if severity in ALERT_OPEN_SEVERITIES:
+        return f"{state_type}.{severity}"
+    return None
+
+
+def alert_message_for_state(*, state_type: str, status: str, state: dict) -> str:
+    if state.get("message"):
+        return str(state["message"])
+    if state.get("event_type"):
+        return f"{state_type} {state['event_type']}"
+    return f"{state_type} status changed to {status}"
+
+
+def sync_latest_state_alert(
+    *,
+    monitored_object_id: int | None,
+    state_type: str,
+    status: str,
+    severity: str | None,
+    state: dict,
+    occurred_at: str,
+    received_at: str,
+) -> None:
+    if monitored_object_id is None:
+        return
+
+    db_conn = get_db()
+    alert_prefix = f"{state_type}."
+    alert_code = alert_code_for_state(state_type=state_type, status=status, severity=severity)
+
+    if alert_code is None:
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET status = 'resolved',
+                updated_at = ?,
+                last_occurred_at = ?
+            WHERE monitored_object_id = ?
+              AND status = 'open'
+              AND alert_code LIKE ?
+            """,
+            (received_at, occurred_at, monitored_object_id, f"{alert_prefix}%"),
+        )
+        return
+
+    normalized_severity = normalize_alert_severity(severity, status)
+    latest_message = alert_message_for_state(state_type=state_type, status=status, state=state)
+    metadata_json = json.dumps(state, ensure_ascii=False)
+
+    db_conn.execute(
+        """
+        UPDATE alert_instances
+        SET status = 'resolved',
+            updated_at = ?,
+            last_occurred_at = ?
+        WHERE monitored_object_id = ?
+          AND status = 'open'
+          AND alert_code LIKE ?
+          AND alert_code != ?
+        """,
+        (received_at, occurred_at, monitored_object_id, f"{alert_prefix}%", alert_code),
+    )
+
+    existing = db_conn.execute(
+        """
+        SELECT id
+        FROM alert_instances
+        WHERE monitored_object_id = ?
+          AND alert_code = ?
+          AND status = 'open'
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (monitored_object_id, alert_code),
+    ).fetchone()
+
+    if existing is None:
+        db_conn.execute(
+            """
+            INSERT INTO alert_instances (
+                monitored_object_id, alert_code, severity, status,
+                first_occurred_at, last_occurred_at, repeat_count,
+                latest_message, metadata_json, created_at, updated_at
+            ) VALUES (?, ?, ?, 'open', ?, ?, 1, ?, ?, ?, ?)
+            """,
+            (
+                monitored_object_id,
+                alert_code,
+                normalized_severity,
+                occurred_at,
+                occurred_at,
+                latest_message,
+                metadata_json,
+                received_at,
+                received_at,
+            ),
+        )
+        return
+
+    db_conn.execute(
+        """
+        UPDATE alert_instances
+        SET severity = ?,
+            last_occurred_at = ?,
+            repeat_count = repeat_count + 1,
+            latest_message = ?,
+            metadata_json = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            normalized_severity,
+            occurred_at,
+            latest_message,
+            metadata_json,
+            received_at,
+            existing["id"],
+        ),
+    )
+
+
 def upsert_latest_state(*, target_id: str, state_type: str, status: str, severity: str | None, state: dict, occurred_at: str, received_at: str) -> None:
     db_conn = get_db()
     existing = db_conn.execute(
@@ -136,6 +270,15 @@ def upsert_latest_state(*, target_id: str, state_type: str, status: str, severit
                 received_at,
             ),
         )
+        sync_latest_state_alert(
+            monitored_object_id=monitored_object_id,
+            state_type=state_type,
+            status=status,
+            severity=severity,
+            state=state,
+            occurred_at=occurred_at,
+            received_at=received_at,
+        )
         return
 
     db_conn.execute(
@@ -155,6 +298,15 @@ def upsert_latest_state(*, target_id: str, state_type: str, status: str, severit
             received_at,
             existing["id"],
         ),
+    )
+    sync_latest_state_alert(
+        monitored_object_id=monitored_object_id,
+        state_type=state_type,
+        status=status,
+        severity=severity,
+        state=state,
+        occurred_at=occurred_at,
+        received_at=received_at,
     )
 
 

@@ -120,6 +120,32 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
             """,
             ("Agent Alpha", "agent_local", draft_row["id"]),
         )
+        process_row = db_conn.execute(
+            """
+            SELECT id
+            FROM view_version_nodes
+            WHERE view_version_id = ? AND node_type = 'SoftwareProcess'
+            LIMIT 1
+            """,
+            (draft_row["id"],),
+        ).fetchone()
+        db_conn.execute(
+            "DELETE FROM node_bindings WHERE view_version_node_id = ?",
+            (process_row["id"],),
+        )
+        db_conn.execute(
+            """
+            INSERT INTO node_bindings (
+                view_version_node_id, monitored_object_id, binding_role, created_at, updated_at
+            ) VALUES (?, ?, 'primary', ?, ?)
+            """,
+            (
+                process_row["id"],
+                1302,
+                "2026-04-12T20:09:58.000+09:00",
+                "2026-04-12T20:09:58.000+09:00",
+            ),
+        )
         db_conn.commit()
 
     post_ingest(
@@ -128,20 +154,20 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
             "agent_id": "agent_local",
             "boot_id": "boot-playwright",
             "seq_start": 1,
-            "seq_end": 4,
+            "seq_end": 5,
             "items": [
                 {
                     "seq": 1,
                     "payload_type": "agent_state",
                     "occurred_at": "2026-04-12T20:09:59.000+09:00",
                     "target_id": "agent_local",
-                    "payload": {
-                        "heartbeat_time": "2026-04-12T20:09:59.000+09:00",
-                        "backend_connection_status": "connected",
-                        "outbox_queue_depth": 0,
-                        "last_ack_seq": 4,
+                        "payload": {
+                            "heartbeat_time": "2026-04-12T20:09:59.000+09:00",
+                            "backend_connection_status": "connected",
+                            "outbox_queue_depth": 0,
+                            "last_ack_seq": 5,
+                        },
                     },
-                },
                 {
                     "seq": 2,
                     "payload_type": "host_snapshot",
@@ -158,27 +184,38 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
                         "memory_used": 10485760,
                     },
                 },
-                {
-                    "seq": 3,
-                    "payload_type": "process_snapshot",
-                    "occurred_at": "2026-04-12T20:10:00.000+09:00",
-                    "target_id": process_target_id,
-                    "payload": {
-                        "state": "running",
-                        "severity": "info",
+                    {
+                        "seq": 3,
+                        "payload_type": "process_snapshot",
+                        "occurred_at": "2026-04-12T20:10:00.000+09:00",
+                        "target_id": "app_main",
+                        "payload": {
+                            "state": "running",
+                            "severity": "info",
                         "cpu_usage": 12.5,
                         "memory_rss": 20480,
                     },
                 },
-                {
-                    "seq": 4,
-                    "payload_type": "process_event",
-                    "occurred_at": "2026-04-12T20:10:01.000+09:00",
-                    "target_id": process_target_id,
-                    "payload": {
-                        "event_type": "process_started",
+                    {
+                        "seq": 4,
+                        "payload_type": "process_event",
+                        "occurred_at": "2026-04-12T20:10:01.000+09:00",
+                        "target_id": "app_main",
+                        "payload": {
+                            "event_type": "process_started",
                         "severity": "info",
                         "message": "Playwright process started",
+                    },
+                },
+                    {
+                        "seq": 5,
+                        "payload_type": "process_event",
+                        "occurred_at": "2026-04-12T20:10:02.000+09:00",
+                        "target_id": "app_main",
+                        "payload": {
+                        "event_type": "process_restarted",
+                        "severity": "warning",
+                        "message": "Playwright process restarted",
                     },
                 },
             ],
@@ -203,7 +240,9 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     expect(page.locator("#monitor-agent-summary")).to_contain_text("Agent Alpha")
     expect(page.locator("#monitor-agent-summary")).to_contain_text("connected")
     expect(page.locator("#monitor-agent-summary")).to_contain_text("outbox 0")
-    expect(page.locator("#monitor-agent-summary")).to_contain_text("ack 4")
+    expect(page.locator("#monitor-agent-summary")).to_contain_text("ack 5")
+    expect(page.locator("#alerts-list")).to_contain_text("process.warning")
+    expect(page.locator('g.diagram-node[data-node-type="SoftwareProcess"] .node-alert-badge')).to_have_count(1)
 
     monitor_server_node.click(force=True, position={"x": 24, "y": 24})
     expect(page.locator("#monitor-selection-summary")).to_contain_text("Host Alpha")
@@ -221,9 +260,10 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     expect(page.locator("#monitor-selection-summary")).to_contain_text("Worker Alpha")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("프로세스 상태")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("최근 이벤트")
-    expect(page.locator("#monitor-selection-summary")).to_contain_text("process_started")
-    expect(page.locator("#events-list")).to_contain_text("process_started")
-    expect(page.locator("#events-list")).to_contain_text("Playwright process started")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("process_restarted")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("열린 alert 수: 1")
+    expect(page.locator("#events-list")).to_contain_text("process_restarted")
+    expect(page.locator("#events-list")).to_contain_text("Playwright process restarted")
 
 
 def test_playwright_admin_page(page: Page, live_server) -> None:

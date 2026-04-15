@@ -7,6 +7,7 @@ const appRoot = document.getElementById("monitor-app");
 const svg = document.getElementById("monitor-canvas");
 const monitorStatus = document.getElementById("monitor-status");
 const agentSummary = document.getElementById("monitor-agent-summary");
+const alertsList = document.getElementById("alerts-list");
 const eventsList = document.getElementById("events-list");
 const selectionSummary = document.getElementById("monitor-selection-summary");
 const refreshEventsButton = document.getElementById("refresh-events-button");
@@ -18,6 +19,7 @@ const state = {
     nodes: [],
     edges: [],
     latestStates: [],
+    alerts: [],
     events: [],
     selectedNodeId: null,
 };
@@ -109,6 +111,22 @@ function formatHeartbeatAge(payload) {
     return `${formatNumber(payload.heartbeat_age_seconds, 1)}초`;
 }
 
+function latestStateForNode(node) {
+    if (!node) {
+        return null;
+    }
+    if (node.monitored_object_id) {
+        const byObject = state.latestStates.find((item) => item.monitored_object_id === node.monitored_object_id);
+        if (byObject) {
+            return byObject;
+        }
+    }
+    if (node.target_id) {
+        return state.latestStates.find((item) => item.target_id === node.target_id) || null;
+    }
+    return null;
+}
+
 function agentStatusText(payload, stateRow) {
     if (payload.heartbeat_timeout_level === "down") {
         return "heartbeat 끊김";
@@ -123,6 +141,7 @@ function buildStateDetailRows(node, stateRow) {
     const payload = stateRow.state || {};
     const rows = [
         { label: "타겟", value: node.target_id || "-" },
+        { label: "모니터링 객체", value: node.monitored_object_id ?? "-" },
         { label: "구성 요소", value: node.node_type },
         { label: "상태 종류", value: stateRow.state_type },
         { label: "상태", value: stateRow.status },
@@ -193,6 +212,26 @@ function renderEvents() {
         .join("");
 }
 
+function renderAlerts() {
+    if (state.alerts.length === 0) {
+        alertsList.innerHTML = '<p class="section-copy">현재 열린 alert가 없습니다.</p>';
+        return;
+    }
+
+    alertsList.innerHTML = state.alerts
+        .map(
+            (alert) => `
+            <article class="event-item alert-item severity-${escapeHtml(alert.severity)}">
+                <h3>${escapeHtml(alert.alert_code)}</h3>
+                <p>${escapeHtml(alert.latest_message || "메시지 없음")}</p>
+                <p>object ${escapeHtml(alert.monitored_object_id)} | ${escapeHtml(alert.severity)} | 반복 ${escapeHtml(alert.repeat_count)}회</p>
+                <p>${escapeHtml(formatTimestamp(alert.last_occurred_at))}</p>
+            </article>
+        `
+        )
+        .join("");
+}
+
 function renderAgentSummary() {
     const agents = state.nodes.filter((node) => node.node_type === "MonitoringAgent");
     if (agents.length === 0) {
@@ -202,7 +241,7 @@ function renderAgentSummary() {
 
     agentSummary.innerHTML = agents
         .map((node) => {
-            const stateRow = state.latestStates.find((item) => item.target_id === node.target_id);
+            const stateRow = latestStateForNode(node);
             const payload = stateRow?.state || {};
             const level = runtimeLevel(stateRow);
             const statusText = agentStatusText(payload, stateRow);
@@ -236,12 +275,14 @@ function renderSelection() {
         return;
     }
 
-    const stateRow = state.latestStates.find((item) => item.target_id === node.target_id);
+    const stateRow = latestStateForNode(node);
+    const nodeAlerts = state.alerts.filter((item) => item.monitored_object_id === node.monitored_object_id);
     if (!stateRow) {
         selectionSummary.innerHTML = `
             <p><strong>${escapeHtml(node.display_name)}</strong></p>
             <p>아직 runtime state가 없습니다.</p>
             <p class="selection-kind">타겟 ID: ${escapeHtml(node.target_id || "-")}</p>
+            <p class="selection-kind">열린 alert 수: ${escapeHtml(nodeAlerts.length)}</p>
         `;
         return;
     }
@@ -249,6 +290,7 @@ function renderSelection() {
     const detailRows = buildStateDetailRows(node, stateRow);
     selectionSummary.innerHTML = `
         <p><strong>${escapeHtml(node.display_name)}</strong></p>
+        <p class="selection-kind">열린 alert 수: ${escapeHtml(nodeAlerts.length)}</p>
         <div class="detail-grid">${renderDetailRows(detailRows)}</div>
         <details class="state-payload-block">
             <summary>Raw state payload</summary>
@@ -259,12 +301,25 @@ function renderSelection() {
 
 function render() {
     const latestStatesByTargetId = new Map(state.latestStates.map((item) => [item.target_id, item]));
+    const latestStatesByMonitoredObjectId = new Map(
+        state.latestStates
+            .filter((item) => item.monitored_object_id !== null && item.monitored_object_id !== undefined)
+            .map((item) => [item.monitored_object_id, item])
+    );
+    const alertsByMonitoredObjectId = new Map();
+    for (const alert of state.alerts) {
+        const items = alertsByMonitoredObjectId.get(alert.monitored_object_id) || [];
+        items.push(alert);
+        alertsByMonitoredObjectId.set(alert.monitored_object_id, items);
+    }
     renderDiagram(svg, {
         nodes: state.nodes,
         edges: state.edges,
         notationDefinitionsByCode: state.notationDefinitionsByCode,
         selectedNodeId: state.selectedNodeId,
         latestStatesByTargetId,
+        latestStatesByMonitoredObjectId,
+        alertsByMonitoredObjectId,
         onNodeClick: (node, event) => {
             event.stopPropagation();
             state.selectedNodeId = node.id;
@@ -273,6 +328,7 @@ function render() {
         onEdgeClick: (_edge, event) => event.stopPropagation(),
     });
     renderAgentSummary();
+    renderAlerts();
     renderEvents();
     renderSelection();
 }
@@ -310,11 +366,13 @@ async function loadView() {
 }
 
 async function loadRuntimeData() {
-    const [latest, events] = await Promise.all([
+    const [latest, alerts, events] = await Promise.all([
         apiFetch(`/api/views/${state.viewId}/latest-state`),
+        apiFetch(`/api/views/${state.viewId}/alerts?limit=20`),
         apiFetch(`/api/views/${state.viewId}/events?limit=20`),
     ]);
     state.latestStates = latest.items;
+    state.alerts = alerts.items;
     state.events = events.items;
     monitorStatus.textContent = `최근 갱신 ${new Date().toLocaleTimeString("ko-KR", { hour12: false })}`;
 }

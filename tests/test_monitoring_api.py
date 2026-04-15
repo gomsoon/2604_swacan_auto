@@ -136,6 +136,27 @@ def seed_monitoring_rows(app) -> None:
                 "2026-04-10T10:30:10.230+09:00",
             ),
         )
+        db_conn.execute(
+            """
+            INSERT INTO alert_instances (
+                monitored_object_id, alert_code, severity, status, first_occurred_at, last_occurred_at,
+                repeat_count, latest_message, metadata_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1302,
+                "process.down",
+                "critical",
+                "open",
+                "2026-04-10T10:21:10.100+09:00",
+                "2026-04-10T10:21:10.100+09:00",
+                1,
+                "process not found",
+                json.dumps({"event_type": "process_stopped"}),
+                "2026-04-10T10:21:10.230+09:00",
+                "2026-04-10T10:21:10.230+09:00",
+            ),
+        )
         db_conn.commit()
 
 
@@ -278,6 +299,54 @@ def test_events_prefers_monitored_object_binding_over_changed_active_target_id(s
     assert any(item["target_id"] == "app_main" for item in payload["items"])
     assert not any(item["target_id"] == "stale_process_target" for item in payload["items"])
     assert payload["items"][0]["monitored_object_id"] == 1302
+
+
+def test_alerts_return_open_monitored_object_alerts_for_active_view(seeded_app, seeded_client) -> None:
+    seed_monitoring_rows(seeded_app)
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/1/alerts?limit=10")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["monitored_object_id"] == 1302
+    assert payload["items"][0]["alert_code"] == "process.down"
+    assert payload["items"][0]["repeat_count"] == 1
+
+
+def test_alerts_prefer_monitored_object_binding_over_changed_active_target_id(seeded_app, seeded_client) -> None:
+    seed_monitoring_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE view_version_nodes
+            SET target_id = 'stale_process_target'
+            WHERE id = 1102
+            """
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/1/alerts?limit=10")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["monitored_object_id"] == 1302
+
+
+def test_alerts_reject_out_of_range_limits(seeded_client) -> None:
+    login(seeded_client)
+
+    low_response = seeded_client.get("/api/views/1/alerts?limit=0")
+    high_response = seeded_client.get("/api/views/1/alerts?limit=101")
+
+    assert low_response.status_code == 400
+    assert low_response.get_json()["error"]["code"] == "validation_error"
+    assert high_response.status_code == 400
+    assert high_response.get_json()["error"]["code"] == "validation_error"
 
 
 def test_latest_state_prefers_draft_targets_when_active_version_is_missing(seeded_app, seeded_client) -> None:

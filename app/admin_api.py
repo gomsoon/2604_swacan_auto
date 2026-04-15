@@ -139,6 +139,26 @@ def serialize_cleanup_run(row) -> dict[str, Any]:
     }
 
 
+def serialize_alert_instance(row) -> dict[str, Any]:
+    payload = {
+        "id": row["id"],
+        "monitored_object_id": row["monitored_object_id"],
+        "runtime_binding_key": row["runtime_binding_key"],
+        "semantic_type_code": row["semantic_type_code"],
+        "display_name": row["display_name"],
+        "alert_code": row["alert_code"],
+        "severity": row["severity"],
+        "status": row["status"],
+        "first_occurred_at": row["first_occurred_at"],
+        "last_occurred_at": row["last_occurred_at"],
+        "repeat_count": row["repeat_count"],
+        "latest_message": row["latest_message"],
+    }
+    if row["metadata_json"]:
+        payload["metadata"] = parse_json_or_text(row["metadata_json"])
+    return payload
+
+
 def load_derived_latest_states(state_type: str | None = None) -> list[dict[str, Any]]:
     sql = """
         SELECT monitored_object_id, target_id, state_type, status, severity, state_json, occurred_at, received_at
@@ -165,6 +185,7 @@ def get_summary():
         "view_edges": fetch_count("SELECT COUNT(*) FROM view_edges WHERE is_deleted = 0"),
         "latest_states": fetch_count("SELECT COUNT(*) FROM latest_states"),
         "raw_events": fetch_count("SELECT COUNT(*) FROM raw_events"),
+        "open_alerts": fetch_count("SELECT COUNT(*) FROM alert_instances WHERE status = 'open'"),
         "debug_payload_logs": fetch_count("SELECT COUNT(*) FROM debug_payload_logs"),
         "cleanup_runs": fetch_count("SELECT COUNT(*) FROM cleanup_runs"),
     }
@@ -392,3 +413,44 @@ def list_cleanup_runs():
         (limit,),
     ).fetchall()
     return {"items": [serialize_cleanup_run(row) for row in rows]}
+
+
+@bp.get("/alerts")
+@admin_required
+def list_alert_instances():
+    limit, error = parse_limit()
+    if error:
+        return error
+
+    status = request.args.get("status", "open")
+    if status not in {"open", "resolved"}:
+        return error_response("validation_error", "invalid status filter", 400)
+
+    severity = request.args.get("severity")
+    if severity and severity not in {"critical", "warning", "normal", "info"}:
+        return error_response("validation_error", "invalid severity filter", 400)
+
+    clauses = ["alerts.status = ?"]
+    params: list[Any] = [status]
+    if severity:
+        clauses.append("alerts.severity = ?")
+        params.append(severity)
+
+    sql = """
+        SELECT alerts.id, alerts.monitored_object_id, mo.runtime_binding_key, mo.object_type AS semantic_type_code,
+               mo.display_name, alerts.alert_code, alerts.severity, alerts.status,
+               alerts.first_occurred_at, alerts.last_occurred_at, alerts.repeat_count,
+               alerts.latest_message, alerts.metadata_json
+        FROM alert_instances AS alerts
+        JOIN monitored_objects AS mo ON mo.id = alerts.monitored_object_id
+        WHERE {where_clause}
+        ORDER BY
+            CASE alerts.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+            alerts.last_occurred_at DESC,
+            alerts.id DESC
+        LIMIT ?
+    """.format(where_clause=" AND ".join(clauses))
+    params.append(limit)
+
+    rows = get_db().execute(sql, tuple(params)).fetchall()
+    return {"items": [serialize_alert_instance(row) for row in rows]}

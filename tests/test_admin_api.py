@@ -208,6 +208,27 @@ def seed_admin_dashboard_rows(app) -> None:
         )
         db_conn.execute(
             """
+            INSERT INTO alert_instances (
+                monitored_object_id, alert_code, severity, status, first_occurred_at, last_occurred_at,
+                repeat_count, latest_message, metadata_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1303,
+                "agent.warning",
+                "warning",
+                "open",
+                "2026-04-12T11:04:00.100+09:00",
+                "2026-04-12T11:04:00.100+09:00",
+                1,
+                "heartbeat delayed",
+                json.dumps({"event_type": "agent_heartbeat_lost"}),
+                "2026-04-12T11:04:00.200+09:00",
+                "2026-04-12T11:04:00.200+09:00",
+            ),
+        )
+        db_conn.execute(
+            """
             INSERT INTO debug_payload_logs (
                 channel, direction, endpoint_or_topic, agent_id, user_id, session_id,
                 trace_id, status_code, payload_json, payload_size, is_redacted, occurred_at
@@ -299,6 +320,7 @@ def test_admin_summary_returns_counts_and_recent_failures(seeded_app, seeded_cli
         "view_edges": 1,
         "latest_states": 3,
         "raw_events": 2,
+        "open_alerts": 1,
         "debug_payload_logs": 2,
         "cleanup_runs": 1,
     }
@@ -413,3 +435,26 @@ def test_admin_cleanup_runs_returns_recent_history(seeded_app, seeded_client) ->
     assert len(payload["items"]) == 1
     assert payload["items"][0]["raw_events_deleted"] == 2
     assert payload["items"][0]["debug_payload_logs_deleted"] == 1
+
+
+def test_admin_alerts_returns_open_alerts(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/alerts?limit=10&status=open")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["monitored_object_id"] == 1303
+    assert payload["items"][0]["alert_code"] == "agent.warning"
+    assert payload["items"][0]["runtime_binding_key"] == "agent_local"
+
+
+def test_admin_alerts_reject_invalid_status_filter(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/alerts?status=bad")
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"

@@ -436,6 +436,164 @@ def test_unmapped_target_keeps_monitored_object_id_null(seeded_app, seeded_clien
     assert state_row["status"] == "up"
 
 
+def test_alert_instance_opens_and_repeats_for_abnormal_process_state(seeded_app, seeded_client) -> None:
+    warning_batch = {
+        "agent_id": "agent_local",
+        "boot_id": "boot_alerts",
+        "seq_start": 41,
+        "seq_end": 41,
+        "sent_at": "2026-04-10T10:40:00.150+09:00",
+        "items": [
+            {
+                "seq": 41,
+                "payload_type": "process_event",
+                "occurred_at": "2026-04-10T10:40:00.100+09:00",
+                "target_id": "app_main",
+                "payload": {
+                    "event_type": "process_restarted",
+                    "severity": "warning",
+                    "message": "process restarted",
+                },
+            }
+        ],
+    }
+
+    first_response = seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=warning_batch)
+    assert first_response.status_code == 202
+
+    with seeded_app.app_context():
+        first_result = process_pending_ingest(limit=10)
+        db_conn = get_db()
+        first_alert = db_conn.execute(
+            """
+            SELECT monitored_object_id, alert_code, severity, status, repeat_count, latest_message
+            FROM alert_instances
+            WHERE monitored_object_id = 1302
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert first_result == {
+        "processed_batches": 1,
+        "failed_batches": 0,
+        "processed_items": 1,
+    }
+    assert first_alert["alert_code"] == "process.warning"
+    assert first_alert["severity"] == "warning"
+    assert first_alert["status"] == "open"
+    assert first_alert["repeat_count"] == 1
+    assert first_alert["latest_message"] == "process restarted"
+
+    repeat_batch = {
+        **warning_batch,
+        "seq_start": 42,
+        "seq_end": 42,
+        "items": [
+            {
+                **warning_batch["items"][0],
+                "seq": 42,
+                "occurred_at": "2026-04-10T10:41:00.100+09:00",
+            }
+        ],
+    }
+    second_response = seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=repeat_batch)
+    assert second_response.status_code == 202
+
+    with seeded_app.app_context():
+        second_result = process_pending_ingest(limit=10)
+        db_conn = get_db()
+        second_alert = db_conn.execute(
+            """
+            SELECT alert_code, status, repeat_count
+            FROM alert_instances
+            WHERE monitored_object_id = 1302 AND status = 'open'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        open_count = db_conn.execute(
+            "SELECT COUNT(*) AS count FROM alert_instances WHERE monitored_object_id = 1302 AND status = 'open'"
+        ).fetchone()["count"]
+
+    assert second_result == {
+        "processed_batches": 1,
+        "failed_batches": 0,
+        "processed_items": 1,
+    }
+    assert second_alert["alert_code"] == "process.warning"
+    assert second_alert["repeat_count"] == 2
+    assert open_count == 1
+
+
+def test_alert_instance_resolves_when_process_recovers(seeded_app, seeded_client) -> None:
+    down_batch = {
+        "agent_id": "agent_local",
+        "boot_id": "boot_alert_resolve",
+        "seq_start": 51,
+        "seq_end": 51,
+        "sent_at": "2026-04-10T10:50:00.150+09:00",
+        "items": [
+            {
+                "seq": 51,
+                "payload_type": "process_event",
+                "occurred_at": "2026-04-10T10:50:00.100+09:00",
+                "target_id": "app_main",
+                "payload": {
+                    "event_type": "process_stopped",
+                    "severity": "warning",
+                    "message": "process not found",
+                },
+            }
+        ],
+    }
+
+    up_batch = {
+        "agent_id": "agent_local",
+        "boot_id": "boot_alert_resolve",
+        "seq_start": 52,
+        "seq_end": 52,
+        "sent_at": "2026-04-10T10:51:00.150+09:00",
+        "items": [
+            {
+                "seq": 52,
+                "payload_type": "process_event",
+                "occurred_at": "2026-04-10T10:51:00.100+09:00",
+                "target_id": "app_main",
+                "payload": {
+                    "event_type": "process_started",
+                    "severity": "info",
+                    "message": "process started",
+                },
+            }
+        ],
+    }
+
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=down_batch).status_code == 202
+    with seeded_app.app_context():
+        first_result = process_pending_ingest(limit=10)
+        open_count = get_db().execute(
+            "SELECT COUNT(*) AS count FROM alert_instances WHERE monitored_object_id = 1302 AND status = 'open'"
+        ).fetchone()["count"]
+    assert first_result["processed_items"] == 1
+    assert open_count == 1
+
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=up_batch).status_code == 202
+    with seeded_app.app_context():
+        second_result = process_pending_ingest(limit=10)
+        db_conn = get_db()
+        open_count_after = db_conn.execute(
+            "SELECT COUNT(*) AS count FROM alert_instances WHERE monitored_object_id = 1302 AND status = 'open'"
+        ).fetchone()["count"]
+        resolved_count = db_conn.execute(
+            "SELECT COUNT(*) AS count FROM alert_instances WHERE monitored_object_id = 1302 AND status = 'resolved'"
+        ).fetchone()["count"]
+
+    assert second_result["processed_items"] == 1
+    assert open_count_after == 0
+    assert resolved_count == 1
+
+
 def test_process_ingest_cli_command(seeded_client, seeded_runner) -> None:
     ingest_response = seeded_client.post(
         "/api/agents/ingest",

@@ -61,6 +61,19 @@ function valueForRenderSource(source, node, latestState) {
     return null;
 }
 
+function runtimeStateForNode(node, latestStatesByTargetId, latestStatesByMonitoredObjectId) {
+    if (node.monitored_object_id && latestStatesByMonitoredObjectId instanceof Map) {
+        const byObject = latestStatesByMonitoredObjectId.get(node.monitored_object_id);
+        if (byObject) {
+            return byObject;
+        }
+    }
+    if (node.target_id && latestStatesByTargetId instanceof Map) {
+        return latestStatesByTargetId.get(node.target_id) || null;
+    }
+    return null;
+}
+
 function resolveNodeTextContent(node, renderDescriptor, latestState) {
     const labelSlots = renderDescriptor.notation?.render_schema?.label_slots || [];
     const title = valueForRenderSource(labelSlots[0]?.source, node, latestState) || node.display_name;
@@ -88,12 +101,8 @@ function resolveAnchorPoint(node, anchor) {
     }
 }
 
-function statusClassForNode(node, latestStatesByTargetId) {
-    if (!node.target_id) {
-        return "";
-    }
-
-    const state = latestStatesByTargetId.get(node.target_id);
+function statusClassForNode(node, latestStatesByTargetId, latestStatesByMonitoredObjectId) {
+    const state = runtimeStateForNode(node, latestStatesByTargetId, latestStatesByMonitoredObjectId);
     if (!state) {
         return "";
     }
@@ -110,12 +119,12 @@ function statusClassForNode(node, latestStatesByTargetId) {
     return "";
 }
 
-function agentBadgeTextForNode(node, latestStatesByTargetId) {
-    if (node.node_type !== "MonitoringAgent" || !node.target_id) {
+function agentBadgeTextForNode(node, latestStatesByTargetId, latestStatesByMonitoredObjectId) {
+    if (node.node_type !== "MonitoringAgent") {
         return null;
     }
 
-    const state = latestStatesByTargetId.get(node.target_id);
+    const state = runtimeStateForNode(node, latestStatesByTargetId, latestStatesByMonitoredObjectId);
     if (!state) {
         return "미수신";
     }
@@ -133,6 +142,13 @@ function agentBadgeTextForNode(node, latestStatesByTargetId) {
         return `${connection} · q${queueDepth}`;
     }
     return connection;
+}
+
+function alertCountForNode(node, alertsByMonitoredObjectId) {
+    if (!node.monitored_object_id || !(alertsByMonitoredObjectId instanceof Map)) {
+        return 0;
+    }
+    return alertsByMonitoredObjectId.get(node.monitored_object_id)?.length || 0;
 }
 
 function buildViewBox(nodes) {
@@ -155,6 +171,8 @@ export function renderDiagram(svg, options) {
         selectedEdgeId = null,
         connectSourceId = null,
         latestStatesByTargetId = new Map(),
+        latestStatesByMonitoredObjectId = new Map(),
+        alertsByMonitoredObjectId = new Map(),
         notationDefinitionsByCode = new Map(),
         onNodeClick,
         onNodePointerDown,
@@ -230,8 +248,8 @@ export function renderDiagram(svg, options) {
     }
 
     for (const node of sortedNodes) {
-        const latestState = latestStatesByTargetId.get(node.target_id);
-        const statusClass = statusClassForNode(node, latestStatesByTargetId);
+        const latestState = runtimeStateForNode(node, latestStatesByTargetId, latestStatesByMonitoredObjectId);
+        const statusClass = statusClassForNode(node, latestStatesByTargetId, latestStatesByMonitoredObjectId);
         const classes = ["diagram-node"];
         const renderDescriptor = nodeRenderDescriptor(node, notationDefinitionsByCode);
         const textContent = resolveNodeTextContent(node, renderDescriptor, latestState);
@@ -306,7 +324,8 @@ export function renderDiagram(svg, options) {
         meta.textContent = textContent.subtitle;
         group.appendChild(meta);
 
-        const agentBadgeText = agentBadgeTextForNode(node, latestStatesByTargetId);
+        const agentBadgeText = agentBadgeTextForNode(node, latestStatesByTargetId, latestStatesByMonitoredObjectId);
+        const alertCount = alertCountForNode(node, alertsByMonitoredObjectId);
         if (agentBadgeText) {
             const badgeWidth = Math.min(Math.max(agentBadgeText.length * 7 + 18, 78), Math.max(node.width - 16, 78));
             const badgeGroup = svgEl("g", {
@@ -333,6 +352,30 @@ export function renderDiagram(svg, options) {
             badgeText.textContent = agentBadgeText;
             badgeGroup.appendChild(badgeText);
             group.appendChild(badgeGroup);
+        }
+
+        if (alertCount > 0) {
+            const alertBadge = svgEl("g", {
+                class: "node-alert-badge",
+                transform: `translate(12, 12)`,
+            });
+            alertBadge.appendChild(
+                svgEl("circle", {
+                    class: "node-alert-badge-shape",
+                    cx: 0,
+                    cy: 0,
+                    r: 11,
+                })
+            );
+            const alertText = svgEl("text", {
+                class: "node-alert-badge-text",
+                x: 0,
+                y: 4,
+                "text-anchor": "middle",
+            });
+            alertText.textContent = String(Math.min(alertCount, 99));
+            alertBadge.appendChild(alertText);
+            group.appendChild(alertBadge);
         }
 
         if (typeof onNodeClick === "function") {

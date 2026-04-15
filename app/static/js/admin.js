@@ -13,6 +13,7 @@ const metamodelVersionCount = document.getElementById("metamodel-version-count")
 const ingestList = document.getElementById("admin-ingest-list");
 const latestStateList = document.getElementById("admin-latest-state-list");
 const eventsList = document.getElementById("admin-events-list");
+const alertsList = document.getElementById("admin-alerts-list");
 const debugList = document.getElementById("admin-debug-list");
 const cleanupList = document.getElementById("admin-cleanup-list");
 
@@ -20,6 +21,7 @@ const refreshAdminButton = document.getElementById("refresh-admin-button");
 const refreshIngestButton = document.getElementById("refresh-ingest-button");
 const refreshLatestStateButton = document.getElementById("refresh-latest-state-button");
 const refreshEventsButton = document.getElementById("refresh-admin-events-button");
+const refreshAlertsButton = document.getElementById("refresh-alerts-button");
 const refreshDebugButton = document.getElementById("refresh-debug-button");
 const refreshCleanupButton = document.getElementById("refresh-cleanup-button");
 const refreshMetamodelVersionsButton = document.getElementById("refresh-metamodel-versions-button");
@@ -125,6 +127,7 @@ function renderSummary(payload) {
         ["엣지", payload.counts.view_edges],
         ["latest state", payload.counts.latest_states],
         ["raw event", payload.counts.raw_events],
+        ["open alert", payload.counts.open_alerts],
         ["debug payload", payload.counts.debug_payload_logs],
         ["cleanup run", payload.counts.cleanup_runs],
     ];
@@ -260,6 +263,32 @@ function renderEvents(items) {
                     <h3>${escapeHtml(event.event_type)}</h3>
                     <p>${escapeHtml(event.message || "메시지 없음")}</p>
                     <p>${escapeHtml(event.target_id)} | ${escapeHtml(event.severity)} | ${escapeHtml(formatTimestamp(event.occurred_at))}</p>
+                </article>
+            `
+        )
+        .join("");
+}
+
+function renderAlerts(items) {
+    if (items.length === 0) {
+        alertsList.innerHTML = '<p class="section-copy">현재 열린 alert가 없습니다.</p>';
+        return;
+    }
+
+    alertsList.innerHTML = items
+        .map(
+            (item) => `
+                <article class="admin-item">
+                    <div class="section-header">
+                        <h3>${escapeHtml(item.display_name || item.runtime_binding_key || item.alert_code)}</h3>
+                        <div class="toolbar-inline">
+                            <span class="meta-pill">${escapeHtml(item.alert_code)}</span>
+                            <span class="meta-pill">${escapeHtml(item.severity)}</span>
+                        </div>
+                    </div>
+                    <p class="admin-meta">object=${escapeHtml(item.monitored_object_id)} | binding=${escapeHtml(item.runtime_binding_key || "-")} | type=${escapeHtml(item.semantic_type_code || "-")}</p>
+                    <p class="admin-meta">반복 ${escapeHtml(item.repeat_count)}회 | 최근 ${escapeHtml(formatTimestamp(item.last_occurred_at))}</p>
+                    <p class="admin-meta">${escapeHtml(item.latest_message || "메시지 없음")}</p>
                 </article>
             `
         )
@@ -405,6 +434,11 @@ async function loadEvents() {
     renderEvents(payload.items);
 }
 
+async function loadAlerts() {
+    const payload = await apiFetch("/api/admin/alerts?limit=10&status=open");
+    renderAlerts(payload.items);
+}
+
 async function loadDebug() {
     const params = new URLSearchParams({ limit: "10" });
     if (debugDirectionFilter.value) {
@@ -472,6 +506,7 @@ async function refreshAll() {
             loadIngest(),
             loadLatestStates(),
             loadEvents(),
+            loadAlerts(),
             loadDebug(),
             loadCleanupRuns(),
         ]);
@@ -484,6 +519,7 @@ refreshAdminButton?.addEventListener("click", refreshAll);
 refreshIngestButton?.addEventListener("click", loadIngest);
 refreshLatestStateButton?.addEventListener("click", loadLatestStates);
 refreshEventsButton?.addEventListener("click", loadEvents);
+refreshAlertsButton?.addEventListener("click", loadAlerts);
 refreshDebugButton?.addEventListener("click", loadDebug);
 refreshCleanupButton?.addEventListener("click", loadCleanupRuns);
 refreshMetamodelVersionsButton?.addEventListener("click", loadMetamodelVersions);

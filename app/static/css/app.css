@@ -540,6 +540,14 @@ a {
     color: var(--muted);
 }
 
+.event-item.alert-item.severity-critical {
+    background: var(--danger-soft);
+}
+
+.event-item.alert-item.severity-warning {
+    background: var(--warning-soft);
+}
+
 .diagram-edge {
     stroke: #50606d;
     stroke-width: 2.5;
@@ -606,6 +614,18 @@ a {
     font-size: 10px;
     font-weight: 700;
     fill: var(--ink);
+}
+
+.diagram-node .node-alert-badge-shape {
+    fill: var(--danger);
+    stroke: rgba(64, 81, 98, 0.16);
+    stroke-width: 1;
+}
+
+.diagram-node .node-alert-badge-text {
+    font-size: 10px;
+    font-weight: 700;
+    fill: #fff;
 }
 
 .diagram-node.is-selected .node-shape {

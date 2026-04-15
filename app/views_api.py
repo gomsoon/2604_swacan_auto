@@ -109,6 +109,23 @@ def serialize_raw_event(event_row) -> dict[str, Any]:
     return payload
 
 
+def serialize_alert_instance(alert_row) -> dict[str, Any]:
+    payload = {
+        "id": alert_row["id"],
+        "monitored_object_id": alert_row["monitored_object_id"],
+        "alert_code": alert_row["alert_code"],
+        "severity": alert_row["severity"],
+        "status": alert_row["status"],
+        "first_occurred_at": alert_row["first_occurred_at"],
+        "last_occurred_at": alert_row["last_occurred_at"],
+        "repeat_count": alert_row["repeat_count"],
+        "latest_message": alert_row["latest_message"],
+    }
+    if alert_row["metadata_json"]:
+        payload["metadata"] = json.loads(alert_row["metadata_json"])
+    return payload
+
+
 def get_view_target_rows(view_id: int):
     return get_db().execute(
         """
@@ -489,6 +506,51 @@ def get_view_events(view_id: int):
     )
 
     return {"items": [serialize_raw_event(row) for row in rows]}
+
+
+@bp.get("/<int:view_id>/alerts")
+@login_required
+def get_view_alerts(view_id: int):
+    view_row, error = get_view_for_user(view_id)
+    if error:
+        return error
+
+    limit_raw = request.args.get("limit", default=str(DEFAULT_EVENTS_LIMIT))
+    try:
+        limit = int(limit_raw)
+    except (TypeError, ValueError):
+        return error_response("validation_error", "limit must be an integer", 400)
+
+    if limit <= 0 or limit > MAX_EVENTS_LIMIT:
+        return error_response("validation_error", f"limit must be between 1 and {MAX_EVENTS_LIMIT}", 400)
+
+    status_filter = request.args.get("status", "open")
+    if status_filter not in {"open", "resolved"}:
+        return error_response("validation_error", "status must be open or resolved", 400)
+
+    target_rows = get_monitor_target_rows(view_row["id"])
+    monitored_object_ids = [row["monitored_object_id"] for row in target_rows if row["monitored_object_id"] is not None]
+    if not monitored_object_ids:
+        return {"items": []}
+
+    placeholders = ", ".join("?" for _ in monitored_object_ids)
+    rows = get_db().execute(
+        f"""
+        SELECT id, monitored_object_id, alert_code, severity, status, first_occurred_at,
+               last_occurred_at, repeat_count, latest_message, metadata_json
+        FROM alert_instances
+        WHERE monitored_object_id IN ({placeholders})
+          AND status = ?
+        ORDER BY
+            CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+            last_occurred_at DESC,
+            id DESC
+        LIMIT ?
+        """,
+        tuple(monitored_object_ids) + (status_filter, limit),
+    ).fetchall()
+
+    return {"items": [serialize_alert_instance(row) for row in rows]}
 
 
 @bp.post("")
