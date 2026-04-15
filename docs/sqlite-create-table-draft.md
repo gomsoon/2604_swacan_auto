@@ -39,8 +39,11 @@ PRAGMA synchronous = NORMAL;
 
 ### 3.3 view/editor
 - `views`
+- `view_versions`
 - `view_nodes`
 - `view_edges`
+- `view_version_nodes`
+- `view_version_edges`
 
 ### 3.4 ingest/runtime
 - `ingest_inbox`
@@ -69,6 +72,40 @@ PRAGMA synchronous = NORMAL;
 - `semantic_type_code`, `notation_code`는 metamodel registry 기반 표현과 연결된다.
 - `layer_order`는 화면 렌더 순서를 backend가 관리하기 위한 값이다.
 
+### 4.1.1 view_versions
+
+핵심 컬럼:
+- `view_id`
+- `version_no`
+- `version_code`
+- `status`
+- `based_on_version_id`
+- `metamodel_version_id`
+- `published_at`
+- `activated_at`
+- `revision`
+
+의미:
+- `views`는 logical root 로 유지하고, 실제 편집/운영 대상은 `view_versions` 로 분리한다.
+- `status`는 `draft`, `published`, `active`, `deprecated` 를 가진다.
+- `published`는 승인 대기/배포 후보 고정본, `active`는 실제 운영 중 버전이다.
+
+### 4.1.2 view_version_nodes
+
+핵심 컬럼:
+- `view_version_id`
+- `element_key`
+- `parent_node_id`
+- `semantic_type_code`
+- `notation_code`
+- `target_id`
+- `layer_order`
+- `properties_json`
+
+의미:
+- 특정 version snapshot 에 속한 node 구조와 layout 을 저장한다.
+- `element_key`는 버전 간 동일 논리 객체를 잇는 안정 키다.
+
 ### 4.2 view_edges
 
 핵심 컬럼:
@@ -83,6 +120,22 @@ PRAGMA synchronous = NORMAL;
 의미:
 - edge도 node와 동일하게 metamodel 식별자를 함께 저장한다.
 - `x`, `y`보다 `anchor + control_points_json` 구조를 사용한다.
+
+### 4.2.1 view_version_edges
+
+핵심 컬럼:
+- `view_version_id`
+- `element_key`
+- `association_code`
+- `source_node_id`
+- `target_node_id`
+- `source_element_key`
+- `target_element_key`
+- `layer_order`
+
+의미:
+- 특정 version snapshot 에 속한 edge 를 저장한다.
+- 현재 row id 와 별개로 `source_element_key`, `target_element_key` 를 두면 version 간 안정 참조에 유리하다.
 
 ### 4.3 ingest_inbox
 
@@ -152,13 +205,21 @@ PRAGMA synchronous = NORMAL;
 - `palette_groups(metamodel_version_id, sort_order, id)`
 - `notation_definitions(metamodel_version_id, semantic_type_id, sort_order, id)`
 - `view_nodes(view_id)`
+- `view_versions(view_id, status)`
+- `view_versions(view_id, version_no)`
 - `view_nodes(parent_node_id)`
 - `view_nodes(target_id)`
 - `view_nodes(view_id, layer_order, id)`
+- `view_version_nodes(view_version_id, parent_node_id)`
+- `view_version_nodes(view_version_id, target_id)`
+- `view_version_nodes(view_version_id, layer_order, id)`
 - `view_edges(view_id)`
 - `view_edges(source_node_id)`
 - `view_edges(target_node_id)`
 - `view_edges(view_id, layer_order, id)`
+- `view_version_edges(view_version_id, source_node_id)`
+- `view_version_edges(view_version_id, target_node_id)`
+- `view_version_edges(view_version_id, layer_order, id)`
 - `ingest_inbox(status, received_at)`
 - `ingest_inbox(agent_id, boot_id, seq_start, seq_end)` UNIQUE
 - `processed_item_receipts(agent_id, boot_id, item_seq)` UNIQUE
@@ -174,9 +235,11 @@ PRAGMA synchronous = NORMAL;
 - 기본 로그인은 `admin / admin123!`
 - 기본 published metamodel version은 `seed-v1`
 - demo view 1개를 seed한다.
+- demo view용 `active` version snapshot 1개도 seed한다.
 - demo view에는 `PhysicalServer`, `SoftwareProcess`, `MonitoringAgent`, `CommunicationLink`를 포함한다.
 - seed node/edge도 `semantic_type_code`, `notation_code`를 함께 저장한다.
 - `layer_order`는 seed 단계부터 명시해 초기 렌더 순서를 고정한다.
+- `view_version_nodes`, `view_version_edges` 는 `element_key` 와 함께 seed해 이후 migration 입력으로 사용한다.
 
 ## 8. 구현 시 주의사항
 

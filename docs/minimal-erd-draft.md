@@ -28,8 +28,11 @@
 - `palette_groups`
 - `notation_definitions`
 - `views`
+- `view_versions`
 - `view_nodes`
 - `view_edges`
+- `view_version_nodes`
+- `view_version_edges`
 - `ingest_inbox`
 - `processed_item_receipts`
 - `latest_states`
@@ -226,7 +229,35 @@
 - `created_at` TEXT NOT NULL
 - `updated_at` TEXT NOT NULL
 
-### 3.11 view_nodes
+비고:
+- 현재 `views` 는 logical root 로 유지되고, 점진적으로 실제 편집/운영 대상은 `view_versions` 로 분리될 예정이다.
+
+### 3.11 view_versions
+
+목적:
+- draft / published / active / deprecated 상태를 갖는 view snapshot 관리
+
+주요 컬럼:
+- `id` INTEGER PK
+- `view_id` INTEGER NOT NULL
+- `version_no` INTEGER NOT NULL
+- `version_code` TEXT NULL
+- `status` TEXT NOT NULL
+- `based_on_version_id` INTEGER NULL
+- `metamodel_version_id` INTEGER NULL
+- `created_by_user_id` INTEGER NOT NULL
+- `approved_by_user_id` INTEGER NULL
+- `activated_by_user_id` INTEGER NULL
+- `published_at` TEXT NULL
+- `activated_at` TEXT NULL
+- `revision` INTEGER NOT NULL DEFAULT 1
+- `created_at` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
+
+비고:
+- `published` 는 편집 완료된 고정본, `active` 는 실제 운영 중인 버전으로 해석한다.
+
+### 3.12 view_nodes
 
 목적:
 - editor와 monitoring이 공유하는 node 인스턴스와 레이아웃 저장
@@ -255,7 +286,33 @@
 - `semantic_type_code`, `notation_code`를 함께 저장해서 registry 기반 표현과 실제 persisted view를 연결한다.
 - `layer_order`는 화면에서 보이는 순서를 backend가 일관되게 관리하기 위한 값이다.
 
-### 3.12 view_edges
+### 3.13 view_version_nodes
+
+목적:
+- 특정 version snapshot 에 속한 node 구조와 layout 저장
+
+주요 컬럼:
+- `id` INTEGER PK
+- `view_version_id` INTEGER NOT NULL
+- `element_key` TEXT NOT NULL
+- `parent_node_id` INTEGER NULL
+- `node_type` TEXT NOT NULL
+- `semantic_type_code` TEXT NOT NULL
+- `notation_code` TEXT NOT NULL
+- `display_name` TEXT NOT NULL
+- `target_id` TEXT NULL
+- `layer_order` INTEGER NOT NULL DEFAULT 0
+- `x` REAL NOT NULL
+- `y` REAL NOT NULL
+- `width` REAL NOT NULL
+- `height` REAL NOT NULL
+- `properties_json` TEXT NULL
+- `is_deleted` INTEGER NOT NULL DEFAULT 0
+
+비고:
+- `element_key` 는 버전 간 같은 논리 객체를 잇는 안정 키다.
+
+### 3.14 view_edges
 
 목적:
 - editor와 monitoring이 공유하는 edge 인스턴스 저장
@@ -282,7 +339,29 @@
 - 현재 허용 edge type은 `CommunicationLink` 하나다.
 - `x`, `y`를 직접 두기보다 `anchor + control_points_json`으로 line을 표현한다.
 
-### 3.13 ingest_inbox
+### 3.15 view_version_edges
+
+목적:
+- 특정 version snapshot 에 속한 edge 저장
+
+주요 컬럼:
+- `id` INTEGER PK
+- `view_version_id` INTEGER NOT NULL
+- `element_key` TEXT NOT NULL
+- `association_code` TEXT NULL
+- `edge_type` TEXT NOT NULL
+- `semantic_type_code` TEXT NOT NULL
+- `notation_code` TEXT NOT NULL
+- `source_node_id` INTEGER NOT NULL
+- `target_node_id` INTEGER NOT NULL
+- `source_element_key` TEXT NULL
+- `target_element_key` TEXT NULL
+- `layer_order` INTEGER NOT NULL DEFAULT 0
+
+비고:
+- version 간 안정적인 참조를 위해 `source_element_key`, `target_element_key` 를 병행할 수 있다.
+
+### 3.16 ingest_inbox
 
 목적:
 - agent batch payload의 durable receipt queue
@@ -302,7 +381,7 @@
 비고:
 - ingest ack는 item 처리 완료가 아니라 inbox 영속 저장 완료를 의미한다.
 
-### 3.14 processed_item_receipts
+### 3.17 processed_item_receipts
 
 목적:
 - worker item-level idempotency 보장
@@ -320,7 +399,7 @@
 비고:
 - `(agent_id, boot_id, item_seq)` unique 기준으로 중복 side effect를 막는다.
 
-### 3.15 latest_states
+### 3.18 latest_states
 
 목적:
 - monitoring overlay용 최신 상태 스냅샷
@@ -337,7 +416,7 @@
 - `received_at` TEXT NOT NULL
 - `updated_at` TEXT NOT NULL
 
-### 3.16 raw_events
+### 3.19 raw_events
 
 목적:
 - event panel과 운영 확인용 low-level event 저장
@@ -353,7 +432,7 @@
 - `occurred_at` TEXT NOT NULL
 - `received_at` TEXT NOT NULL
 
-### 3.17 debug_payload_logs
+### 3.20 debug_payload_logs
 
 목적:
 - debug mode에서만 저장되는 통신 payload 로그
@@ -373,7 +452,7 @@
 - `is_redacted` INTEGER NOT NULL DEFAULT 1
 - `occurred_at` TEXT NOT NULL
 
-### 3.18 cleanup_runs
+### 3.21 cleanup_runs
 
 목적:
 - backend retention cleanup 실행 결과 기록
@@ -398,7 +477,11 @@
 - `semantic_types 1:N property_definitions`
 - `views 1:N view_nodes`
 - `views 1:N view_edges`
+- `views 1:N view_versions`
+- `view_versions 1:N view_version_nodes`
+- `view_versions 1:N view_version_edges`
 - `view_nodes 1:N view_nodes` self-reference for containment
+- `view_version_nodes 1:N view_version_nodes` self-reference for containment
 - `view_nodes 1:N latest_states` optional by `view_node_id`
 - `ingest_inbox 1:N processed_item_receipts`
 
@@ -412,13 +495,21 @@
 - `palette_groups(metamodel_version_id, sort_order)`
 - `notation_definitions(metamodel_version_id, semantic_type_id, sort_order)`
 - `view_nodes(view_id)`
+- `view_versions(view_id, status)`
+- `view_versions(view_id, version_no)`
 - `view_nodes(parent_node_id)`
 - `view_nodes(target_id)`
 - `view_nodes(view_id, layer_order, id)`
+- `view_version_nodes(view_version_id, parent_node_id)`
+- `view_version_nodes(view_version_id, target_id)`
+- `view_version_nodes(view_version_id, layer_order, id)`
 - `view_edges(view_id)`
 - `view_edges(source_node_id)`
 - `view_edges(target_node_id)`
 - `view_edges(view_id, layer_order, id)`
+- `view_version_edges(view_version_id, source_node_id)`
+- `view_version_edges(view_version_id, target_node_id)`
+- `view_version_edges(view_version_id, layer_order, id)`
 - `ingest_inbox(status, received_at)`
 - `processed_item_receipts(agent_id, boot_id, item_seq)` UNIQUE
 - `latest_states(target_id, state_type)` UNIQUE

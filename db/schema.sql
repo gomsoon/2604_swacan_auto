@@ -158,6 +158,37 @@ CREATE TABLE IF NOT EXISTS views (
     FOREIGN KEY (owner_user_id) REFERENCES users(id)
 );
 
+CREATE TABLE IF NOT EXISTS view_versions (
+    id INTEGER PRIMARY KEY,
+    view_id INTEGER NOT NULL,
+    version_no INTEGER NOT NULL,
+    version_code TEXT,
+    status TEXT NOT NULL CHECK (status IN ('draft', 'published', 'active', 'deprecated')),
+    based_on_version_id INTEGER,
+    metamodel_version_id INTEGER,
+    created_by_user_id INTEGER NOT NULL,
+    approved_by_user_id INTEGER,
+    activated_by_user_id INTEGER,
+    description TEXT,
+    published_at TEXT,
+    activated_at TEXT,
+    is_edit_locked INTEGER NOT NULL DEFAULT 0 CHECK (is_edit_locked IN (0, 1)),
+    lock_owner_user_id INTEGER,
+    lock_acquired_at TEXT,
+    lock_expires_at TEXT,
+    revision INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (view_id) REFERENCES views(id) ON DELETE CASCADE,
+    FOREIGN KEY (based_on_version_id) REFERENCES view_versions(id),
+    FOREIGN KEY (metamodel_version_id) REFERENCES metamodel_versions(id),
+    FOREIGN KEY (created_by_user_id) REFERENCES users(id),
+    FOREIGN KEY (approved_by_user_id) REFERENCES users(id),
+    FOREIGN KEY (activated_by_user_id) REFERENCES users(id),
+    FOREIGN KEY (lock_owner_user_id) REFERENCES users(id),
+    UNIQUE (view_id, version_no)
+);
+
 CREATE TABLE IF NOT EXISTS view_nodes (
     id INTEGER PRIMARY KEY,
     view_id INTEGER NOT NULL,
@@ -180,6 +211,36 @@ CREATE TABLE IF NOT EXISTS view_nodes (
     FOREIGN KEY (parent_node_id) REFERENCES view_nodes(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS view_version_nodes (
+    id INTEGER PRIMARY KEY,
+    view_version_id INTEGER NOT NULL,
+    element_key TEXT NOT NULL,
+    parent_node_id INTEGER,
+    node_type TEXT NOT NULL CHECK (node_type IN ('PhysicalServer', 'SoftwareProcess', 'MonitoringAgent')),
+    semantic_type_code TEXT NOT NULL,
+    notation_code TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    target_id TEXT,
+    instance_mode TEXT,
+    cardinality_scope TEXT,
+    expected_min INTEGER,
+    expected_max INTEGER,
+    layer_order INTEGER NOT NULL DEFAULT 0,
+    x REAL NOT NULL,
+    y REAL NOT NULL,
+    width REAL NOT NULL,
+    height REAL NOT NULL,
+    collapsed_state INTEGER NOT NULL DEFAULT 0 CHECK (collapsed_state IN (0, 1)),
+    is_deleted INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0, 1)),
+    style_json TEXT,
+    properties_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (view_version_id) REFERENCES view_versions(id) ON DELETE CASCADE,
+    FOREIGN KEY (parent_node_id) REFERENCES view_version_nodes(id) ON DELETE CASCADE,
+    UNIQUE (view_version_id, element_key)
+);
+
 CREATE TABLE IF NOT EXISTS view_edges (
     id INTEGER PRIMARY KEY,
     view_id INTEGER NOT NULL,
@@ -200,6 +261,33 @@ CREATE TABLE IF NOT EXISTS view_edges (
     FOREIGN KEY (view_id) REFERENCES views(id) ON DELETE CASCADE,
     FOREIGN KEY (source_node_id) REFERENCES view_nodes(id) ON DELETE CASCADE,
     FOREIGN KEY (target_node_id) REFERENCES view_nodes(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS view_version_edges (
+    id INTEGER PRIMARY KEY,
+    view_version_id INTEGER NOT NULL,
+    element_key TEXT NOT NULL,
+    edge_type TEXT NOT NULL CHECK (edge_type IN ('CommunicationLink')),
+    association_code TEXT,
+    semantic_type_code TEXT NOT NULL,
+    notation_code TEXT NOT NULL,
+    source_node_id INTEGER NOT NULL,
+    target_node_id INTEGER NOT NULL,
+    source_element_key TEXT,
+    target_element_key TEXT,
+    layer_order INTEGER NOT NULL DEFAULT 0,
+    source_anchor TEXT,
+    target_anchor TEXT,
+    control_points_json TEXT,
+    label TEXT,
+    style_json TEXT,
+    is_deleted INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0, 1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (view_version_id) REFERENCES view_versions(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_node_id) REFERENCES view_version_nodes(id) ON DELETE CASCADE,
+    FOREIGN KEY (target_node_id) REFERENCES view_version_nodes(id) ON DELETE CASCADE,
+    UNIQUE (view_version_id, element_key)
 );
 
 CREATE TABLE IF NOT EXISTS ingest_inbox (
@@ -306,6 +394,15 @@ CREATE INDEX IF NOT EXISTS idx_notation_definitions_version_type_sort
 CREATE INDEX IF NOT EXISTS idx_view_nodes_view_id
     ON view_nodes(view_id);
 
+CREATE INDEX IF NOT EXISTS idx_view_versions_view_status
+    ON view_versions(view_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_view_versions_view_version_no
+    ON view_versions(view_id, version_no);
+
+CREATE INDEX IF NOT EXISTS idx_view_versions_based_on
+    ON view_versions(based_on_version_id);
+
 CREATE INDEX IF NOT EXISTS idx_view_nodes_parent_node_id
     ON view_nodes(parent_node_id);
 
@@ -314,6 +411,15 @@ CREATE INDEX IF NOT EXISTS idx_view_nodes_target_id
 
 CREATE INDEX IF NOT EXISTS idx_view_nodes_view_layer
     ON view_nodes(view_id, layer_order, id);
+
+CREATE INDEX IF NOT EXISTS idx_view_version_nodes_version_parent
+    ON view_version_nodes(view_version_id, parent_node_id);
+
+CREATE INDEX IF NOT EXISTS idx_view_version_nodes_version_target
+    ON view_version_nodes(view_version_id, target_id);
+
+CREATE INDEX IF NOT EXISTS idx_view_version_nodes_version_layer
+    ON view_version_nodes(view_version_id, layer_order, id);
 
 CREATE INDEX IF NOT EXISTS idx_view_edges_view_id
     ON view_edges(view_id);
@@ -326,6 +432,15 @@ CREATE INDEX IF NOT EXISTS idx_view_edges_target_node_id
 
 CREATE INDEX IF NOT EXISTS idx_view_edges_view_layer
     ON view_edges(view_id, layer_order, id);
+
+CREATE INDEX IF NOT EXISTS idx_view_version_edges_version_source
+    ON view_version_edges(view_version_id, source_node_id);
+
+CREATE INDEX IF NOT EXISTS idx_view_version_edges_version_target
+    ON view_version_edges(view_version_id, target_node_id);
+
+CREATE INDEX IF NOT EXISTS idx_view_version_edges_version_layer
+    ON view_version_edges(view_version_id, layer_order, id);
 
 CREATE INDEX IF NOT EXISTS idx_ingest_inbox_status_received
     ON ingest_inbox(status, received_at);
