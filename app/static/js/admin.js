@@ -8,6 +8,8 @@ const runtimeStatus = document.getElementById("admin-runtime-status");
 const retentionPolicy = document.getElementById("admin-retention-policy");
 const staleAgents = document.getElementById("admin-stale-agents");
 const cleanupSummary = document.getElementById("admin-cleanup-summary");
+const metamodelVersionsList = document.getElementById("admin-metamodel-versions-list");
+const metamodelVersionCount = document.getElementById("metamodel-version-count");
 const ingestList = document.getElementById("admin-ingest-list");
 const latestStateList = document.getElementById("admin-latest-state-list");
 const eventsList = document.getElementById("admin-events-list");
@@ -20,11 +22,19 @@ const refreshLatestStateButton = document.getElementById("refresh-latest-state-b
 const refreshEventsButton = document.getElementById("refresh-admin-events-button");
 const refreshDebugButton = document.getElementById("refresh-debug-button");
 const refreshCleanupButton = document.getElementById("refresh-cleanup-button");
+const refreshMetamodelVersionsButton = document.getElementById("refresh-metamodel-versions-button");
 
 const ingestStatusFilter = document.getElementById("ingest-status-filter");
 const latestStateTypeFilter = document.getElementById("latest-state-type-filter");
 const latestStateStatusFilter = document.getElementById("latest-state-status-filter");
 const debugDirectionFilter = document.getElementById("debug-direction-filter");
+const metamodelVersionForm = document.getElementById("metamodel-version-form");
+const metamodelNamespaceSelect = document.getElementById("metamodel-namespace-select");
+const metamodelBaseVersionSelect = document.getElementById("metamodel-base-version-select");
+const metamodelVersionCodeInput = document.getElementById("metamodel-version-code");
+const metamodelVersionDescriptionInput = document.getElementById("metamodel-version-description");
+
+let metamodelVersions = [];
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -303,6 +313,67 @@ function renderCleanupRuns(items) {
         .join("");
 }
 
+function renderMetamodelSelectOptions() {
+    const namespaceCodes = [...new Set(metamodelVersions.map((item) => item.namespace_code))];
+    const currentNamespace = metamodelNamespaceSelect.value || namespaceCodes[0] || "";
+
+    metamodelNamespaceSelect.innerHTML = namespaceCodes
+        .map(
+            (code) => `
+                <option value="${escapeHtml(code)}" ${code === currentNamespace ? "selected" : ""}>
+                    ${escapeHtml(code)}
+                </option>
+            `
+        )
+        .join("");
+
+    const baseVersions = metamodelVersions.filter((item) => item.namespace_code === (metamodelNamespaceSelect.value || currentNamespace));
+    metamodelBaseVersionSelect.innerHTML = baseVersions
+        .map(
+            (item) => `
+                <option value="${escapeHtml(item.id)}" ${item.status === "published" ? "selected" : ""}>
+                    ${escapeHtml(item.version_code)} (${escapeHtml(item.status)})
+                </option>
+            `
+        )
+        .join("");
+}
+
+function renderMetamodelVersions(items) {
+    metamodelVersions = items;
+    metamodelVersionCount.textContent = `${items.length}개`;
+    renderMetamodelSelectOptions();
+
+    if (items.length === 0) {
+        metamodelVersionsList.innerHTML = '<p class="section-copy">등록된 메타모델 버전이 없습니다.</p>';
+        return;
+    }
+
+    metamodelVersionsList.innerHTML = items
+        .map((item) => {
+            const canPublish = item.status === "draft";
+            return `
+                <article class="admin-item">
+                    <div class="section-header">
+                        <div>
+                            <h3>${escapeHtml(item.namespace_code)} / ${escapeHtml(item.version_code)}</h3>
+                            <p class="admin-meta">상태 ${escapeHtml(item.status)} | 생성 ${escapeHtml(formatTimestamp(item.created_at))}</p>
+                        </div>
+                        <div class="toolbar-inline">
+                            <span class="meta-pill">type ${escapeHtml(item.semantic_type_count)}</span>
+                            <span class="meta-pill">notation ${escapeHtml(item.notation_count)}</span>
+                            <span class="meta-pill">palette ${escapeHtml(item.palette_group_count)}</span>
+                            ${canPublish ? `<button class="button small primary publish-metamodel-button" type="button" data-version-id="${escapeHtml(item.id)}">Publish</button>` : ""}
+                        </div>
+                    </div>
+                    <p class="admin-meta">기준 버전 ${escapeHtml(item.based_on_version_id ?? "-")} | published ${escapeHtml(formatTimestamp(item.published_at))}</p>
+                    <p class="admin-meta">${escapeHtml(item.description || "설명 없음")}</p>
+                </article>
+            `;
+        })
+        .join("");
+}
+
 async function loadSummary() {
     const payload = await apiFetch("/api/admin/summary");
     renderSummary(payload);
@@ -348,10 +419,55 @@ async function loadCleanupRuns() {
     renderCleanupRuns(payload.items);
 }
 
+async function loadMetamodelVersions() {
+    const payload = await apiFetch("/api/admin/metamodel/versions");
+    renderMetamodelVersions(payload.items);
+}
+
+async function createMetamodelVersion(event) {
+    event.preventDefault();
+    clearBanner();
+
+    try {
+        const payload = {
+            namespace_code: metamodelNamespaceSelect.value,
+            based_on_version_id: Number(metamodelBaseVersionSelect.value),
+            version_code: metamodelVersionCodeInput.value.trim(),
+            description: metamodelVersionDescriptionInput.value.trim() || null,
+        };
+
+        await apiFetch("/api/admin/metamodel/versions", {
+            method: "POST",
+            body: payload,
+        });
+
+        metamodelVersionForm.reset();
+        await loadMetamodelVersions();
+        showBanner("메타모델 draft 버전을 생성했습니다.", "success");
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
+}
+
+async function publishMetamodelVersion(versionId) {
+    clearBanner();
+
+    try {
+        await apiFetch(`/api/admin/metamodel/versions/${versionId}/publish`, {
+            method: "POST",
+        });
+        await loadMetamodelVersions();
+        showBanner("메타모델 버전을 publish했습니다.", "success");
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
+}
+
 async function refreshAll() {
     clearBanner();
     try {
         await Promise.all([
+            loadMetamodelVersions(),
             loadSummary(),
             loadIngest(),
             loadLatestStates(),
@@ -370,6 +486,22 @@ refreshLatestStateButton?.addEventListener("click", loadLatestStates);
 refreshEventsButton?.addEventListener("click", loadEvents);
 refreshDebugButton?.addEventListener("click", loadDebug);
 refreshCleanupButton?.addEventListener("click", loadCleanupRuns);
+refreshMetamodelVersionsButton?.addEventListener("click", loadMetamodelVersions);
+metamodelVersionForm?.addEventListener("submit", createMetamodelVersion);
+metamodelNamespaceSelect?.addEventListener("change", renderMetamodelSelectOptions);
+metamodelVersionsList?.addEventListener("click", async (event) => {
+    const button = event.target instanceof HTMLElement ? event.target.closest(".publish-metamodel-button") : null;
+    if (!button) {
+        return;
+    }
+
+    const versionId = Number(button.dataset.versionId);
+    if (!versionId) {
+        return;
+    }
+
+    await publishMetamodelVersion(versionId);
+});
 
 ingestStatusFilter?.addEventListener("change", loadIngest);
 latestStateTypeFilter?.addEventListener("change", loadLatestStates);

@@ -679,6 +679,22 @@ a {
     gap: 20px;
 }
 
+.admin-metamodel-layout {
+    display: grid;
+    grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+    gap: 20px;
+    margin-top: 18px;
+    align-items: start;
+}
+
+.admin-subcard {
+    background: var(--panel-strong);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 18px;
+    box-shadow: none;
+}
+
 .admin-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -782,6 +798,7 @@ a {
 }
 
 @media (max-width: 960px) {
+    .admin-metamodel-layout,
     .admin-grid {
         grid-template-columns: 1fr;
     }

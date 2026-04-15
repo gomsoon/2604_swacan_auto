@@ -91,6 +91,7 @@ def test_admin_page_renders_for_admin(seeded_client) -> None:
     assert response.status_code == 200
     assert "기본 관리자 화면".encode("utf-8") in response.data
     assert "시스템 요약".encode("utf-8") in response.data
+    assert "메타모델 버전".encode("utf-8") in response.data
     assert "Cleanup 기록".encode("utf-8") in response.data
 
 

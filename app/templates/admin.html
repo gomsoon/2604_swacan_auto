@@ -49,6 +49,52 @@
         </div>
     </section>
 
+    <section class="card">
+        <div class="section-header section-header-stack">
+            <div>
+                <h2>메타모델 버전</h2>
+                <p class="section-copy">published/draft/deprecated 버전을 확인하고, 기존 버전을 복제해 draft를 만든 뒤 publish 할 수 있습니다.</p>
+            </div>
+            <button id="refresh-metamodel-versions-button" class="button ghost small" type="button">갱신</button>
+        </div>
+
+        <div class="admin-metamodel-layout">
+            <form id="metamodel-version-form" class="stack-form card admin-subcard">
+                <h3>Draft 생성</h3>
+                <div class="field-grid">
+                    <label class="field compact-field">
+                        <span>Namespace</span>
+                        <select id="metamodel-namespace-select"></select>
+                    </label>
+                    <label class="field compact-field">
+                        <span>기준 버전</span>
+                        <select id="metamodel-base-version-select"></select>
+                    </label>
+                </div>
+                <label class="field">
+                    <span>새 버전 코드</span>
+                    <input id="metamodel-version-code" type="text" placeholder="예: core-v2-draft" required />
+                </label>
+                <label class="field">
+                    <span>설명</span>
+                    <textarea id="metamodel-version-description" rows="3" placeholder="draft 버전에 대한 설명"></textarea>
+                </label>
+                <div class="toolbar-inline">
+                    <button id="create-metamodel-version-button" class="button primary" type="submit">Draft 생성</button>
+                    <span class="meta-pill">기존 버전 복제 기반</span>
+                </div>
+            </form>
+
+            <section class="admin-subcard">
+                <div class="section-header">
+                    <h3>버전 목록</h3>
+                    <span id="metamodel-version-count" class="meta-pill">0개</span>
+                </div>
+                <div id="admin-metamodel-versions-list" class="admin-list"></div>
+            </section>
+        </div>
+    </section>
+
     <div class="admin-grid">
         <section class="card">
             <div class="section-header section-header-stack">

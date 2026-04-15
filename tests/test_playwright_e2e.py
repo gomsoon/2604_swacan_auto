@@ -214,9 +214,22 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
 
     expect(page.get_by_role("heading", name="기본 관리자 화면")).to_be_visible()
     expect(page.get_by_role("heading", name="시스템 요약", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="메타모델 버전")).to_be_visible()
     expect(page.get_by_role("heading", name="Latest State")).to_be_visible()
     expect(page.get_by_role("heading", name="Cleanup 기록")).to_be_visible()
     expect(page.locator("#admin-summary-cards")).to_contain_text("사용자")
+    expect(page.locator("#admin-metamodel-versions-list")).to_contain_text("seed-v1")
+
+    page.locator("#metamodel-version-code").fill("core-v2-ui-draft")
+    page.locator("#metamodel-version-description").fill("Playwright draft create")
+    page.get_by_role("button", name="Draft 생성").click()
+
+    createdVersion = page.locator(".admin-item", has_text="core-v2-ui-draft").first
+    expect(createdVersion).to_contain_text("draft")
+
+    createdVersion.locator(".publish-metamodel-button").click()
+
+    expect(page.locator(".admin-item", has_text="core-v2-ui-draft").first).to_contain_text("published")
     expect(page.locator("#admin-ingest-list")).to_contain_text("표시할 ingest batch가 없습니다.")
     expect(page.locator("#admin-latest-state-list")).to_contain_text("조건에 맞는 latest state가 없습니다.")
     expect(page.locator("#admin-cleanup-list")).to_contain_text("최근 cleanup 기록이 없습니다.")
