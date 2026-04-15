@@ -580,6 +580,11 @@ a {
     stroke-width: 1.2;
 }
 
+.diagram-node.has-dashed-border .node-shape,
+.diagram-node.has-dashed-border .node-double-border {
+    stroke-dasharray: 8 4;
+}
+
 .diagram-node .node-label {
     font-size: 15px;
     font-weight: 700;

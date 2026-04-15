@@ -10,6 +10,67 @@ function svgEl(name, attrs = {}) {
     return element;
 }
 
+function notationForCode(notationCode, notationDefinitionsByCode) {
+    if (!notationCode || !(notationDefinitionsByCode instanceof Map)) {
+        return null;
+    }
+    return notationDefinitionsByCode.get(notationCode) || null;
+}
+
+function nodeRenderDescriptor(node, notationDefinitionsByCode) {
+    const notation = notationForCode(node.notation_code, notationDefinitionsByCode);
+    const renderSchema = notation?.render_schema || {};
+    const primitive =
+        notation?.render_primitive ||
+        renderSchema.primitive ||
+        (node.style?.shape === "rect" ? "rect" : "rounded_rect");
+    const modifiers = renderSchema.modifiers || {};
+    const hasDoubleBorder = Boolean(modifiers.double_border || node.style?.variant === "double-border");
+    const hasDashedBorder = Boolean(modifiers.dashed_border || node.style?.variant === "dashed-border");
+    const radius = primitive === "rect" ? 4 : renderSchema.corner_radius ?? 18;
+
+    return {
+        notation,
+        primitive,
+        modifiers,
+        hasDoubleBorder,
+        hasDashedBorder,
+        radius,
+    };
+}
+
+function valueForRenderSource(source, node, latestState) {
+    if (!source) {
+        return null;
+    }
+    if (source === "display_name") {
+        return node.display_name;
+    }
+    if (source === "target_id") {
+        return node.target_id;
+    }
+    if (source === "node_type") {
+        return node.node_type;
+    }
+    if (source === "runtime.status") {
+        return latestState?.status || null;
+    }
+    if (source.startsWith("runtime.")) {
+        return latestState?.state?.[source.slice("runtime.".length)] ?? null;
+    }
+    return null;
+}
+
+function resolveNodeTextContent(node, renderDescriptor, latestState) {
+    const labelSlots = renderDescriptor.notation?.render_schema?.label_slots || [];
+    const title = valueForRenderSource(labelSlots[0]?.source, node, latestState) || node.display_name;
+    const subtitle =
+        valueForRenderSource(labelSlots[1]?.source, node, latestState) ||
+        node.target_id ||
+        node.node_type;
+    return { title, subtitle };
+}
+
 function resolveAnchorPoint(node, anchor) {
     const midX = node.x + node.width / 2;
     const midY = node.y + node.height / 2;
@@ -94,6 +155,7 @@ export function renderDiagram(svg, options) {
         selectedEdgeId = null,
         connectSourceId = null,
         latestStatesByTargetId = new Map(),
+        notationDefinitionsByCode = new Map(),
         onNodeClick,
         onNodePointerDown,
         onEdgeClick,
@@ -148,6 +210,8 @@ export function renderDiagram(svg, options) {
             "marker-end": "url(#edge-arrow)",
         });
         path.dataset.edgeId = String(edge.id);
+        path.dataset.edgeType = edge.edge_type;
+        path.dataset.notationCode = edge.notation_code || "";
         if (typeof onEdgeClick === "function") {
             path.addEventListener("click", (event) => onEdgeClick(edge, event));
         }
@@ -166,11 +230,18 @@ export function renderDiagram(svg, options) {
     }
 
     for (const node of sortedNodes) {
+        const latestState = latestStatesByTargetId.get(node.target_id);
         const statusClass = statusClassForNode(node, latestStatesByTargetId);
         const classes = ["diagram-node"];
+        const renderDescriptor = nodeRenderDescriptor(node, notationDefinitionsByCode);
+        const textContent = resolveNodeTextContent(node, renderDescriptor, latestState);
+        classes.push(renderDescriptor.primitive === "rect" ? "node-primitive-rect" : "node-primitive-rounded");
         classes.push(node.node_type === "PhysicalServer" ? "node-physical" : "node-process");
         if (node.node_type === "MonitoringAgent") {
             classes.push("node-agent");
+        }
+        if (renderDescriptor.hasDashedBorder) {
+            classes.push("has-dashed-border");
         }
         if (node.id === selectedNodeId) {
             classes.push("is-selected");
@@ -188,8 +259,9 @@ export function renderDiagram(svg, options) {
         });
         group.dataset.nodeId = String(node.id);
         group.dataset.nodeType = node.node_type;
+        group.dataset.semanticType = node.semantic_type_code || node.node_type;
+        group.dataset.notationCode = node.notation_code || "";
 
-        const radius = node.node_type === "PhysicalServer" ? 4 : 18;
         group.appendChild(
             svgEl("rect", {
                 class: "node-shape",
@@ -197,12 +269,12 @@ export function renderDiagram(svg, options) {
                 y: 0,
                 width: node.width,
                 height: node.height,
-                rx: radius,
-                ry: radius,
+                rx: renderDescriptor.radius,
+                ry: renderDescriptor.radius,
             })
         );
 
-        if (node.node_type === "MonitoringAgent") {
+        if (renderDescriptor.hasDoubleBorder) {
             group.appendChild(
                 svgEl("rect", {
                     class: "node-double-border",
@@ -210,8 +282,8 @@ export function renderDiagram(svg, options) {
                     y: 6,
                     width: Math.max(node.width - 12, 0),
                     height: Math.max(node.height - 12, 0),
-                    rx: Math.max(radius - 4, 2),
-                    ry: Math.max(radius - 4, 2),
+                    rx: Math.max(renderDescriptor.radius - 4, 2),
+                    ry: Math.max(renderDescriptor.radius - 4, 2),
                 })
             );
         }
@@ -222,7 +294,7 @@ export function renderDiagram(svg, options) {
             y: node.node_type === "PhysicalServer" ? 28 : node.height / 2 - 2,
             "text-anchor": "middle",
         });
-        label.textContent = node.display_name;
+        label.textContent = textContent.title;
         group.appendChild(label);
 
         const meta = svgEl("text", {
@@ -231,7 +303,7 @@ export function renderDiagram(svg, options) {
             y: node.node_type === "PhysicalServer" ? 48 : node.height / 2 + 18,
             "text-anchor": "middle",
         });
-        meta.textContent = node.target_id || node.node_type;
+        meta.textContent = textContent.subtitle;
         group.appendChild(meta);
 
         const agentBadgeText = agentBadgeTextForNode(node, latestStatesByTargetId);

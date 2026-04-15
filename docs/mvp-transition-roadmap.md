@@ -1,215 +1,146 @@
-# Software Architecture Runtime Monitoring System
+﻿# Software Architecture Runtime Monitoring System
 
 ## MVP 전환 로드맵
-버전: Draft 0.1  
-작성일: 2026-04-14
+버전: Draft 0.2  
+작성일: 2026-04-15
 
-목적: `minimal-e2e-v1` 완료 기준점을 바탕으로, 다음 단계인 MVP 구현의 목표, 우선순위, 단계별 범위, 리스크를 정리한다.
+목적: `minimal-e2e-v1` 기준점을 바탕으로, 현재 구현 상태에서 MVP 단계로 넘어가기 위한 우선순위와 다음 확장 방향을 정리한다.
 
-참고 기준점:
-
+참고 문서:
 - [minimal-e2e-signoff.md](C:/2604_swacan_auto/docs/minimal-e2e-signoff.md)
+- [metamodel-notation-db-design-draft.md](C:/2604_swacan_auto/docs/metamodel-notation-db-design-draft.md)
 - Git tag: `minimal-e2e-v1`
 
-## 1. 전환 원칙
+## 1. 현재 기준점 요약
 
-- Minimal E2E에서 검증한 `agent -> backend -> DB -> frontend` 기본 흐름은 유지한다.
-- MVP에서는 “전체 흐름이 되는가”보다 “제품으로 운영 가능한가”를 우선한다.
-- 기능을 넓히기 전에 구조적 안정성, 운영성, 데이터 모델 일관성을 먼저 강화한다.
-- 여전히 점진적 개발 방식을 유지하며, 각 단계마다 자동화 테스트와 회귀 검증을 함께 가져간다.
+- 실제 Linux agent가 backend와 frontend까지 연결되는 최소 end-to-end 흐름이 검증되었다.
+- monitoring, admin, cleanup, stale 파생 상태까지 minimal E2E 기준으로 닫혔다.
+- metamodel registry의 기본 테이블, seed 데이터, 조회 API가 이미 구현되었다.
+- editor와 persisted view는 `semantic_type_code`, `notation_code`를 함께 저장하도록 전환되었다.
+- frontend editor는 metamodel palette를 조회해 node 생성에 활용하고 있다.
+- 다음 단계의 핵심은 metamodel/notation이 실제 제품 동작 전반을 더 강하게 지배하도록 만드는 것이다.
 
-## 2. 현재 기준점 요약
+## 2. MVP 전환의 핵심 원칙
 
-- 실제 Linux agent가 backend와 frontend까지 연결되는 흐름이 검증되었다.
-- monitoring UI와 admin UI에서 실제 데이터 확인이 가능하다.
-- worker loop, duplicate/idempotency, batch rollback, stale 파생 상태, retention cleanup 1차가 반영되어 있다.
-- 전체 회귀 테스트와 Playwright 브라우저 테스트가 안정적으로 통과한다.
-- branch coverage 기준이 확보되어 있다.
+- MVP에서는 기능 수를 늘리는 것보다 메타모델 기반 구조를 제품 중심축으로 고정하는 것이 우선이다.
+- backend는 semantic type, notation, containment, association, property를 일관되게 관리한다.
+- frontend는 backend가 제공하는 선언형 render schema를 해석하는 SVG 렌더러 역할을 맡는다.
+- 기존 minimal E2E 구조는 유지하되, `하드코딩된 타입 분기`를 점진적으로 `registry 기반 해석`으로 바꾼다.
+- agent와 runtime 파이프라인은 이미 닫힌 흐름을 유지하면서 운영성과 효율을 높이는 방향으로 확장한다.
 
-## 3. MVP에서 반드시 강화할 축
+## 3. MVP 주요 단계
 
-### 3.1 메타모델과 notation
-
-- seed 기반 최소 모델에서 실제 `metamodel/notation registry` 기반 구조로 전환
-- semantic type, property definition, association, containment rule의 관리 체계 정리
-- 관리자 화면에서 메타모델을 조회하고 점진적으로 관리할 수 있는 기반 강화
-
-### 3.2 runtime 운영성
-
-- stale event의 명시적 생성
-- cleanup 실행 결과의 운영 흐름 연결
-- grouped event 기반 event storm 완화
-- latest state와 raw event의 운영 활용성 강화
-
-### 3.3 agent 실전성
-
-- multi-process daemon을 `Process Group` 관점으로 더 자연스럽게 처리
-- selector를 systemd/cgroup 중심으로 확장할 수 있는 구조 준비
-- host resource 수집 범위를 disk/network 쪽으로 점진 확장
-- 실제 Linux 운영 runbook과 설정/배포 방식을 정리
-
-### 3.4 frontend 제품성
-
-- canvas/editor 사용성 보강
-- monitoring view의 실시간성 고도화
-- admin 화면의 운영 분석 기능 강화
-- grouped event, stale state, debug 흐름의 가시성 강화
-
-## 4. 권장 구현 순서
-
-### Phase 1. 운영 안정화
-
+### Phase 1. 메타모델 기반 표현 강화
 목표:
-
-- minimal E2E를 “운영 가능한 MVP 기반”으로 안정화한다.
+- frontend와 persisted view가 metamodel/notation registry를 실질적으로 사용하도록 만든다.
 
 주요 항목:
-
-- stale 감지 결과를 별도 raw event로 생성
-- cleanup 결과를 worker 주기 작업과 관리자 화면에 더 자연스럽게 연결
-- debug payload와 운영 로그의 관리자 조회 흐름 정리
-- sign-off 기준에 맞는 최종 증적 정리
+- editor와 monitor가 `notation_code + render_schema` 기반으로 렌더링
+- `semantic_type_code`, `notation_code`를 기준으로 생성/저장/조회 흐름 정리
+- metamodel registry가 제공하는 palette/notation 정보를 재사용하는 공통 helper 정리
+- 오래된 초안 문서를 현재 코드 기준으로 정비
 
 완료 기준:
+- 새 notation이 기존 primitive 범위 안에서는 frontend 수정 없이 palette와 렌더링에 반영된다.
+- editor와 monitor가 같은 metamodel registry 정보를 바탕으로 그려진다.
 
-- stale/cleanup 관련 운영자가 추적해야 할 최소 정보가 admin 화면에서 확인 가능하다.
-- 관련 자동화 테스트가 추가되고 전체 회귀가 안정적으로 유지된다.
-
-### Phase 2. 메타모델/notation registry 고도화
-
+### Phase 2. 관리자용 metamodel 관리 기능
 목표:
-
-- 현재 seed 기반 구조를 실제 메타모델 관리 구조로 확장한다.
+- 관리자 화면에서 metamodel draft/publish 흐름을 다룰 수 있는 최소 관리 기능을 연다.
 
 주요 항목:
-
-- semantic type / notation / containment rule / property definition 테이블 구체화
-- notation registry API 고도화
-- palette를 registry 기반으로 더 명확히 연결
-- metamodel version 관리의 draft/published 흐름 도입
+- draft metamodel version 생성 API
+- semantic type / notation / containment rule 추가 API
+- publish API와 최소 검증
+- 관리자 화면에서 published/draft 버전 조회
 
 완료 기준:
+- 코드 수정 없이 draft metamodel을 만들고 publish할 수 있다.
+- published version 기준으로 일반 editor와 monitor가 안정적으로 동작한다.
 
-- 새로운 notation이나 semantic type이 backend 데이터 기준으로 관리된다.
-- frontend가 registry 조회를 통해 palette를 구성할 수 있다.
-
-### Phase 3. event storm 대응과 관제 강화
-
+### Phase 3. event storm 대응과 운영 고도화
 목표:
-
-- 운영 중 반복 이벤트와 대량 이벤트 상황을 제품 수준으로 다룬다.
+- 반복 이벤트와 대량 이벤트 상황에서도 운영 화면이 유지되도록 만든다.
 
 주요 항목:
-
-- raw event와 grouped event 분리 저장
-- 동일 agent/동일 대상/동일 이벤트 유형 반복 시 그룹화
-- frontend event panel은 grouped event 중심으로 표시
-- low-level event drill-down 조회 기능 제공
+- grouped event 모델과 집계 로직 도입
+- low-level event와 grouped event를 분리 저장
+- 관리자/모니터링 화면에서 grouped event 우선 표시
+- drill-down으로 raw event 상세 조회
 
 완료 기준:
+- 동일 원인 반복 이벤트가 요약되어 표시된다.
+- 운영자는 필요할 때만 raw event를 세부 조회한다.
 
-- event storm 상황에서도 frontend 전송량과 화면 복잡도가 통제된다.
-- 운영자는 요약과 상세를 분리해서 볼 수 있다.
-
-### Phase 4. agent 확장과 효율화
-
+### Phase 4. agent 효율화와 식별 전략 강화
 목표:
-
-- 실제 운영 Linux 서버에서 agent 비용과 정확도를 더 개선한다.
+- 실제 운영 Linux 서버에서 agent 부하를 줄이고 multi-process daemon 감시 품질을 높인다.
 
 주요 항목:
-
-- systemd/cgroup 기반 selector 검토 및 도입
-- multi-process daemon grouping 고도화
-- host resource 확장 수집: disk, network
-- retry/backoff, outbox 압력, cleanup 정책 세분화
-- agent 자동 업데이트 설계 착수
+- discovery와 collection 분리 강화
+- 단일 `/proc` 순회로 다중 target 평가
+- multi-process daemon을 `Process Group`으로 모델링
+- systemd/cgroup selector 검토 및 단계적 도입
+- host resource 수집 범위의 점진 확장
 
 완료 기준:
+- 다수의 process 환경에서도 agent 부하가 예측 가능하게 관리된다.
+- multi-process daemon이 개별 PID가 아니라 논리 group으로 표현된다.
 
-- 대규모 process 환경에서 agent 부담을 더 낮출 수 있다.
-- multi-process daemon monitoring이 더 제품답게 동작한다.
-
-### Phase 5. frontend 협업성과 제품성 보강
-
+### Phase 5. 제품성 보강
 목표:
-
-- editor와 monitoring을 실제 사용자가 더 편하게 쓰도록 다듬는다.
+- 운영자와 관리자 입장에서 더 자연스럽게 사용할 수 있는 화면으로 다듬는다.
 
 주요 항목:
-
-- edit lock과 충돌 처리 UX 보강
+- editor 계층 순서(layer) 조정 UI
 - grouped event drill-down UI
-- stale/agent/self-state 요약 보강
-- monitoring의 SSE + polling hybrid 흐름 고도화
-- 관리자 화면 검색/필터 보강
+- agent self-state, stale 상태, cleanup 결과의 가시성 보강
+- 필요 시 polling 이후의 실시간 갱신 구조 보강
 
 완료 기준:
+- 운영자가 주요 상태를 적은 클릭으로 파악할 수 있다.
+- editor가 실제 설계 도구로 사용 가능한 수준으로 다듬어진다.
 
-- 사용자와 운영자 입장에서 실제 사용성이 눈에 띄게 좋아진다.
-
-## 5. MVP 1차 우선순위
+## 4. 현재 시점의 우선순위
 
 가장 먼저 추천하는 순서는 다음과 같다.
 
-1. `Phase 1 운영 안정화`
-2. `Phase 2 메타모델/notation registry 고도화`
-3. `Phase 3 event storm 대응`
-4. `Phase 4 agent 효율화`
-5. `Phase 5 frontend 제품성 보강`
+1. Phase 1 메타모델 기반 표현 강화 마무리
+2. Phase 2 관리자용 metamodel 관리 기능
+3. Phase 3 event storm 대응
+4. Phase 4 agent 효율화
+5. Phase 5 제품성 보강
 
 이 순서를 추천하는 이유:
+- 메타모델과 notation 구조를 먼저 고정해야 이후 확장이 흔들리지 않는다.
+- runtime 운영성은 이미 minimal E2E에서 기본이 닫혀 있으므로, 지금은 구조 중심 확장이 더 큰 가치가 있다.
+- agent 고도화도 중요하지만, backend와 frontend가 같은 metamodel 축을 공유한 뒤에 확장하는 편이 더 안정적이다.
 
-- 지금 가장 큰 가치는 “확장”보다 “안정된 기반”을 먼저 만드는 데 있다.
-- 메타모델과 event 구조를 먼저 고정해야 이후 frontend/agent 확장이 흔들리지 않는다.
-- agent 고도화는 중요하지만, backend 데이터 모델과 운영 정책이 먼저 단단해져야 효과가 크다.
+## 5. 현재 바로 이어갈 추천 작업
 
-## 6. 단계별 산출물 권장안
+지금 시점에서 가장 자연스러운 다음 작업은 아래와 같다.
 
-각 phase마다 다음 산출물을 남기는 것을 권장한다.
+1. registry 기반 렌더링을 editor와 monitor에 더 깊게 연결
+2. 관리자용 metamodel draft/publish API 초안 구현
+3. `view_nodes`, `view_edges`의 코드 기반 참조를 향후 id 기반 참조와 어떻게 연결할지 migration 전략 구체화
+4. grouped event 설계 초안 작성
 
-- 요구사항 업데이트 문서
-- DB/ERD 변경 초안
-- API 변경 초안
-- 자동화 테스트 추가
-- 회귀 테스트 결과
-- 필요 시 운영 runbook 업데이트
+## 6. 주요 리스크
 
-## 7. 주요 리스크
+### 6.1 메타모델 범위 확장 리스크
+- metamodel/notation registry를 지나치게 범용적으로 설계하면 MVP 범위를 빠르게 벗어날 수 있다.
+- primitive whitelist와 선언형 schema 범위를 엄격히 관리해야 한다.
 
-### 7.1 메타모델 범위 확장 리스크
+### 6.2 runtime과 metamodel의 연결 리스크
+- metamodel이 너무 앞서가고 persisted view, runtime binding이 뒤따르지 못하면 실제 제품 일관성이 흔들릴 수 있다.
+- 따라서 `registry -> view persistence -> renderer` 순서로 단계적으로 묶어야 한다.
 
-- 메타모델과 notation registry를 너무 범용적으로 설계하면 MVP 속도가 급격히 느려질 수 있다.
-- 따라서 처음에는 실제로 쓰는 semantic type 중심으로 좁게 가는 것이 좋다.
+### 6.3 agent 효율화 리스크
+- systemd/cgroup, pidfd, 고급 Linux 기능은 가치가 크지만 환경 의존성이 있다.
+- MVP에서는 구조를 열어두되, 단계적으로 적용해야 한다.
 
-### 7.2 event storm 대응 리스크
+## 7. 요약
 
-- grouped event를 너무 늦게 넣으면 운영 화면이 noisy 해지고 backend/frontend 부담이 커진다.
-- 반대로 너무 이르게 복잡한 룰을 넣으면 데이터 모델이 무거워질 수 있다.
-
-### 7.3 agent 고도화 리스크
-
-- systemd/cgroup, pidfd, 더 고급한 Linux 기능은 가치가 크지만 환경 의존성이 생긴다.
-- 따라서 실제 운영 서버 특성을 보면서 단계적으로 적용해야 한다.
-
-### 7.4 frontend 사용성 리스크
-
-- canvas 기능을 너무 빨리 크게 넓히면 다시 editor 자체가 중심이 되어 MVP 초점이 흐려질 수 있다.
-- backend 계약과 관제 가치 중심으로 우선순위를 유지해야 한다.
-
-## 8. 바로 다음 추천 작업
-
-지금 시점에서 가장 자연스러운 다음 작업은 아래 셋 중 하나다.
-
-1. `Phase 1`을 더 구체화한 운영 안정화 백로그 작성
-2. 메타모델/notation registry용 DB 설계 초안 작성
-3. grouped event/event storm 대응 요구사항 상세화
-
-제 추천은 `2번 메타모델/notation registry용 DB 설계 초안`부터 들어가는 것이다.  
-이 축이 정리되면 backend, frontend, admin 화면, 이후 agent 확장까지 모두 같은 중심축 위에 올라갈 수 있다.
-
-## 9. 요약
-
-- minimal E2E는 성공적으로 완료되었고, 이제는 MVP 전환이 가능한 상태다.
-- MVP의 핵심은 기능을 무작정 넓히는 것이 아니라, 메타모델 기반 구조와 운영성을 제품 수준으로 끌어올리는 것이다.
-- 다음 단계는 운영 안정화와 메타모델/notation registry 고도화를 중심으로 시작하는 것이 가장 적절하다.
+- minimal E2E는 완료되었고, 현재는 MVP 구조 확장을 시작하기에 적절한 상태다.
+- MVP의 중심축은 `메타모델/notation registry를 실제 제품 구조의 기준으로 만드는 것`이다.
+- 지금은 기능을 무작정 늘리기보다, backend와 frontend가 같은 metamodel 정의를 실제로 공유하도록 만드는 단계다.

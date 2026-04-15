@@ -112,10 +112,13 @@ def seeded_runner(seeded_app):
 
 @pytest.fixture(scope="session")
 def browser() -> Browser:
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
-        yield browser
-        browser.close()
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            yield browser
+            browser.close()
+    except PermissionError as exc:
+        pytest.skip(f"playwright browser launch is not available in this environment: {exc}")
 
 
 @pytest.fixture()

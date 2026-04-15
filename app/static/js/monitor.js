@@ -1,6 +1,6 @@
 ﻿import { apiFetch, clearBanner, formatTimestamp, showBanner } from "./common.js";
 import { renderDiagram } from "./diagram.js";
-
+import { loadMetamodelRegistry } from "./metamodel.js";
 const POLL_INTERVAL_MS = 5000;
 
 const appRoot = document.getElementById("monitor-app");
@@ -13,6 +13,8 @@ const refreshEventsButton = document.getElementById("refresh-events-button");
 
 const state = {
     viewId: Number(appRoot.dataset.viewId),
+    metamodelVersionCode: null,
+    notationDefinitionsByCode: new Map(),
     nodes: [],
     edges: [],
     latestStates: [],
@@ -260,6 +262,7 @@ function render() {
     renderDiagram(svg, {
         nodes: state.nodes,
         edges: state.edges,
+        notationDefinitionsByCode: state.notationDefinitionsByCode,
         selectedNodeId: state.selectedNodeId,
         latestStatesByTargetId,
         onNodeClick: (node, event) => {
@@ -276,6 +279,11 @@ function render() {
 
 async function loadView() {
     const payload = await apiFetch(`/api/views/${state.viewId}`);
+    if (state.metamodelVersionCode !== payload.view.metamodel_version || state.notationDefinitionsByCode.size === 0) {
+        const registry = await loadMetamodelRegistry(payload.view.metamodel_version);
+        state.metamodelVersionCode = registry.versionCode;
+        state.notationDefinitionsByCode = registry.notationDefinitionsByCode;
+    }
     state.nodes = payload.nodes;
     state.edges = payload.edges;
 }
@@ -319,3 +327,5 @@ svg.addEventListener("click", () => {
 
 refreshAll();
 window.setInterval(refreshAll, POLL_INTERVAL_MS);
+
+

@@ -64,6 +64,7 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     server_shape.click(force=True)
     page.get_by_role("button", name="에이전트 추가").click()
     expect(page.locator('g.diagram-node[data-node-type="MonitoringAgent"]')).to_have_count(1)
+    expect(page.locator('g.diagram-node[data-notation-code="agent.rounded_rect.double_border"] .node-double-border')).to_have_count(1)
 
     view_id = int(re.search(r"/views/(\d+)/edit$", page.url).group(1))
 
@@ -176,6 +177,8 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     monitor_server_node = page.locator('g.diagram-node[data-node-type="PhysicalServer"]').first
     monitor_agent_shape = page.locator('g.diagram-node[data-node-type="MonitoringAgent"] .node-shape').first
     monitor_process_shape = page.locator('g.diagram-node[data-node-type="SoftwareProcess"] .node-shape').first
+    expect(page.locator('g.diagram-node[data-notation-code="server.physical.rect"]')).to_have_count(1)
+    expect(page.locator('g.diagram-node[data-notation-code="agent.rounded_rect.double_border"] .node-double-border')).to_have_count(1)
 
     expect(page.locator("#monitor-agent-summary")).to_contain_text("Agent Alpha")
     expect(page.locator("#monitor-agent-summary")).to_contain_text("connected")

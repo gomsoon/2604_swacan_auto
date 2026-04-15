@@ -1,6 +1,6 @@
 ﻿import { apiFetch, clearBanner, readNumber, showBanner, slugify } from "./common.js";
 import { clientToSvg, renderDiagram } from "./diagram.js";
-
+import { loadMetamodelRegistry } from "./metamodel.js";
 const appRoot = document.getElementById("editor-app");
 const svg = document.getElementById("editor-canvas");
 const selectionKind = document.getElementById("selection-kind");
@@ -21,6 +21,7 @@ const state = {
     metamodelVersionCode: null,
     metamodelVersionId: null,
     paletteGroups: [],
+    notationDefinitionsByCode: new Map(),
     paletteItemsByType: new Map(),
     edgeToolLabel: "통신선 시작",
     nodes: [],
@@ -265,91 +266,20 @@ function renderPalette() {
     );
 }
 
-function buildFallbackPaletteGroups() {
-    return [
-        {
-            code: "servers",
-            label: "Servers",
-            items: [
-                {
-                    notation_code: "server.physical.rect",
-                    display_name: "Physical Server",
-                    semantic_type_code: "PhysicalServer",
-                    render_primitive: "rect",
-                    render_schema: { primitive: "rect", default_size: { width: 480, height: 260 } },
-                },
-            ],
-        },
-        {
-            code: "processes",
-            label: "Processes",
-            items: [
-                {
-                    notation_code: "process.rounded_rect",
-                    display_name: "Software Process",
-                    semantic_type_code: "SoftwareProcess",
-                    render_primitive: "rounded_rect",
-                    render_schema: { primitive: "rounded_rect", default_size: { width: 180, height: 56 } },
-                },
-            ],
-        },
-        {
-            code: "monitoring",
-            label: "Monitoring",
-            items: [
-                {
-                    notation_code: "agent.rounded_rect.double_border",
-                    display_name: "Monitoring Agent",
-                    semantic_type_code: "MonitoringAgent",
-                    render_primitive: "rounded_rect",
-                    render_schema: {
-                        primitive: "rounded_rect",
-                        default_size: { width: 170, height: 56 },
-                        modifiers: { double_border: true },
-                    },
-                },
-            ],
-        },
-        {
-            code: "communication",
-            label: "Communication",
-            items: [
-                {
-                    notation_code: "communication.line",
-                    display_name: "통신선 시작",
-                    semantic_type_code: "CommunicationLink",
-                    render_primitive: "line",
-                    render_schema: { primitive: "line" },
-                },
-            ],
-        },
-    ];
-}
-
 async function loadPalette(metamodelVersionCode) {
+    const registry = await loadMetamodelRegistry(metamodelVersionCode);
+    state.metamodelVersionId = registry.versionId;
+    state.metamodelVersionCode = registry.versionCode;
+    state.paletteGroups = registry.paletteGroups;
+    state.notationDefinitionsByCode = registry.notationDefinitionsByCode;
+    renderPalette();
+
     if (!metamodelVersionCode) {
-        state.paletteGroups = buildFallbackPaletteGroups();
-        renderPalette();
         setPaletteStatus("metamodel version 정보가 없어 기본 palette를 사용합니다.");
         return;
     }
 
-    try {
-        const versionsPayload = await apiFetch("/api/metamodel/versions/published");
-        const version = versionsPayload.items.find((item) => item.version_code === metamodelVersionCode);
-        if (!version) {
-            throw new Error(`published metamodel version '${metamodelVersionCode}' not found`);
-        }
-
-        const palettePayload = await apiFetch(`/api/metamodel/versions/${version.id}/palette`);
-        state.metamodelVersionId = version.id;
-        state.metamodelVersionCode = metamodelVersionCode;
-        state.paletteGroups = palettePayload.palette_groups || [];
-        renderPalette();
-    } catch (error) {
-        console.error(error);
-        state.paletteGroups = buildFallbackPaletteGroups();
-        renderPalette();
+    if (registry.usedFallback) {
         setPaletteStatus("metamodel palette 조회에 실패해 기본 palette를 사용합니다.");
     }
 }
@@ -388,6 +318,7 @@ function render() {
     renderDiagram(svg, {
         nodes: state.nodes,
         edges: state.edges,
+        notationDefinitionsByCode: state.notationDefinitionsByCode,
         selectedNodeId: state.selectedNodeId,
         selectedEdgeId: state.selectedEdgeId,
         connectSourceId: state.connectSourceId,
