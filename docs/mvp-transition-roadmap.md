@@ -61,7 +61,21 @@
 - published version 기준으로 일반 editor와 monitor가 안정적으로 동작한다.
 - draft 편집이 운영 중 monitoring 화면에 직접 영향을 주지 않는다.
 
-### Phase 3. event storm 대응과 운영 고도화
+### Phase 3. runtime identity 분리와 운영 모델 정리
+목표:
+- view snapshot과 runtime identity를 분리해, 여러 active view가 동일 runtime 대상을 안정적으로 공유하게 만든다.
+
+주요 항목:
+- `monitored_objects` 개념 도입
+- `node_bindings` 구조 설계
+- latest state / raw event / alert의 monitored object 귀속 모델 정리
+- `target_id` compatibility 경로와 점진 migration 전략 수립
+
+완료 기준:
+- 동일 runtime 대상이 여러 active view에서 fan-out되어도 저장과 alert 생성은 1회만 일어난다.
+- view snapshot과 runtime state 귀속 단위가 분리된다.
+
+### Phase 4. event storm 대응과 운영 고도화
 목표:
 - 반복 이벤트와 대량 이벤트 상황에서도 운영 화면이 유지되도록 만든다.
 
@@ -75,7 +89,7 @@
 - 동일 원인 반복 이벤트가 요약되어 표시된다.
 - 운영자는 필요할 때만 raw event를 세부 조회한다.
 
-### Phase 4. agent 효율화와 식별 전략 강화
+### Phase 5. agent 효율화와 식별 전략 강화
 목표:
 - 실제 운영 Linux 서버에서 agent 부하를 줄이고 multi-process daemon 감시 품질을 높인다.
 
@@ -90,7 +104,7 @@
 - 다수의 process 환경에서도 agent 부하가 예측 가능하게 관리된다.
 - multi-process daemon이 개별 PID가 아니라 논리 group으로 표현된다.
 
-### Phase 5. 제품성 보강
+### Phase 6. 제품성 보강
 목표:
 - 운영자와 관리자 입장에서 더 자연스럽게 사용할 수 있는 화면으로 다듬는다.
 
@@ -110,14 +124,15 @@
 
 1. Phase 1 메타모델 기반 표현 강화 마무리
 2. Phase 2 관리자용 metamodel 관리 기능
-3. Phase 3 event storm 대응
-4. Phase 4 agent 효율화
-5. Phase 5 제품성 보강
+3. Phase 3 runtime identity 분리
+4. Phase 4 event storm 대응
+5. Phase 5 agent 효율화
+6. Phase 6 제품성 보강
 
 이 순서를 추천하는 이유:
 - 메타모델과 notation 구조를 먼저 고정해야 이후 확장이 흔들리지 않는다.
-- runtime 운영성은 이미 minimal E2E에서 기본이 닫혀 있으므로, 지금은 구조 중심 확장이 더 큰 가치가 있다.
-- agent 고도화도 중요하지만, backend와 frontend가 같은 metamodel 축을 공유한 뒤에 확장하는 편이 더 안정적이다.
+- 같은 runtime 대상을 여러 view가 공유할 수 있도록 runtime identity를 view snapshot에서 분리해야 event/alert 설계가 안정된다.
+- agent 고도화도 중요하지만, backend와 frontend가 같은 metamodel 축과 runtime identity 축을 공유한 뒤에 확장하는 편이 더 안정적이다.
 
 ## 5. 현재 바로 이어갈 추천 작업
 
@@ -125,7 +140,7 @@
 
 1. registry 기반 렌더링을 editor와 monitor에 더 깊게 연결
 2. 관리자용 metamodel draft/publish API 초안 구현
-3. `view_nodes`, `view_edges`의 코드 기반 참조를 향후 id 기반 참조와 어떻게 연결할지 migration 전략 구체화
+3. `monitored_objects / node_bindings / alert_instances` 설계 초안 구체화
 4. grouped event 설계 초안 작성
 
 ## 6. 주요 리스크

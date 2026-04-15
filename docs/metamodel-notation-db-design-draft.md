@@ -68,6 +68,11 @@
 
 본 문서는 1, 2 계층을 중심으로 정리한다.
 
+### 3.1 Runtime Layer 보강 메모
+- 여러 active view가 동일한 runtime 대상을 동시에 표현할 수 있으므로, runtime layer는 장기적으로 `view node`가 아니라 별도의 `monitored object`를 기준으로 구성하는 편이 더 안정적이다.
+- 이 경우 view는 `node binding`을 통해 monitored object를 참조하고, latest state / raw event / alert는 monitored object에 1회 생성된 뒤 여러 view로 fan-out된다.
+- 관련 상세는 [runtime-identity-binding-design-draft.md](C:/2604_swacan_auto/docs/runtime-identity-binding-design-draft.md)에서 별도로 정리한다.
+
 ## 4. 핵심 테이블
 
 ### 4.1 metamodel_namespaces

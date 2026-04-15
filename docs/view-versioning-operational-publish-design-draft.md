@@ -1,196 +1,160 @@
 # Software Architecture Runtime Monitoring System
 
 ## View Versioning / Publish / Active Operational View 설계 초안
+버전: Draft 0.2  
+작성일: 2026-04-16
 
-버전: Draft 0.1  
-작성일: 2026-04-15
-
-목적: architecture view 를 편집용 draft 와 운영용 active snapshot 으로 분리하기 위한 설계 방향을 정리한다. 이 문서는 이후 ERD, API, 화면 설계의 기준 초안으로 사용한다.
+목적: architecture view를 편집용 `draft`, 승인 대기용 `published`, 운영용 `active` snapshot으로 분리하는 설계 방향을 정리한다. 이 문서는 이후 ERD, SQLite 스키마, API, 화면 흐름의 기준 초안으로 사용한다.
 
 참고 문서:
 - [software-architecture-runtime-monitoring-mvp-plan.md](C:/2604_swacan_auto/docs/software-architecture-runtime-monitoring-mvp-plan.md)
-- [backend-detailed-requirements.md](C:/2604_swacan_auto/docs/backend-detailed-requirements.md)
-- [frontend-detailed-requirements.md](C:/2604_swacan_auto/docs/frontend-detailed-requirements.md)
 - [mvp-transition-roadmap.md](C:/2604_swacan_auto/docs/mvp-transition-roadmap.md)
+- [view-versioning-erd-draft.md](C:/2604_swacan_auto/docs/view-versioning-erd-draft.md)
+- [runtime-identity-binding-design-draft.md](C:/2604_swacan_auto/docs/runtime-identity-binding-design-draft.md)
 
 ## 1. 문제 정의
 
-- 현재 `views`, `view_nodes`, `view_edges` 가 하나의 편집 대상이자 하나의 운영 대상처럼 동작하면, 운영자가 관제 중인 화면 구조가 다른 사용자의 편집에 의해 즉시 바뀔 수 있다.
-- 이 구조는 관제 도구 관점에서 위험하다. 장애 분석 중에 화면 구조가 바뀌면 운영자가 무엇을 보고 있는지 기준이 흔들리기 때문이다.
-- 따라서 편집본과 운영본을 분리하고, 운영 화면은 명시적으로 배포된 snapshot 을 기준으로 동작해야 한다.
+- 운영자가 관제 중인 화면은 다른 사용자의 편집으로 즉시 바뀌면 안 된다.
+- 같은 logical view라도 편집 중인 작업본과 실제 운영 중인 화면은 분리돼야 한다.
+- publish는 기존 운영본을 덮어쓰는 동작이 아니라, 고정된 snapshot을 새로 만드는 동작이어야 한다.
+- 하나의 server, process, thread를 여러 view가 동시에 표시할 수 있으므로, view snapshot과 runtime identity는 장기적으로 분리돼야 한다.
 
-## 2. 설계 원칙
+## 2. 핵심 원칙
 
-- 편집은 항상 `draft view version` 에 대해 수행한다.
-- 운영 monitoring 은 항상 `active operational view version` 을 기준으로 수행한다.
-- publish 는 기존 운영 row 를 수정하는 방식이 아니라, draft 를 기준으로 새로운 version snapshot 을 만드는 방식이어야 한다.
-- active operational version 전환은 publish 와 분리할 수 있어야 한다.
-- rollback 을 위해 과거 published version 을 다시 active 로 전환할 수 있어야 한다.
-- version 별 row id 는 달라질 수 있으므로, 논리 객체 동일성을 위해 별도 `element_key` 를 유지하는 것이 바람직하다.
+- 편집은 항상 `draft view version`에서만 수행한다.
+- 운영 monitoring은 항상 `active view version`을 기준으로 수행한다.
+- `published`는 승인 대기 또는 배포 후보인 고정 snapshot이다.
+- `active`는 실제 운영 중인 snapshot이다.
+- `deprecated`는 더 이상 운영 기준으로 사용하지 않는 과거 snapshot이다.
+- `published -> draft`는 직접 상태 변경이 아니라 `published 기반 새 draft 생성`으로 처리한다.
 
-## 3. 핵심 개념
+## 3. 상태 모델
 
-### 3.1 Logical View
-- 사용자 입장에서 하나의 architecture 화면을 의미한다.
-- 예: `SimpleChatServer 운영 view`
+### 3.1 draft
+- 편집 가능
+- node/edge/layout 수정 가능
+- 운영 화면에서 직접 사용하지 않음
 
-### 3.2 View Version
-- 특정 시점의 snapshot 이다.
-- 하나의 logical view 아래에 여러 version 이 존재할 수 있다.
+### 3.2 published
+- 편집 완료된 고정 snapshot
+- 승인 대기 또는 배포 후보
+- 수정 불가
 
-### 3.3 Draft Version
-- 편집 가능한 작업본
-- 운영 화면에서는 직접 사용하지 않는다.
+### 3.3 active
+- 실제 monitoring 화면이 참조하는 운영 snapshot
+- 수정 불가
+- 하나의 logical view에 대해 동시에 하나만 존재해야 한다
 
-### 3.4 Published Version
-- 배포 가능한 고정본
-- immutable snapshot 으로 취급하는 것이 바람직하다.
+### 3.4 deprecated
+- 더 이상 운영 기준으로 사용하지 않는 과거 snapshot
+- rollback 또는 감사 추적용으로 보존
 
-### 3.5 Active Operational Version
-- 실제 monitoring 화면이 참조하는 현재 운영 기준 버전
-- published version 중 하나를 가리킨다.
+## 4. 권장 상태 전이
 
-## 4. 권장 상태 모델
+- `draft -> published`
+- `published -> active`
+- `published -> deprecated`
+- `active -> deprecated`
+- `published -> new draft(clone)`
+- `deprecated -> new draft(clone)`는 선택적으로 허용 가능
 
-- `draft`
-- `published`
-- `active`
-- `deprecated`
+운영 규칙:
+- 새 version이 `active`가 되면 기존 `active`는 자동으로 `deprecated`로 전환한다.
+- `published`, `active`, `deprecated`는 직접 수정하지 않는다.
+- 수정이 필요하면 기존 version을 기반으로 새 `draft`를 만든다.
 
-설계 메모:
-- 구현 단순화를 위해 `active` 를 published 의 한 종류로 볼 수도 있다.
-- 다만 의미상으로는 `published` 와 `active` 를 구분하는 편이 운영 정책을 설명하기 쉽다.
+## 5. 핵심 개념
 
-## 5. 권장 데이터 모델 방향
+### 5.1 Logical View
+- 사용자가 인식하는 하나의 architecture 화면
+- 예: `SimpleChatServer 운영 View`
 
-### 5.1 logical view 루트
-- `views`
-- 역할:
-  - view 의 논리적 루트
-  - 이름, 설명, owner, workspace 등의 상위 정보 보관
+### 5.2 View Version
+- 특정 시점의 snapshot
+- logical view 아래에 여러 version이 존재할 수 있다
 
-### 5.2 version 테이블
-- 예시: `view_versions`
-- 핵심 컬럼 제안:
-  - `id`
-  - `view_id`
-  - `version_no` 또는 `version_code`
-  - `status`
-  - `based_on_version_id`
-  - `published_at`
-  - `activated_at`
-  - `created_by_user_id`
-  - `created_at`
-  - `updated_at`
-
-### 5.3 version별 node/edge
-- 예시:
-  - `view_version_nodes`
-  - `view_version_edges`
-- 현재 `view_nodes`, `view_edges` 는 장기적으로 이 구조로 이동하는 것이 바람직하다.
-
-### 5.4 element_key
-- version 간 동일 논리 객체를 이어주기 위한 안정 키
+### 5.3 Element Key
+- version 간 동일한 논리 객체를 잇는 안정 키
 - 예:
   - `srv_main`
-  - `proc_worker_group`
+  - `proc_chat_main`
   - `agent_local_main`
-- 장점:
-  - row id 가 바뀌어도 runtime binding 을 유지하기 쉽다.
-  - publish 시 snapshot row 가 새로 생겨도 이벤트 매핑 기준이 유지된다.
 
-## 6. 동작 흐름
+장점:
+- version row id가 바뀌어도 같은 논리 객체를 추적할 수 있다
+- runtime binding, event overlay, alert fan-out을 안정적으로 연결할 수 있다
 
-### 6.1 Draft 생성
-- 기존 active 또는 published version 을 기준으로 새 draft 생성
-- 편집자는 이 draft 만 수정
+## 6. 운영/편집 분리의 의미
 
-### 6.2 저장
-- draft 내부 row 만 갱신
-- 운영 화면에는 영향 없음
+### 6.1 Editor
+- logical view를 열면 현재 `draft`가 있으면 그 version을 연다
+- draft가 없으면 active 또는 published를 기준으로 새 draft를 생성한다
+
+### 6.2 Monitoring
+- logical view를 열면 현재 `active` version만 본다
+- active가 없고 초기 작성 단계라면 선택적으로 draft preview를 허용할 수 있다
+- draft 편집은 운영 화면에 즉시 반영되지 않는다
 
 ### 6.3 Publish
-- draft 를 immutable published snapshot 으로 승격
-- 기존 active version 은 자동으로 바꾸지 않을 수 있음
+- draft를 고정 snapshot으로 승격한다
+- 운영 반영은 하지 않는다
 
-### 6.4 Active 전환
-- 관리자 또는 권한 있는 사용자가 특정 published version 을 active operational version 으로 전환
-- monitoring 화면은 이후부터 새 active version 을 기준으로 열림
+### 6.4 Activate
+- published snapshot을 active로 승격한다
+- monitoring은 이후부터 이 snapshot을 기준으로 동작한다
 
-### 6.5 Rollback
-- 이전 published version 을 다시 active 로 지정
+## 7. runtime identity와의 연결
 
-## 7. Frontend 관점 요구사항
+view versioning만으로는 운영 문제가 완전히 해결되지 않는다. 같은 process를 여러 active view에서 동시에 표시할 수 있기 때문이다.
 
-- editor 는 현재 보고 있는 대상이 `draft` 임을 명확히 보여주어야 한다.
-- monitoring 은 현재 보고 있는 대상이 `active operational version` 임을 보여주어야 한다.
-- publish 이후에도 운영 화면이 자동 변경되는지, 수동 active 전환이 필요한지 사용자에게 분명히 안내해야 한다.
-- version 목록, 현재 active 표시, publish 버튼, active 전환 버튼이 필요하다.
+따라서 다음 원칙을 함께 가져가야 한다.
+- view snapshot은 화면 표현 책임을 가진다
+- 실제 runtime state, event, alert는 별도의 monitored object에 귀속된다
+- active view는 자신이 참조하는 monitored object를 화면에 fan-out해서 보여준다
 
-## 8. Backend 관점 요구사항
+즉:
+- 생성 단위: monitored object
+- 표현 단위: active view version node
 
-- draft 저장과 publish 를 분리해야 한다.
-- active version 조회 API 가 필요하다.
-- monitoring latest state 조회는 active version 기준 node/edge 구조를 참조해야 한다.
-- revision 충돌은 draft version 내부에서만 관리하면 된다.
-- 운영 화면은 draft row 를 직접 조회하지 않아야 한다.
+이 구조는 [runtime-identity-binding-design-draft.md](C:/2604_swacan_auto/docs/runtime-identity-binding-design-draft.md)에서 별도로 정리한다.
 
-## 9. Migration 관점 메모
+## 8. 최소 API 방향
 
-- 현재 구조는 `views`, `view_nodes`, `view_edges` 가 단일 버전처럼 동작한다.
-- MVP 초기 전환은 다음 순서가 적절하다.
+### 8.1 Version 목록 조회
+- `GET /api/views/{view_id}/versions`
 
-1. `views` 는 logical root 로 유지
-2. `view_versions` 추가
-3. 기존 `view_nodes`, `view_edges` 를 `view_version_nodes`, `view_version_edges` 구조로 이관
-4. active version 조회 API 도입
-5. editor/monitoring 화면 분리
+### 8.2 Draft 생성
+- `POST /api/views/{view_id}/drafts`
+
+### 8.3 Draft 상세 조회
+- `GET /api/views/{view_id}/draft`
+
+### 8.4 Draft 편집
+- `PUT /api/view-versions/{version_id}`
+- 또는 node/edge 단위 CRUD API 사용
+
+### 8.5 Publish
+- `POST /api/view-versions/{version_id}/publish`
+
+### 8.6 Activate
+- `POST /api/view-versions/{version_id}/activate`
+
+### 8.7 Active 조회
+- `GET /api/views/{view_id}/active`
+
+## 9. 구현 순서 권장
+
+1. `views`를 logical root로 유지
+2. `view_versions`, `view_version_nodes`, `view_version_edges` 도입
+3. editor를 draft 기준으로 전환
+4. monitoring을 active 기준으로 전환
+5. publish / activate lifecycle 추가
+6. runtime identity 분리 계층 추가
 
 ## 10. 요약
 
-- 운영 안정성을 위해 편집본과 운영본은 분리되어야 한다.
-- 가장 적절한 구조는 `logical view + draft/published/active version snapshot` 모델이다.
-- publish 는 덮어쓰기가 아니라 snapshot 생성이어야 한다.
-- runtime binding 과 event 매핑을 위해 `element_key` 같은 안정 식별자 도입이 유리하다.
-- 이 설계는 이후 view versioning ERD 와 publish/active 전환 API 설계의 기준이 된다.
-
-## 11. 권장 최소 API 초안
-
-### 11.1 Version 조회
-- `GET /api/views/{view_id}/versions`
-- 목적:
-  - logical view 아래의 draft/published/active/deprecated version 목록 조회
-
-### 11.2 Draft 생성
-- `POST /api/views/{view_id}/drafts`
-- 목적:
-  - 특정 published 또는 active version 을 기준으로 새 draft 생성
-
-### 11.3 Draft 저장
-- `PUT /api/view-versions/{version_id}`
-- 목적:
-  - draft version 내부 node/edge/layout 갱신
-
-### 11.4 Publish
-- `POST /api/view-versions/{version_id}/publish`
-- 목적:
-  - draft version 을 새 published snapshot 으로 승격
-
-### 11.5 Active 전환
-- `POST /api/view-versions/{version_id}/activate`
-- 목적:
-  - 특정 published version 을 active operational version 으로 지정
-
-### 11.6 Active 조회
-- `GET /api/views/{view_id}/active`
-- 목적:
-  - monitoring 화면이 사용해야 하는 현재 active version 반환
-
-## 12. 권장 구현 순서
-
-1. `view_versions` 테이블과 상태 모델 추가
-2. 기존 `views` 와 `view_nodes/view_edges` 를 logical root + active snapshot 관점으로 해석하는 compatibility layer 도입
-3. editor 는 draft version 기준으로 저장
-4. monitoring 은 active version 기준으로 조회
-5. publish / activate API 추가
-6. 이후 `element_key` 와 version별 node/edge 이관 진행
+- 운영 안정성을 위해 편집본과 운영본은 분리돼야 한다.
+- `draft / published / active / deprecated` 상태 모델은 운영 승인 흐름과 잘 맞는다.
+- publish는 overwrite가 아니라 snapshot 생성이다.
+- `element_key`는 version 간 논리 객체를 잇는 핵심 키다.
+- 장기적으로는 view snapshot과 runtime identity를 분리해, alert/event/latest state가 monitored object에 귀속되도록 가야 한다.

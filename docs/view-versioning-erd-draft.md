@@ -1,33 +1,32 @@
 # Software Architecture Runtime Monitoring System
 
 ## View Versioning ERD 초안
+버전: Draft 0.2  
+작성일: 2026-04-16
 
-버전: Draft 0.1  
-작성일: 2026-04-15
-
-목적: `draft / published / active operational view` 구조를 데이터베이스 엔터티 수준으로 구체화한다. 이 문서는 이후 SQLite 스키마 확장, API 설계, migration 계획의 기준 초안으로 사용한다.
+목적: `draft / published / active / deprecated` 상태 모델을 데이터베이스 구조로 구체화하고, 이후 runtime identity 분리 계층과 어떻게 연결할지 정리한다.
 
 참고 문서:
 - [view-versioning-operational-publish-design-draft.md](C:/2604_swacan_auto/docs/view-versioning-operational-publish-design-draft.md)
-- [minimal-erd-draft.md](C:/2604_swacan_auto/docs/minimal-erd-draft.md)
-- [sqlite-create-table-draft.md](C:/2604_swacan_auto/docs/sqlite-create-table-draft.md)
+- [view-versioning-sqlite-draft.md](C:/2604_swacan_auto/docs/view-versioning-sqlite-draft.md)
+- [runtime-identity-binding-design-draft.md](C:/2604_swacan_auto/docs/runtime-identity-binding-design-draft.md)
 
 ## 1. 설계 목표
 
-- 운영 중인 monitoring 화면과 편집 중인 draft 화면을 분리한다.
-- `views` 는 논리 루트로 유지하고, 실제 편집/운영 대상은 `view_versions` 와 그 하위 snapshot row 로 옮긴다.
-- publish 는 draft row 를 운영 원본에 덮어쓰지 않고, version snapshot 상태를 바꾸는 방식으로 처리한다.
-- active operational version 을 명시적으로 고정해 운영 화면이 다른 사용자의 편집에 영향을 받지 않게 한다.
-- 버전 간 동일 논리 객체를 이어가기 위해 `element_key` 를 도입한다.
+- `views`는 logical root로 유지한다.
+- 실제 편집/운영 대상은 `view_versions`와 그 하위 snapshot row로 관리한다.
+- 운영 중인 `active` 화면은 다른 사용자의 draft 편집에 영향을 받지 않는다.
+- version row id와 별개로 `element_key`를 둬 version 간 동일 논리 객체를 잇는다.
+- 장기적으로는 runtime state/event/alert를 `view_version_nodes`가 아니라 별도 monitored object에 귀속시킨다.
 
-## 2. 권장 엔터티 구조
+## 2. 권장 테이블 구조
 
 ### 2.1 views
 역할:
-- logical view 루트
-- 사용자 입장에서 보이는 “하나의 아키텍처 화면” 정의
+- logical view root
+- 사용자 관점의 화면 단위
 
-권장 컬럼:
+핵심 컬럼:
 - `id INTEGER PRIMARY KEY`
 - `workspace_id INTEGER`
 - `owner_user_id INTEGER NOT NULL`
@@ -37,15 +36,12 @@
 - `created_at TEXT NOT NULL`
 - `updated_at TEXT NOT NULL`
 
-설계 메모:
-- 현재 `views` 가 갖고 있는 `revision` 은 장기적으로 draft version 수준으로 이동하는 것이 더 자연스럽다.
-
 ### 2.2 view_versions
 역할:
-- logical view 의 snapshot 단위
-- draft / published / active / deprecated 상태 관리
+- logical view 아래의 snapshot 단위
+- `draft / published / active / deprecated` 상태 관리
 
-권장 컬럼:
+핵심 컬럼:
 - `id INTEGER PRIMARY KEY`
 - `view_id INTEGER NOT NULL`
 - `version_no INTEGER NOT NULL`
@@ -54,13 +50,11 @@
 - `based_on_version_id INTEGER`
 - `metamodel_version_id INTEGER`
 - `created_by_user_id INTEGER NOT NULL`
+- `approved_by_user_id INTEGER`
+- `activated_by_user_id INTEGER`
 - `description TEXT`
 - `published_at TEXT`
 - `activated_at TEXT`
-- `is_edit_locked INTEGER NOT NULL DEFAULT 0`
-- `lock_owner_user_id INTEGER`
-- `lock_acquired_at TEXT`
-- `lock_expires_at TEXT`
 - `revision INTEGER NOT NULL DEFAULT 1`
 - `created_at TEXT NOT NULL`
 - `updated_at TEXT NOT NULL`
@@ -69,20 +63,20 @@
 - `(view_id, version_no)` unique
 - `status` in (`draft`, `published`, `active`, `deprecated`)
 
-권장 운영 규칙:
-- 하나의 `view_id` 아래에는 `draft` 여러 개를 허용할지, 하나만 허용할지 정책 결정 필요
-- MVP 에서는 `view_id` 당 동시 `draft` 1개로 제한하는 것이 단순하다
-- `active` 는 `view_id` 당 최대 1개여야 한다
+운영 규칙:
+- MVP에서는 `view_id`별 동시 `draft`는 1개로 제한하는 편이 단순하다.
+- `active`는 `view_id`별 최대 1개만 허용한다.
 
 ### 2.3 view_version_nodes
 역할:
-- 특정 version snapshot 에 속한 node 저장
+- 특정 version snapshot에 속한 node 표현
 
-권장 컬럼:
+핵심 컬럼:
 - `id INTEGER PRIMARY KEY`
 - `view_version_id INTEGER NOT NULL`
 - `element_key TEXT NOT NULL`
 - `parent_node_id INTEGER`
+- `node_type TEXT NOT NULL`
 - `semantic_type_code TEXT NOT NULL`
 - `notation_code TEXT NOT NULL`
 - `display_name TEXT NOT NULL`
@@ -105,20 +99,22 @@
 권장 제약:
 - `(view_version_id, element_key)` unique
 
-설계 메모:
-- `parent_node_id` 는 같은 `view_version_id` 내부 row 를 참조해야 한다
-- version 간 row id 는 바뀌어도 `element_key` 는 유지하는 것이 바람직하다
+메모:
+- `target_id`는 현재 compatibility 용도로 유지할 수 있다.
+- 장기적으로는 `target_id` 대신 `node_bindings`를 통한 monitored object 연결로 축소하는 편이 좋다.
 
 ### 2.4 view_version_edges
 역할:
-- 특정 version snapshot 에 속한 edge 저장
+- 특정 version snapshot에 속한 edge 표현
 
-권장 컬럼:
+핵심 컬럼:
 - `id INTEGER PRIMARY KEY`
 - `view_version_id INTEGER NOT NULL`
 - `element_key TEXT NOT NULL`
-- `association_code TEXT NOT NULL`
-- `notation_code TEXT`
+- `edge_type TEXT NOT NULL`
+- `association_code TEXT`
+- `semantic_type_code TEXT NOT NULL`
+- `notation_code TEXT NOT NULL`
 - `source_node_id INTEGER NOT NULL`
 - `target_node_id INTEGER NOT NULL`
 - `source_element_key TEXT`
@@ -136,10 +132,6 @@
 권장 제약:
 - `(view_version_id, element_key)` unique
 
-설계 메모:
-- 초기 migration 단계에서는 `source_node_id`, `target_node_id` 로 충분하다
-- 장기적으로 version 간 안정 참조를 위해 `source_element_key`, `target_element_key` 를 병행하는 것이 좋다
-
 ## 3. 권장 관계
 
 - `views 1 --- N view_versions`
@@ -149,85 +141,123 @@
 - `view_version_nodes 1 --- N source view_version_edges`
 - `view_version_nodes 1 --- N target view_version_edges`
 
-## 4. 상태 모델 권장 해석
+## 4. runtime identity 분리 계층
 
-### 4.1 draft
-- 편집 가능
-- monitoring 에 직접 사용하지 않음
+view versioning만으로는 운영 데이터 fan-out 문제를 해결하기 어렵다. 같은 server/process/thread가 여러 active view에서 동시에 표현될 수 있기 때문이다.
 
-### 4.2 published
-- publish 완료 snapshot
-- active 전환 후보
+그래서 장기적으로는 다음 계층이 필요하다.
 
-### 4.3 active
-- 현재 monitoring 이 참조하는 운영 버전
-- 읽기 전용
+### 4.1 monitored_objects
+역할:
+- 실제 관측 대상의 전역 논리 ID
+- latest state, raw event, alert의 귀속 대상
 
-### 4.4 deprecated
-- 더 이상 운영 기준으로 쓰지 않는 과거 버전
+예시 컬럼:
+- `id INTEGER PRIMARY KEY`
+- `object_key TEXT NOT NULL UNIQUE`
+- `object_type TEXT NOT NULL`
+- `display_name TEXT NOT NULL`
+- `runtime_binding_key TEXT`
+- `metadata_json TEXT`
+- `created_at TEXT NOT NULL`
+- `updated_at TEXT NOT NULL`
 
-설계 메모:
-- 구현 단순화를 위해 `published` + `is_active` 조합으로도 가능하다
-- 다만 질의와 운영 정책 설명은 `status='active'` 가 더 직관적이다
+### 4.2 node_bindings
+역할:
+- 특정 `view_version_node`가 어떤 `monitored_object`를 바라보는지 연결
 
-## 5. 최소 질의 패턴
+예시 컬럼:
+- `id INTEGER PRIMARY KEY`
+- `view_version_node_id INTEGER NOT NULL`
+- `monitored_object_id INTEGER NOT NULL`
+- `binding_role TEXT NOT NULL DEFAULT 'primary'`
+- `created_at TEXT NOT NULL`
+- `updated_at TEXT NOT NULL`
 
-### 5.1 Editor 열기
-- logical view 선택
-- 해당 view 의 최신 `draft` version 조회
-- 없으면 active 또는 latest published 기준으로 새 draft 생성 후 진입
+권장 제약:
+- `(view_version_node_id, monitored_object_id)` unique
 
-### 5.2 Monitoring 열기
-- `view_id` 의 현재 `active` version 조회
-- 해당 version 의 nodes/edges 조회
+### 4.3 alert_instances
+역할:
+- runtime rule 평가 결과 생성된 alert
+- view node가 아니라 monitored object에 귀속
 
-### 5.3 Publish
-- draft version 조회
-- 상태를 `published` 로 변경
-- 기존 `active` 는 그대로 유지 가능
+예시 컬럼:
+- `id INTEGER PRIMARY KEY`
+- `monitored_object_id INTEGER NOT NULL`
+- `alert_code TEXT NOT NULL`
+- `severity TEXT NOT NULL`
+- `status TEXT NOT NULL`
+- `first_occurred_at TEXT NOT NULL`
+- `last_occurred_at TEXT NOT NULL`
+- `repeat_count INTEGER NOT NULL DEFAULT 1`
+- `latest_message TEXT`
+- `metadata_json TEXT`
 
-### 5.4 Active 전환
-- chosen published version 의 상태를 `active` 로 변경
-- 기존 active version 은 `published` 또는 `deprecated` 로 변경
+## 5. fan-out 원칙
 
-## 6. Migration 전략
+- latest state는 `monitored_object_id` 기준으로 1번 갱신한다.
+- raw event도 `monitored_object_id` 기준으로 1번 생성한다.
+- alert도 `monitored_object_id` 기준으로 1번 생성한다.
+- 각 active view는 자신이 참조하는 monitored object를 화면에 fan-out해서 보여준다.
 
-### 6.1 1단계
-- 현재 `views`, `view_nodes`, `view_edges` 유지
-- `view_versions` 추가
-- `view_nodes`, `view_edges` 는 임시로 active snapshot row 로 간주
+즉:
+- 생성 단위: monitored object
+- 표현 단위: view version node
 
-### 6.2 2단계
-- `view_version_nodes`, `view_version_edges` 추가
-- 기존 데이터 1회 이관
-- API 가 `view_version_id` 를 우선 사용하도록 전환
+## 6. 현재 구조 평가
 
-### 6.3 3단계
-- editor 는 draft version 전용 저장
-- monitor 는 active version 전용 조회
-- 기존 단일 `view_nodes`, `view_edges` 는 compatibility layer 또는 제거 대상
+현재 구조도 `target_id`가 전역적으로 일관되게 관리되면, 동일 runtime 대상을 여러 view에서 참조할 때 latest state를 여러 번 저장할 필요는 없다.
 
-## 7. 인덱스 권장안
+하지만 현재의 한계는 분명하다.
+- `target_id`가 view snapshot row 안에 있어서 runtime identity 책임을 과도하게 진다.
+- 같은 process를 서로 다른 view에서 다른 `target_id`로 저장하면 같은 대상을 다르게 취급할 수 있다.
+- `latest_states.view_node_id` 같은 legacy linkage는 versioned 구조와 잘 맞지 않는다.
 
-- `view_versions(view_id, status)`
-- `view_versions(view_id, version_no)`
-- `view_version_nodes(view_version_id, parent_node_id)`
-- `view_version_nodes(view_version_id, element_key)`
-- `view_version_nodes(view_version_id, target_id)`
-- `view_version_edges(view_version_id, source_node_id)`
-- `view_version_edges(view_version_id, target_node_id)`
-- `view_version_edges(view_version_id, element_key)`
+그래서 MVP에서는 `target_id`를 유지하되, 다음 방향으로 점진 전환하는 것이 좋다.
 
-## 8. runtime binding 과의 연결 메모
+1. `target_id`를 compatibility binding key로 유지
+2. `monitored_objects` 추가
+3. `node_bindings` 추가
+4. `latest_states`, `raw_events`, `alert_instances`를 점진적으로 `monitored_object_id` 기준으로 전환
 
-- runtime binding 은 version row id 보다 `element_key` 또는 `target_id` 기준으로 유지하는 편이 안정적이다
-- active version 이 바뀌어도 같은 논리 객체라면 runtime overlay 는 새 row 에 이어서 붙을 수 있어야 한다
-- 따라서 version snapshot row 자체를 runtime identity 로 쓰는 것은 피하는 것이 좋다
+## 7. 조회 패턴 권장
+
+### 7.1 Editor
+- logical view를 선택
+- 현재 draft version 조회
+- `view_version_nodes`, `view_version_edges` 기반으로 편집
+
+### 7.2 Monitoring
+- logical view를 선택
+- 현재 active version 조회
+- active version node가 참조하는 monitored object 집합 조회
+- latest state / event / alert를 monitored object 기준으로 가져와 fan-out
+
+### 7.3 Publish / Activate
+- publish는 draft snapshot을 고정본으로 승격
+- activate는 published snapshot을 운영본으로 승격
+- 기존 active는 deprecated로 전환
+
+## 8. migration 방향
+
+### 8.1 1단계
+- `view_versions`, `view_version_nodes`, `view_version_edges` 추가
+- 기존 `views`, `view_nodes`, `view_edges`는 compatibility root로 유지
+
+### 8.2 2단계
+- editor는 draft version 기준으로 전환
+- monitoring은 active version 기준으로 전환
+
+### 8.3 3단계
+- `monitored_objects`, `node_bindings` 추가
+- `latest_states`, `raw_events`를 점진적으로 runtime identity layer 기준으로 전환
 
 ## 9. 요약
 
-- `views` 는 logical root
-- `view_versions` 는 draft/published/active snapshot 관리
-- `view_version_nodes`, `view_version_edges` 는 실제 구조 snapshot 저장
-- `element_key` 는 버전 간 동일 논리 객체를 잇는 안정 키
-- 이 구조가 운영 화면 안정성과 publish/rollback 정책을 가장 자연스럽게 지원한다
+- `views`는 logical root다.
+- `view_versions`는 draft/published/active/deprecated snapshot을 관리한다.
+- `view_version_nodes`, `view_version_edges`는 화면 snapshot 표현이다.
+- `element_key`는 version 간 동일 논리 객체를 잇는 핵심 키다.
+- alert/event/latest state는 장기적으로 node가 아니라 monitored object에 귀속돼야 한다.
+- 이 구조가 있어야 같은 runtime 대상을 여러 active view에서 안정적으로 동시에 표현할 수 있다.
