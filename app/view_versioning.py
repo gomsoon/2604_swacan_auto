@@ -172,6 +172,22 @@ def get_active_view_target_rows(view_id: int):
     return rows
 
 
+def get_current_draft_view_target_rows(view_id: int):
+    draft_row = get_current_draft_view_version(view_id)
+    if draft_row is None:
+        return None
+    rows = get_db().execute(
+        """
+        SELECT id, target_id
+        FROM view_version_nodes
+        WHERE view_version_id = ? AND is_deleted = 0 AND target_id IS NOT NULL
+        ORDER BY layer_order ASC, id ASC
+        """,
+        (draft_row["id"],),
+    ).fetchall()
+    return rows
+
+
 def get_current_draft_view_version(view_id: int):
     return get_db().execute(
         """
@@ -236,6 +252,13 @@ def fetch_active_view_detail(view_id: int) -> tuple[dict[str, Any], list[dict[st
     if active_row is None:
         return None
     return fetch_version_detail(active_row["id"])
+
+
+def fetch_current_draft_view_detail(view_id: int) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]] | None:
+    draft_row = get_current_draft_view_version(view_id)
+    if draft_row is None:
+        return None
+    return fetch_version_detail(draft_row["id"])
 
 
 def resolve_default_metamodel_version_id(view_row) -> int | None:

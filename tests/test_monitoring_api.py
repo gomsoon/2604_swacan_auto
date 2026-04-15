@@ -226,6 +226,81 @@ def test_events_prefers_active_version_targets_over_legacy_view_nodes(seeded_app
     assert not any(item["target_id"] == "legacy_process_target" for item in payload["items"])
 
 
+def test_latest_state_prefers_draft_targets_when_active_version_is_missing(seeded_app, seeded_client) -> None:
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T10:20:05.000+09:00")
+    login(seeded_client)
+
+    create_view_response = seeded_client.post(
+        "/api/views",
+        json={"name": "Draft Preview View", "description": "draft fallback"},
+    )
+    assert create_view_response.status_code == 201
+    view_id = create_view_response.get_json()["view"]["id"]
+
+    draft_response = seeded_client.post(
+        f"/api/views/{view_id}/drafts",
+        json={"description": "draft preview"},
+    )
+    assert draft_response.status_code == 201
+    draft_id = draft_response.get_json()["version"]["id"]
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO view_nodes (
+                view_id, parent_node_id, node_type, semantic_type_code, notation_code, display_name, target_id,
+                layer_order, x, y, width, height, is_deleted, style_json, created_at, updated_at
+            ) VALUES (?, NULL, 'PhysicalServer', 'PhysicalServer', 'server.physical.rect', 'Legacy Host', 'legacy_host',
+                      10, 10, 10, 100, 80, 0, NULL, ?, ?)
+            """,
+            (
+                view_id,
+                "2026-04-10T10:00:00.000+09:00",
+                "2026-04-10T10:00:00.000+09:00",
+            ),
+        )
+        db_conn.execute(
+            """
+            INSERT INTO view_version_nodes (
+                view_version_id, element_key, parent_node_id, node_type, semantic_type_code, notation_code,
+                display_name, target_id, instance_mode, cardinality_scope, expected_min, expected_max,
+                layer_order, x, y, width, height, collapsed_state, is_deleted, style_json, properties_json,
+                created_at, updated_at
+            ) VALUES (?, 'draft_process_main', NULL, 'SoftwareProcess', 'SoftwareProcess', 'process.rounded_rect',
+                      'Draft Process', 'draft_process_target', 'single', 'group_total', 1, 1,
+                      20, 40, 40, 160, 56, 0, 0, NULL, NULL, ?, ?)
+            """,
+            (
+                draft_id,
+                "2026-04-10T10:00:00.000+09:00",
+                "2026-04-10T10:00:00.000+09:00",
+            ),
+        )
+        db_conn.execute(
+            """
+            INSERT INTO latest_states (
+                id, view_node_id, target_id, state_type, status, severity, state_json, occurred_at, received_at, updated_at
+            ) VALUES (?, NULL, ?, 'process', 'up', 'normal', ?, ?, ?, ?)
+            """,
+            (
+                9991,
+                "draft_process_target",
+                json.dumps({"pid": 4567, "cpu_usage": 1.5}),
+                "2026-04-10T10:20:00.100+09:00",
+                "2026-04-10T10:20:00.220+09:00",
+                "2026-04-10T10:20:00.220+09:00",
+            ),
+        )
+        db_conn.commit()
+
+    response = seeded_client.get(f"/api/views/{view_id}/latest-state")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert [item["target_id"] for item in payload["items"]] == ["draft_process_target"]
+
+
 def test_latest_state_marks_agent_warning_when_heartbeat_is_delayed(seeded_app, seeded_client) -> None:
     seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T10:20:20.000+09:00")
     seeded_app.config["AGENT_HEARTBEAT_WARNING_SECONDS"] = 10

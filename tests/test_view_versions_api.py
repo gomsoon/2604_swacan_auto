@@ -225,3 +225,32 @@ def test_create_draft_for_new_view_without_source_creates_empty_draft(seeded_app
             (view_id,),
         ).fetchone()
         assert draft_row["count"] == 1
+
+
+def test_get_current_draft_returns_created_draft_snapshot(seeded_client) -> None:
+    login(seeded_client)
+    created = seeded_client.post(
+        "/api/views/1/drafts",
+        json={"description": "current draft"},
+    )
+    assert created.status_code == 201
+    created_payload = created.get_json()
+
+    response = seeded_client.get("/api/views/1/draft")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["view"]["id"] == 1
+    assert payload["version"]["id"] == created_payload["version"]["id"]
+    assert payload["version"]["status"] == "draft"
+    assert len(payload["nodes"]) == 3
+    assert len(payload["edges"]) == 1
+
+
+def test_get_current_draft_returns_404_when_missing(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/1/draft")
+
+    assert response.status_code == 404
+    assert response.get_json()["error"]["code"] == "not_found"

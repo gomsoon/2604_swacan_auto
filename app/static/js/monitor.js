@@ -288,8 +288,16 @@ async function loadView() {
         if (error.status !== 404) {
             throw error;
         }
-        payload = await apiFetch(`/api/views/${state.viewId}`);
-        metamodelVersionCode = payload.view.metamodel_version;
+        try {
+            payload = await apiFetch(`/api/views/${state.viewId}/draft`);
+            metamodelVersionCode = payload.version?.metamodel_version_code || payload.view.metamodel_version;
+        } catch (draftError) {
+            if (draftError.status !== 404) {
+                throw draftError;
+            }
+            payload = await apiFetch(`/api/views/${state.viewId}`);
+            metamodelVersionCode = payload.view.metamodel_version;
+        }
     }
 
     if (state.metamodelVersionCode !== metamodelVersionCode || state.notationDefinitionsByCode.size === 0) {

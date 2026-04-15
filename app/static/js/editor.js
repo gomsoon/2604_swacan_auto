@@ -16,6 +16,9 @@ const startConnectButton = document.getElementById("start-connect-button");
 
 const state = {
     viewId: Number(appRoot.dataset.viewId),
+    viewVersionId: null,
+    viewVersionCode: null,
+    viewVersionStatus: null,
     viewName: "",
     revision: 0,
     metamodelVersionCode: null,
@@ -86,6 +89,10 @@ function setPaletteStatus(message) {
 function updateRevision(revision) {
     state.revision = revision;
     revisionLabel.textContent = `revision ${revision}`;
+}
+
+function getVersionApiBase() {
+    return `/api/view-versions/${state.viewVersionId}`;
 }
 
 function getNode(nodeId) {
@@ -334,19 +341,51 @@ async function loadView() {
     setPaletteStatus("메타모델 palette를 불러오는 중입니다.");
     clearBanner();
     try {
-        const payload = await apiFetch(`/api/views/${state.viewId}`);
+        let payload;
+        try {
+            payload = await apiFetch(`/api/views/${state.viewId}/draft`);
+        } catch (error) {
+            if (error.status === 404) {
+                try {
+                    payload = await apiFetch(`/api/views/${state.viewId}/drafts`, {
+                        method: "POST",
+                        body: { description: "Editor auto-created draft" },
+                    });
+                    payload = {
+                        view: { id: state.viewId, name: appRoot.querySelector("h1")?.textContent || "Draft View" },
+                        version: payload.version,
+                        nodes: payload.nodes,
+                        edges: payload.edges,
+                    };
+                } catch (draftCreateError) {
+                    if (draftCreateError.status === 409) {
+                        payload = await apiFetch(`/api/views/${state.viewId}/draft`);
+                    } else {
+                        throw draftCreateError;
+                    }
+                }
+            } else {
+                throw error;
+            }
+        }
+
         state.viewName = payload.view.name;
-        if (state.metamodelVersionCode !== payload.view.metamodel_version || state.paletteGroups.length === 0) {
-            await loadPalette(payload.view.metamodel_version);
+        state.viewVersionId = payload.version.id;
+        state.viewVersionCode = payload.version.version_code;
+        state.viewVersionStatus = payload.version.status;
+
+        const metamodelVersionCode = payload.version?.metamodel_version_code || payload.view.metamodel_version;
+        if (state.metamodelVersionCode !== metamodelVersionCode || state.paletteGroups.length === 0) {
+            await loadPalette(metamodelVersionCode);
         }
         state.nodes = payload.nodes;
         state.edges = payload.edges;
         state.selectedNodeId = null;
         state.selectedEdgeId = null;
         state.connectSourceId = null;
-        updateRevision(payload.view.revision);
+        updateRevision(payload.version.revision);
         render();
-        setStatus("뷰가 준비되었습니다.");
+        setStatus(`${payload.version.version_code} draft가 준비되었습니다.`);
     } catch (error) {
         showBanner(error.message, "error");
         setStatus("뷰를 불러오지 못했습니다.");
@@ -356,7 +395,7 @@ async function loadView() {
 async function addNode(nodeType) {
     clearBanner();
     try {
-        const payload = await apiFetch(`/api/views/${state.viewId}/nodes`, {
+        const payload = await apiFetch(`${getVersionApiBase()}/nodes`, {
             method: "POST",
             body: {
                 revision: state.revision,
@@ -396,7 +435,7 @@ async function createEdge(targetNodeId) {
     clearBanner();
     try {
         const edgeItem = getPaletteItemByType("CommunicationLink");
-        const payload = await apiFetch(`/api/views/${state.viewId}/edges`, {
+        const payload = await apiFetch(`${getVersionApiBase()}/edges`, {
             method: "POST",
             body: {
                 revision: state.revision,
@@ -430,7 +469,7 @@ async function deleteSelected() {
     clearBanner();
     try {
         if (state.selectedNodeId) {
-            await apiFetch(`/api/views/${state.viewId}/nodes/${state.selectedNodeId}`, {
+            await apiFetch(`${getVersionApiBase()}/nodes/${state.selectedNodeId}`, {
                 method: "DELETE",
                 body: { revision: state.revision },
             });
@@ -441,7 +480,7 @@ async function deleteSelected() {
 
         if (state.selectedEdgeId) {
             const edgeId = state.selectedEdgeId;
-            const payload = await apiFetch(`/api/views/${state.viewId}/edges/${edgeId}`, {
+            const payload = await apiFetch(`${getVersionApiBase()}/edges/${edgeId}`, {
                 method: "DELETE",
                 body: { revision: state.revision },
             });
@@ -468,7 +507,7 @@ async function saveSelectedNode(event) {
 
     clearBanner();
     try {
-        const payload = await apiFetch(`/api/views/${state.viewId}/nodes/${node.id}`, {
+        const payload = await apiFetch(`${getVersionApiBase()}/nodes/${node.id}`, {
             method: "PATCH",
             body: {
                 revision: state.revision,
@@ -542,7 +581,7 @@ function handleNodePointerDown(node, event) {
 }
 
 async function persistLayout() {
-    const payload = await apiFetch(`/api/views/${state.viewId}`, {
+    const payload = await apiFetch(getVersionApiBase(), {
         method: "PUT",
         body: {
             revision: state.revision,

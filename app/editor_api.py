@@ -298,6 +298,8 @@ def create_node(view_id: int):
     missing = {"node_type", "display_name", "x", "y", "width", "height"} - payload.keys()
     if missing:
         return error_response("validation_error", f"node is missing required fields: {', '.join(sorted(missing))}", 400)
+    if payload["node_type"] not in NODE_METAMODEL_DEFAULTS:
+        return error_response("validation_error", "invalid node_type", 400)
 
     current_nodes = get_current_nodes(view_id)
     temp_id = -1 * (max((node["id"] for node in current_nodes), default=0) + 1)
@@ -471,6 +473,8 @@ def create_edge(view_id: int):
     missing = {"edge_type", "source_node_id", "target_node_id"} - payload.keys()
     if missing:
         return error_response("validation_error", f"edge is missing required fields: {', '.join(sorted(missing))}", 400)
+    if payload["edge_type"] not in EDGE_METAMODEL_DEFAULTS:
+        return error_response("validation_error", "invalid edge_type", 400)
 
     current_nodes = get_current_nodes(view_id)
     current_edges = get_current_edges(view_id)

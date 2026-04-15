@@ -12,6 +12,7 @@ from . import (
     ingest_worker,
     metamodel_api,
     view_versions_api,
+    view_version_editor_api,
     views_api,
     web,
 )
@@ -48,6 +49,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     app.register_blueprint(admin_metamodel_api.bp)
     app.register_blueprint(views_api.bp)
     app.register_blueprint(view_versions_api.bp)
+    app.register_blueprint(view_version_editor_api.bp)
     app.register_blueprint(editor_api.bp)
     app.register_blueprint(agent_api.bp)
     app.register_blueprint(admin_api.bp)

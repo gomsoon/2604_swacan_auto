@@ -5,6 +5,7 @@ from flask import Blueprint, g, request
 from .auth import error_response, login_required
 from .view_versioning import (
     fetch_active_view_detail,
+    fetch_current_draft_view_detail,
     create_draft_view_version,
     fetch_version_detail,
     get_owned_view,
@@ -35,6 +36,21 @@ def get_active_version(view_id: int):
     detail = fetch_active_view_detail(view_id)
     if detail is None:
         return error_response("not_found", "active version not found", 404)
+
+    version, nodes, edges = detail
+    return {"view": {"id": view_row["id"], "name": view_row["name"]}, "version": version, "nodes": nodes, "edges": edges}
+
+
+@bp.get("/views/<int:view_id>/draft")
+@login_required
+def get_current_draft(view_id: int):
+    view_row = get_owned_view(view_id, g.user["id"])
+    if view_row is None:
+        return error_response("not_found", "view not found", 404)
+
+    detail = fetch_current_draft_view_detail(view_id)
+    if detail is None:
+        return error_response("not_found", "draft version not found", 404)
 
     version, nodes, edges = detail
     return {"view": {"id": view_row["id"], "name": view_row["name"]}, "version": version, "nodes": nodes, "edges": edges}

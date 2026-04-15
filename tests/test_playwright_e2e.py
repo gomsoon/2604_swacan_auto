@@ -84,21 +84,32 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
 
     with seeded_app.app_context():
         db_conn = get_db()
+        draft_row = db_conn.execute(
+            """
+            SELECT id
+            FROM view_versions
+            WHERE view_id = ? AND status = 'draft'
+            ORDER BY version_no DESC, id DESC
+            LIMIT 1
+            """,
+            (view_id,),
+        ).fetchone()
+        assert draft_row is not None
         db_conn.execute(
             """
-            UPDATE view_nodes
+            UPDATE view_version_nodes
             SET display_name = ?, target_id = ?
-            WHERE view_id = ? AND node_type = 'PhysicalServer'
+            WHERE view_version_id = ? AND node_type = 'PhysicalServer'
             """,
-            ("Host Alpha", "agent_local:host", view_id),
+            ("Host Alpha", "agent_local:host", draft_row["id"]),
         )
         db_conn.execute(
             """
-            UPDATE view_nodes
+            UPDATE view_version_nodes
             SET display_name = ?, target_id = ?
-            WHERE view_id = ? AND node_type = 'MonitoringAgent'
+            WHERE view_version_id = ? AND node_type = 'MonitoringAgent'
             """,
-            ("Agent Alpha", "agent_local", view_id),
+            ("Agent Alpha", "agent_local", draft_row["id"]),
         )
         db_conn.commit()
 

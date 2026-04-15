@@ -9,7 +9,7 @@ from flask import Blueprint, g, request
 from .auth import error_response, login_required
 from .db import get_db
 from .runtime_state import derive_latest_state
-from .view_versioning import get_active_view_target_rows
+from .view_versioning import get_active_view_target_rows, get_current_draft_view_target_rows
 
 bp = Blueprint("views_api", __name__, url_prefix="/api/views")
 
@@ -124,6 +124,9 @@ def get_monitor_target_rows(view_id: int):
     active_rows = get_active_view_target_rows(view_id)
     if active_rows is not None:
         return active_rows
+    draft_rows = get_current_draft_view_target_rows(view_id)
+    if draft_rows is not None:
+        return draft_rows
     return get_view_target_rows(view_id)
 
 
