@@ -2,7 +2,7 @@ from pathlib import Path
 
 from flask import Flask
 
-from . import admin_api, agent_api, auth, db, editor_api, ingest_worker, metamodel_api, views_api, web
+from . import admin_api, admin_metamodel_api, agent_api, auth, db, editor_api, ingest_worker, metamodel_api, views_api, web
 
 
 def create_app(test_config: dict | None = None) -> Flask:
@@ -33,6 +33,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     app.register_blueprint(auth.bp)
     app.register_blueprint(web.bp)
     app.register_blueprint(metamodel_api.bp)
+    app.register_blueprint(admin_metamodel_api.bp)
     app.register_blueprint(views_api.bp)
     app.register_blueprint(editor_api.bp)
     app.register_blueprint(agent_api.bp)
