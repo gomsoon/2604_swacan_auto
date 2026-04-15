@@ -1,21 +1,32 @@
-# Software Architecture Runtime Monitoring System
+﻿# Software Architecture Runtime Monitoring System
 
 ## 최소 ERD 초안
 
-버전: Draft 0.1
-작성일: 2026-04-10
-목적: 본 문서는 최소 E2E 구현을 위해 필요한 최소 데이터베이스 엔터티와 관계를 정의한다. 본 초안은 MVP 전체 ERD가 아니라, `로그인 -> view 저장 -> agent ingest -> latest state 반영 -> monitoring 조회 -> raw event 확인 -> debug payload 저장` 흐름을 만족시키기 위한 최소 범위만 다룬다.
+버전: Draft 0.2  
+작성일: 2026-04-15
+
+목적: 본 문서는 현재 구현된 minimal end-to-end와 MVP 전환 초입의 설계를 기준으로, 최소 데이터 모델을 사람이 읽기 쉬운 ERD 관점에서 정리한 초안이다. 이 문서는 전체 제품 ERD가 아니라, 현재 코드베이스에서 실제로 사용 중인 핵심 테이블과 관계를 설명한다.
 
 ## 1. 설계 원칙
 
-- [필수] ERD 는 최소 E2E 구현에 직접 필요한 테이블만 포함한다.
-- [필수] `model/view 저장`, `agent ingest durable write`, `latest state`, `raw event`, `debug payload` 는 분리한다.
-- [필수] grouped event, 동적 metamodel 편집, 관리자 콘솔용 전체 테이블은 이후 확장으로 미룬다.
-- [필수] SQLite 기반 구현을 전제로 하므로, 읽기 최적화와 단순한 쓰기 흐름을 우선한다.
+- editor, monitoring, admin, agent ingest가 같은 저장소를 공유하되 책임은 분리한다.
+- `view` 구조와 `runtime` 데이터는 분리 저장한다.
+- agent 수신은 `ingest_inbox`에 durable write 한 뒤 worker가 후처리한다.
+- `latest_states`는 현재 스냅샷, `raw_events`는 append-only 이벤트로 구분한다.
+- metamodel/notation registry는 현재 seed 기반 published version을 조회하는 구조로 시작한다.
+- `view_nodes`, `view_edges`는 기존 `node_type`, `edge_type`를 유지하면서도 `semantic_type_code`, `notation_code`를 함께 저장해 metamodel registry와 점진 연결한다.
 
-## 2. 최소 포함 테이블
+## 2. 현재 핵심 테이블
 
 - `users`
+- `metamodel_namespaces`
+- `metamodel_versions`
+- `semantic_types`
+- `property_definitions`
+- `association_definitions`
+- `containment_rules`
+- `palette_groups`
+- `notation_definitions`
 - `views`
 - `view_nodes`
 - `view_edges`
@@ -24,13 +35,14 @@
 - `latest_states`
 - `raw_events`
 - `debug_payload_logs`
+- `cleanup_runs`
 
-## 3. 테이블 정의
+## 3. 테이블 정의 요약
 
 ### 3.1 users
 
 목적:
-- 로그인과 최소 권한 확인을 위한 사용자 계정 저장
+- 로그인, 권한 확인, 관리자 여부 판단
 
 주요 컬럼:
 - `id` INTEGER PK
@@ -41,10 +53,165 @@
 - `created_at` TEXT NOT NULL
 - `updated_at` TEXT NOT NULL
 
-비고:
-- 최소 E2E 에서는 `admin` 또는 `user` 수준의 단순 role 만 있어도 된다.
+### 3.2 metamodel_namespaces
 
-### 3.2 views
+목적:
+- metamodel registry의 namespace 구분
+
+주요 컬럼:
+- `id` INTEGER PK
+- `code` TEXT UNIQUE NOT NULL
+- `name` TEXT NOT NULL
+- `description` TEXT NULL
+- `is_system` INTEGER NOT NULL DEFAULT 0
+- `created_at` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
+
+### 3.3 metamodel_versions
+
+목적:
+- metamodel 버전 관리
+
+주요 컬럼:
+- `id` INTEGER PK
+- `namespace_id` INTEGER NOT NULL
+- `version_code` TEXT NOT NULL
+- `status` TEXT NOT NULL (`draft`, `published`, `deprecated`)
+- `description` TEXT NULL
+- `based_on_version_id` INTEGER NULL
+- `published_at` TEXT NULL
+- `created_at` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
+
+비고:
+- 현재 minimal/MVP baseline은 `seed-v1` published version을 사용한다.
+
+### 3.4 semantic_types
+
+목적:
+- backend가 이해하는 의미 타입 정의
+
+주요 컬럼:
+- `id` INTEGER PK
+- `metamodel_version_id` INTEGER NOT NULL
+- `code` TEXT NOT NULL
+- `display_name` TEXT NOT NULL
+- `kind` TEXT NOT NULL (`node`, `edge`, `container`, `runtime-only`)
+- `runtime_kind` TEXT NULL
+- `is_groupable` INTEGER NOT NULL DEFAULT 0
+- `allows_runtime_binding` INTEGER NOT NULL DEFAULT 1
+- `default_notation_id` INTEGER NULL
+- `is_active` INTEGER NOT NULL DEFAULT 1
+- `created_at` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
+
+현재 seed 예:
+- `PhysicalServer`
+- `VirtualMachine`
+- `SoftwareProcess`
+- `MonitoringAgent`
+- `CommunicationLink`
+
+### 3.5 property_definitions
+
+목적:
+- semantic type별 속성 정의
+
+주요 컬럼:
+- `id` INTEGER PK
+- `semantic_type_id` INTEGER NOT NULL
+- `code` TEXT NOT NULL
+- `display_name` TEXT NOT NULL
+- `value_type` TEXT NOT NULL
+- `unit` TEXT NULL
+- `default_value_json` TEXT NULL
+- `is_required` INTEGER NOT NULL DEFAULT 0
+- `is_runtime` INTEGER NOT NULL DEFAULT 0
+- `is_user_editable` INTEGER NOT NULL DEFAULT 1
+- `sort_order` INTEGER NOT NULL DEFAULT 0
+- `created_at` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
+
+### 3.6 association_definitions
+
+목적:
+- edge 의미 정의
+
+주요 컬럼:
+- `id` INTEGER PK
+- `metamodel_version_id` INTEGER NOT NULL
+- `code` TEXT NOT NULL
+- `display_name` TEXT NOT NULL
+- `source_type_id` INTEGER NOT NULL
+- `target_type_id` INTEGER NOT NULL
+- `direction` TEXT NOT NULL
+- `multiplicity_source` TEXT NULL
+- `multiplicity_target` TEXT NULL
+- `semantics_json` TEXT NULL
+- `created_at` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
+
+현재 seed 예:
+- `communicates_with`
+- `monitors`
+
+### 3.7 containment_rules
+
+목적:
+- parent-child containment 규칙 정의
+
+주요 컬럼:
+- `id` INTEGER PK
+- `metamodel_version_id` INTEGER NOT NULL
+- `parent_type_id` INTEGER NOT NULL
+- `child_type_id` INTEGER NOT NULL
+- `min_count` INTEGER NULL
+- `max_count` INTEGER NULL
+- `cardinality_scope` TEXT NOT NULL DEFAULT `group_total`
+- `is_required` INTEGER NOT NULL DEFAULT 0
+- `created_at` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
+
+### 3.8 palette_groups
+
+목적:
+- frontend palette 그룹 정의
+
+주요 컬럼:
+- `id` INTEGER PK
+- `metamodel_version_id` INTEGER NOT NULL
+- `code` TEXT NOT NULL
+- `label` TEXT NOT NULL
+- `sort_order` INTEGER NOT NULL DEFAULT 0
+- `created_at` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
+
+### 3.9 notation_definitions
+
+목적:
+- semantic type의 시각 표현 정의
+
+주요 컬럼:
+- `id` INTEGER PK
+- `metamodel_version_id` INTEGER NOT NULL
+- `semantic_type_id` INTEGER NOT NULL
+- `palette_group_id` INTEGER NULL
+- `code` TEXT NOT NULL
+- `display_name` TEXT NOT NULL
+- `kind` TEXT NOT NULL (`node`, `edge`)
+- `render_primitive` TEXT NOT NULL
+- `render_schema_json` TEXT NOT NULL
+- `style_tokens_json` TEXT NULL
+- `is_default` INTEGER NOT NULL DEFAULT 0
+- `is_visible_in_palette` INTEGER NOT NULL DEFAULT 1
+- `sort_order` INTEGER NOT NULL DEFAULT 0
+- `created_at` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
+
+비고:
+- frontend는 임의 SVG 코드를 받는 구조가 아니라, 제한된 primitive와 render schema를 해석한다.
+
+### 3.10 views
 
 목적:
 - architecture view 메타데이터 저장
@@ -59,22 +226,18 @@
 - `created_at` TEXT NOT NULL
 - `updated_at` TEXT NOT NULL
 
-관계:
-- `owner_user_id -> users.id`
-
-비고:
-- 최소 E2E 에서는 workspace 분리를 생략하고 단일 사용자 또는 단일 소유자 구조로 시작할 수 있다.
-
-### 3.3 view_nodes
+### 3.11 view_nodes
 
 목적:
-- editor 와 monitoring view 가 공유하는 최소 layout 및 노드 정의 저장
+- editor와 monitoring이 공유하는 node 인스턴스와 레이아웃 저장
 
 주요 컬럼:
 - `id` INTEGER PK
 - `view_id` INTEGER NOT NULL
 - `parent_node_id` INTEGER NULL
 - `node_type` TEXT NOT NULL
+- `semantic_type_code` TEXT NOT NULL
+- `notation_code` TEXT NOT NULL
 - `display_name` TEXT NOT NULL
 - `target_id` TEXT NULL
 - `layer_order` INTEGER NOT NULL DEFAULT 0
@@ -87,27 +250,22 @@
 - `created_at` TEXT NOT NULL
 - `updated_at` TEXT NOT NULL
 
-관계:
-- `view_id -> views.id`
-- `parent_node_id -> view_nodes.id`
-
 비고:
-- 최소 E2E 에서는 `PhysicalServer`, `SoftwareProcess`, `MonitoringAgent` 세 타입만 지원해도 된다.
-- `target_id` 는 process node 와 agent node 를 runtime 상태와 연결하기 위한 최소 식별자다.
-- `view_nodes.id` 는 frontend 임시 문자열이 아니라 backend 에서 일관되게 생성하고 반환하는 정수 PK 를 사용하는 것이 바람직하다.
-- 이 정책은 이후 라이선스, 감사, 정책 적용, soft delete, background cleanup 기능을 붙일 때 유리하다.
-- 최소 E2E 단계에서는 `is_deleted` 를 기본 0으로 두고, 실제 soft delete 처리는 후속 단계에서 활성화할 수 있다.
-- `layer_order` 는 canvas 에서 낮은 값부터 먼저 그리기 위한 기본 계층 값이다.
+- 현재 허용 node type은 `PhysicalServer`, `SoftwareProcess`, `MonitoringAgent`다.
+- `semantic_type_code`, `notation_code`를 함께 저장해서 registry 기반 표현과 실제 persisted view를 연결한다.
+- `layer_order`는 화면에서 보이는 순서를 backend가 일관되게 관리하기 위한 값이다.
 
-### 3.4 view_edges
+### 3.12 view_edges
 
 목적:
-- editor 와 monitoring view 가 공유하는 최소 edge 및 communication line 정의 저장
+- editor와 monitoring이 공유하는 edge 인스턴스 저장
 
 주요 컬럼:
 - `id` INTEGER PK
 - `view_id` INTEGER NOT NULL
 - `edge_type` TEXT NOT NULL
+- `semantic_type_code` TEXT NOT NULL
+- `notation_code` TEXT NOT NULL
 - `source_node_id` INTEGER NOT NULL
 - `target_node_id` INTEGER NOT NULL
 - `layer_order` INTEGER NOT NULL DEFAULT 0
@@ -120,21 +278,14 @@
 - `created_at` TEXT NOT NULL
 - `updated_at` TEXT NOT NULL
 
-관계:
-- `view_id -> views.id`
-- `source_node_id -> view_nodes.id`
-- `target_node_id -> view_nodes.id`
-
 비고:
-- 최소 E2E 에서는 `edge_type=CommunicationLink` 하나만 지원해도 된다.
-- 단순 직선은 node 좌표와 anchor 정보만으로 계산 가능하므로, `x`, `y` 컬럼을 직접 두기보다 `control_points_json` 을 선택적으로 사용한다.
-- `view_edges` 도 backend 가 생성/관리하는 정수 PK 를 사용하는 것이 바람직하다.
-- `layer_order` 는 edge 간 렌더 순서를 조정하기 위한 기본 계층 값이다.
+- 현재 허용 edge type은 `CommunicationLink` 하나다.
+- `x`, `y`를 직접 두기보다 `anchor + control_points_json`으로 line을 표현한다.
 
-### 3.5 ingest_inbox
+### 3.13 ingest_inbox
 
 목적:
-- agent ingest 요청을 durable 하게 먼저 저장하는 내부 work queue
+- agent batch payload의 durable receipt queue
 
 주요 컬럼:
 - `id` INTEGER PK AUTOINCREMENT
@@ -144,18 +295,17 @@
 - `seq_end` INTEGER NOT NULL
 - `received_at` TEXT NOT NULL
 - `payload_json` TEXT NOT NULL
-- `status` TEXT NOT NULL
+- `status` TEXT NOT NULL (`pending`, `processing`, `processed`, `failed`)
 - `processed_at` TEXT NULL
 - `error_message` TEXT NULL
 
 비고:
-- request path 는 이 테이블까지 durable write 한 뒤 ack 를 반환한다.
-- worker 가 `status=pending` 레코드를 읽어 후처리한다.
+- ingest ack는 item 처리 완료가 아니라 inbox 영속 저장 완료를 의미한다.
 
-### 3.6 processed_item_receipts
+### 3.14 processed_item_receipts
 
 목적:
-- worker 가 `(agent_id, boot_id, item_seq)` 기준으로 item 단위 중복 반영을 방지하기 위한 처리 영수증 저장
+- worker item-level idempotency 보장
 
 주요 컬럼:
 - `id` INTEGER PK AUTOINCREMENT
@@ -167,23 +317,19 @@
 - `inbox_id` INTEGER NOT NULL
 - `processed_at` TEXT NOT NULL
 
-관계:
-- `inbox_id -> ingest_inbox.id`
-
 비고:
-- batch receipt 중복 방지와 별도로 worker-level idempotency 를 담당한다.
-- 동일 item 이 다른 batch range 로 다시 들어와도 이 테이블 기준으로 side effect 를 한 번만 적용한다.
+- `(agent_id, boot_id, item_seq)` unique 기준으로 중복 side effect를 막는다.
 
-### 3.7 latest_states
+### 3.15 latest_states
 
 목적:
-- monitoring 화면 조회용 최신 상태 저장
+- monitoring overlay용 최신 상태 스냅샷
 
 주요 컬럼:
 - `id` INTEGER PK
 - `view_node_id` INTEGER NULL
 - `target_id` TEXT NOT NULL
-- `state_type` TEXT NOT NULL
+- `state_type` TEXT NOT NULL (`process`, `agent`, `host`)
 - `status` TEXT NOT NULL
 - `severity` TEXT NULL
 - `state_json` TEXT NOT NULL
@@ -191,18 +337,10 @@
 - `received_at` TEXT NOT NULL
 - `updated_at` TEXT NOT NULL
 
-관계:
-- `view_node_id -> view_nodes.id`
-
-비고:
-- `state_type` 은 최소한 `process`, `agent`, `host` 를 지원한다.
-- `state_json` 에는 cpu, memory, pid, heartbeat 등 최소 overlay 정보가 들어간다.
-- 같은 `target_id + state_type` 조합에 대해 upsert 중심으로 관리한다.
-
-### 3.8 raw_events
+### 3.16 raw_events
 
 목적:
-- 최소 event panel 에 표시할 원시 이벤트 저장
+- event panel과 운영 확인용 low-level event 저장
 
 주요 컬럼:
 - `id` INTEGER PK AUTOINCREMENT
@@ -215,14 +353,10 @@
 - `occurred_at` TEXT NOT NULL
 - `received_at` TEXT NOT NULL
 
-비고:
-- 최소 E2E 에서는 `process_started`, `process_stopped`, `process_restarted`, `agent_heartbeat_lost` 정도면 충분하다.
-- grouped event 는 이후 확장에서 별도 테이블 또는 파생 구조로 추가한다.
-
-### 3.9 debug_payload_logs
+### 3.17 debug_payload_logs
 
 목적:
-- backend debug mode 에서만 저장되는 통신 payload 기록
+- debug mode에서만 저장되는 통신 payload 로그
 
 주요 컬럼:
 - `id` INTEGER PK AUTOINCREMENT
@@ -239,66 +373,61 @@
 - `is_redacted` INTEGER NOT NULL DEFAULT 1
 - `occurred_at` TEXT NOT NULL
 
-관계:
-- `user_id -> users.id`
+### 3.18 cleanup_runs
 
-비고:
-- 최소 E2E 에서는 `agent <-> backend` payload 저장만 우선 지원해도 된다.
-- 보존 기간은 최근 24시간 기준으로 정리한다.
+목적:
+- backend retention cleanup 실행 결과 기록
 
-## 4. 테이블 간 관계 요약
+주요 컬럼:
+- `id` INTEGER PK AUTOINCREMENT
+- `started_at` TEXT NOT NULL
+- `finished_at` TEXT NOT NULL
+- `raw_events_deleted` INTEGER NOT NULL
+- `debug_payload_logs_deleted` INTEGER NOT NULL
+- `ingest_inbox_deleted` INTEGER NOT NULL
+
+## 4. 관계 요약
 
 - `users 1:N views`
+- `metamodel_namespaces 1:N metamodel_versions`
+- `metamodel_versions 1:N semantic_types`
+- `metamodel_versions 1:N association_definitions`
+- `metamodel_versions 1:N containment_rules`
+- `metamodel_versions 1:N palette_groups`
+- `metamodel_versions 1:N notation_definitions`
+- `semantic_types 1:N property_definitions`
 - `views 1:N view_nodes`
 - `views 1:N view_edges`
 - `view_nodes 1:N view_nodes` self-reference for containment
 - `view_nodes 1:N latest_states` optional by `view_node_id`
-- `view_nodes 1:N view_edges` by source/target reference
-- `users 1:N debug_payload_logs` optional
-- `ingest_inbox` 는 다른 테이블의 직접 FK 없이 ingest/work queue 역할을 수행
 - `ingest_inbox 1:N processed_item_receipts`
-- `raw_events` 와 `latest_states` 는 `target_id` 중심으로 연결됨
 
-## 5. 최소 인덱스 제안
+## 5. 최소 인덱스 방향
 
-- `users(username)` UNIQUE
 - `views(owner_user_id, updated_at)`
+- `semantic_types(metamodel_version_id, code)`
+- `property_definitions(semantic_type_id, sort_order)`
+- `association_definitions(metamodel_version_id, code)`
+- `containment_rules(metamodel_version_id, parent_type_id, child_type_id)`
+- `palette_groups(metamodel_version_id, sort_order)`
+- `notation_definitions(metamodel_version_id, semantic_type_id, sort_order)`
 - `view_nodes(view_id)`
 - `view_nodes(parent_node_id)`
 - `view_nodes(target_id)`
+- `view_nodes(view_id, layer_order, id)`
 - `view_edges(view_id)`
 - `view_edges(source_node_id)`
 - `view_edges(target_node_id)`
+- `view_edges(view_id, layer_order, id)`
 - `ingest_inbox(status, received_at)`
 - `processed_item_receipts(agent_id, boot_id, item_seq)` UNIQUE
-- `latest_states(target_id, state_type)` UNIQUE 또는 동등 인덱스
+- `latest_states(target_id, state_type)` UNIQUE
 - `raw_events(target_id, occurred_at)`
-- `raw_events(event_type, occurred_at)`
 - `debug_payload_logs(channel, occurred_at)`
-- `debug_payload_logs(trace_id, occurred_at)`
+- `cleanup_runs(finished_at)`
 
-## 6. 최소 E2E 범위에서 일부러 뺀 것
+## 6. 현재 문서의 위치
 
-- `metamodel tables`
-- `notation registry tables`
-- `runtime_bindings`
-- `grouped_events`
-- `admin_audit_logs`
-- `viewer_sessions`
-- `workspace_members`
-
-비고:
-- metamodel 과 notation 은 우선 seed 데이터와 enum 수준으로 처리하고, 정식 테이블화는 다음 단계에서 진행할 수 있다.
-- 최소 E2E 에서는 `view_edges` 를 단순 `CommunicationLink` 저장 용도로만 사용하고, 고급 edge 스타일과 bend-point 편집은 후속 확장으로 미룬다.
-
-## 7. 최소 ERD에 대한 판단
-
-- 이 초안은 최소 E2E 구현 속도를 높이기 위한 고의적 축소본이다.
-- 가장 중요한 것은 `view_nodes`, `ingest_inbox`, `latest_states`, `raw_events` 의 책임이 섞이지 않는 것이다.
-- 이후 grouped event, metamodel registry, admin 기능 확장 시 테이블은 늘어나더라도, 최소 E2E 에서 만든 `durable ingest -> latest state -> monitoring 조회` 흐름은 유지되어야 한다.
-
-## 8. 다음 단계 입력
-
-- 이 문서를 기준으로 SQLite `CREATE TABLE` 초안을 작성할 수 있어야 한다.
-- 이 문서를 기준으로 최소 API 명세 초안의 request/response 구조를 정리할 수 있어야 한다.
-- 이 문서를 기준으로 backend web/worker 코드 경계를 나눌 수 있어야 한다.
+- 본 문서는 더 이상 purely minimal E2E만 설명하지 않는다.
+- 현재 구현 기준으로 `metamodel registry + persisted view + runtime pipeline`이 연결된 상태를 반영한다.
+- 이후에는 이 문서를 바탕으로 PostgreSQL용 정식 ERD로 확장하면 된다.

@@ -1,19 +1,20 @@
-# Software Architecture Runtime Monitoring System
+﻿# Software Architecture Runtime Monitoring System
 
 ## SQLite CREATE TABLE 초안
 
-버전: Draft 0.1
-작성일: 2026-04-12
-목적: 본 문서는 최소 E2E 구현을 위한 SQLite DDL 초안을 정의한다. 이 문서는 `minimal-erd-draft.md` 를 실제 테이블 생성 SQL 수준으로 구체화한 것이다.
+버전: Draft 0.2  
+작성일: 2026-04-15
+
+목적: 본 문서는 현재 `db/schema.sql` 기준의 SQLite 테이블 구성을 설명하는 초안이다. 초기 minimal E2E 범위를 출발점으로 했지만, 현재는 metamodel registry 테이블과 운영 보조 테이블까지 포함한 상태를 반영한다.
 
 ## 1. 기본 원칙
 
-- 본 초안은 최소 E2E 범위에 필요한 테이블만 포함한다.
-- SQLite 를 사용하므로 타입은 실용적인 TEXT/INTEGER/REAL 중심으로 단순화한다.
-- 시간 값은 밀리초(1/1000초) 단위 ISO 8601 문자열 저장을 기본으로 한다.
-- `PRAGMA foreign_keys = ON;` 을 전제로 한다.
+- SQLite는 backend의 현재 기본 저장소다.
+- 시간은 ISO 8601 문자열과 밀리초 정밀도를 사용한다.
+- foreign key를 켜고 WAL 모드로 동작한다.
+- `view` 구조와 `runtime` 데이터, `metamodel registry`를 한 저장소에서 관리하되 책임은 구분한다.
 
-## 2. PRAGMA 초안
+## 2. PRAGMA
 
 ```sql
 PRAGMA foreign_keys = ON;
@@ -21,250 +22,171 @@ PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 ```
 
-## 3. DDL 초안
+## 3. 현재 주요 테이블
 
-### 3.1 users
+### 3.1 사용자/인증
+- `users`
 
-```sql
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY,
-    username TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    role TEXT NOT NULL,
-    is_active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-```
+### 3.2 metamodel registry
+- `metamodel_namespaces`
+- `metamodel_versions`
+- `semantic_types`
+- `property_definitions`
+- `association_definitions`
+- `containment_rules`
+- `palette_groups`
+- `notation_definitions`
 
-### 3.2 views
+### 3.3 view/editor
+- `views`
+- `view_nodes`
+- `view_edges`
 
-```sql
-CREATE TABLE IF NOT EXISTS views (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT,
-    owner_user_id INTEGER NOT NULL,
-    metamodel_version TEXT NOT NULL,
-    revision INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY (owner_user_id) REFERENCES users(id)
-);
-```
+### 3.4 ingest/runtime
+- `ingest_inbox`
+- `processed_item_receipts`
+- `latest_states`
+- `raw_events`
+- `debug_payload_logs`
+- `cleanup_runs`
 
-### 3.3 view_nodes
+## 4. 핵심 DDL 포인트
 
-```sql
-CREATE TABLE IF NOT EXISTS view_nodes (
-    id INTEGER PRIMARY KEY,
-    view_id INTEGER NOT NULL,
-    parent_node_id INTEGER,
-    node_type TEXT NOT NULL,
-    display_name TEXT NOT NULL,
-    target_id TEXT,
-    layer_order INTEGER NOT NULL DEFAULT 0,
-    x REAL NOT NULL,
-    y REAL NOT NULL,
-    width REAL NOT NULL,
-    height REAL NOT NULL,
-    is_deleted INTEGER NOT NULL DEFAULT 0,
-    style_json TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY (view_id) REFERENCES views(id) ON DELETE CASCADE,
-    FOREIGN KEY (parent_node_id) REFERENCES view_nodes(id) ON DELETE CASCADE,
-    CHECK (node_type IN ('PhysicalServer', 'SoftwareProcess', 'MonitoringAgent'))
-);
-```
+### 4.1 view_nodes
 
-### 3.4 view_edges
+현재 `view_nodes`는 단순 layout 테이블이 아니라, metamodel registry와 연결되는 persisted node 인스턴스다.
 
-```sql
-CREATE TABLE IF NOT EXISTS view_edges (
-    id INTEGER PRIMARY KEY,
-    view_id INTEGER NOT NULL,
-    edge_type TEXT NOT NULL,
-    source_node_id INTEGER NOT NULL,
-    target_node_id INTEGER NOT NULL,
-    layer_order INTEGER NOT NULL DEFAULT 0,
-    source_anchor TEXT,
-    target_anchor TEXT,
-    control_points_json TEXT,
-    label TEXT,
-    style_json TEXT,
-    is_deleted INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY (view_id) REFERENCES views(id) ON DELETE CASCADE,
-    FOREIGN KEY (source_node_id) REFERENCES view_nodes(id) ON DELETE CASCADE,
-    FOREIGN KEY (target_node_id) REFERENCES view_nodes(id) ON DELETE CASCADE,
-    CHECK (edge_type IN ('CommunicationLink'))
-);
-```
+핵심 컬럼:
+- `node_type`
+- `semantic_type_code`
+- `notation_code`
+- `layer_order`
+- `target_id`
+- `style_json`
 
-### 3.5 ingest_inbox
+의미:
+- `node_type`는 현재 코드의 기존 분기와 호환된다.
+- `semantic_type_code`, `notation_code`는 metamodel registry 기반 표현과 연결된다.
+- `layer_order`는 화면 렌더 순서를 backend가 관리하기 위한 값이다.
 
-```sql
-CREATE TABLE IF NOT EXISTS ingest_inbox (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    agent_id TEXT NOT NULL,
-    boot_id TEXT NOT NULL,
-    seq_start INTEGER NOT NULL,
-    seq_end INTEGER NOT NULL,
-    received_at TEXT NOT NULL,
-    payload_json TEXT NOT NULL,
-    status TEXT NOT NULL,
-    processed_at TEXT,
-    error_message TEXT,
-    CHECK (status IN ('pending', 'processing', 'processed', 'failed'))
-);
-```
+### 4.2 view_edges
 
-### 3.6 processed_item_receipts
+핵심 컬럼:
+- `edge_type`
+- `semantic_type_code`
+- `notation_code`
+- `source_node_id`
+- `target_node_id`
+- `layer_order`
+- `control_points_json`
 
-```sql
-CREATE TABLE IF NOT EXISTS processed_item_receipts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    agent_id TEXT NOT NULL,
-    boot_id TEXT NOT NULL,
-    item_seq INTEGER NOT NULL,
-    payload_type TEXT NOT NULL,
-    target_id TEXT NOT NULL,
-    inbox_id INTEGER NOT NULL,
-    processed_at TEXT NOT NULL,
-    FOREIGN KEY (inbox_id) REFERENCES ingest_inbox(id) ON DELETE CASCADE
-);
-```
+의미:
+- edge도 node와 동일하게 metamodel 식별자를 함께 저장한다.
+- `x`, `y`보다 `anchor + control_points_json` 구조를 사용한다.
 
-### 3.7 latest_states
+### 4.3 ingest_inbox
 
-```sql
-CREATE TABLE IF NOT EXISTS latest_states (
-    id INTEGER PRIMARY KEY,
-    view_node_id INTEGER,
-    target_id TEXT NOT NULL,
-    state_type TEXT NOT NULL,
-    status TEXT NOT NULL,
-    severity TEXT,
-    state_json TEXT NOT NULL,
-    occurred_at TEXT NOT NULL,
-    received_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY (view_node_id) REFERENCES view_nodes(id) ON DELETE SET NULL,
-    CHECK (state_type IN ('process', 'agent', 'host'))
-);
-```
+핵심 컬럼:
+- `agent_id`
+- `boot_id`
+- `seq_start`
+- `seq_end`
+- `payload_json`
+- `status`
+- `processed_at`
+- `error_message`
 
-### 3.8 raw_events
+의미:
+- agent가 보낸 batch payload의 durable receipt queue다.
+- `ack_seq`는 이 inbox 저장 완료를 기준으로 반환된다.
 
-```sql
-CREATE TABLE IF NOT EXISTS raw_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    agent_id TEXT NOT NULL,
-    target_id TEXT NOT NULL,
-    event_type TEXT NOT NULL,
-    severity TEXT NOT NULL,
-    message TEXT,
-    event_json TEXT,
-    occurred_at TEXT NOT NULL,
-    received_at TEXT NOT NULL,
-    CHECK (event_type IN ('process_started', 'process_stopped', 'process_restarted', 'agent_heartbeat_lost'))
-);
-```
+### 4.4 processed_item_receipts
 
-### 3.9 debug_payload_logs
+의미:
+- worker item-level idempotency 테이블
+- `(agent_id, boot_id, item_seq)` unique로 중복 반영을 막는다.
 
-```sql
-CREATE TABLE IF NOT EXISTS debug_payload_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    channel TEXT NOT NULL,
-    direction TEXT NOT NULL,
-    endpoint_or_topic TEXT NOT NULL,
-    agent_id TEXT,
-    user_id INTEGER,
-    session_id TEXT,
-    trace_id TEXT,
-    status_code INTEGER,
-    payload_json TEXT NOT NULL,
-    payload_size INTEGER NOT NULL,
-    is_redacted INTEGER NOT NULL DEFAULT 1,
-    occurred_at TEXT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
-    CHECK (direction IN ('request', 'response'))
-);
-```
+### 4.5 latest_states
 
-## 4. 인덱스 초안
+의미:
+- monitoring overlay용 최신 상태 스냅샷
+- `target_id + state_type` unique 기반 upsert
 
-```sql
-CREATE INDEX IF NOT EXISTS idx_views_owner_updated
-    ON views(owner_user_id, updated_at DESC);
+### 4.6 raw_events
 
-CREATE INDEX IF NOT EXISTS idx_view_nodes_view_id
-    ON view_nodes(view_id);
+의미:
+- low-level event append-only 저장
+- grouped event는 현재 후속 단계다.
 
-CREATE INDEX IF NOT EXISTS idx_view_nodes_parent_node_id
-    ON view_nodes(parent_node_id);
+### 4.7 debug_payload_logs
 
-CREATE INDEX IF NOT EXISTS idx_view_nodes_target_id
-    ON view_nodes(target_id);
+의미:
+- debug mode에서만 저장되는 통신 payload 로그
+- `agent <-> backend`, `backend <-> frontend` 흐름 디버깅용
 
-CREATE INDEX IF NOT EXISTS idx_view_edges_view_id
-    ON view_edges(view_id);
+### 4.8 cleanup_runs
 
-CREATE INDEX IF NOT EXISTS idx_view_edges_source_node_id
-    ON view_edges(source_node_id);
+의미:
+- retention cleanup 실행 결과 기록
+- 관리자 화면에서 최근 cleanup 결과를 조회할 수 있다.
 
-CREATE INDEX IF NOT EXISTS idx_view_edges_target_node_id
-    ON view_edges(target_node_id);
+## 5. 현재 스키마에서 중요한 제약
 
-CREATE INDEX IF NOT EXISTS idx_ingest_inbox_status_received
-    ON ingest_inbox(status, received_at);
+- `metamodel_versions.status`는 `draft`, `published`, `deprecated`만 허용한다.
+- `semantic_types.kind`는 `node`, `edge`, `container`, `runtime-only`만 허용한다.
+- `notation_definitions.render_primitive`는 현재 whitelist primitive만 허용한다.
+- `view_nodes.node_type`는 현재 `PhysicalServer`, `SoftwareProcess`, `MonitoringAgent`만 허용한다.
+- `view_edges.edge_type`는 현재 `CommunicationLink`만 허용한다.
+- `ingest_inbox.status`는 `pending`, `processing`, `processed`, `failed`만 허용한다.
+- `latest_states.state_type`는 `process`, `agent`, `host`만 허용한다.
+- `raw_events.event_type`는 현재 minimal/MVP 핵심 이벤트 집합만 허용한다.
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_processed_item_receipts_agent_boot_seq
-    ON processed_item_receipts(agent_id, boot_id, item_seq);
+## 6. 주요 인덱스 방향
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_latest_states_target_state_type
-    ON latest_states(target_id, state_type);
+- `views(owner_user_id, updated_at DESC)`
+- `metamodel_versions(namespace_id, status)`
+- `semantic_types(metamodel_version_id, code)`
+- `property_definitions(semantic_type_id, sort_order, id)`
+- `association_definitions(metamodel_version_id, code)`
+- `containment_rules(metamodel_version_id, parent_type_id, child_type_id)`
+- `palette_groups(metamodel_version_id, sort_order, id)`
+- `notation_definitions(metamodel_version_id, semantic_type_id, sort_order, id)`
+- `view_nodes(view_id)`
+- `view_nodes(parent_node_id)`
+- `view_nodes(target_id)`
+- `view_nodes(view_id, layer_order, id)`
+- `view_edges(view_id)`
+- `view_edges(source_node_id)`
+- `view_edges(target_node_id)`
+- `view_edges(view_id, layer_order, id)`
+- `ingest_inbox(status, received_at)`
+- `ingest_inbox(agent_id, boot_id, seq_start, seq_end)` UNIQUE
+- `processed_item_receipts(agent_id, boot_id, item_seq)` UNIQUE
+- `latest_states(target_id, state_type)` UNIQUE
+- `raw_events(target_id, occurred_at DESC)`
+- `raw_events(event_type, occurred_at DESC)`
+- `debug_payload_logs(channel, occurred_at DESC)`
+- `debug_payload_logs(trace_id, occurred_at DESC)`
+- `cleanup_runs(finished_at DESC)`
 
-CREATE INDEX IF NOT EXISTS idx_raw_events_target_occurred
-    ON raw_events(target_id, occurred_at DESC);
+## 7. seed 방향
 
-CREATE INDEX IF NOT EXISTS idx_raw_events_event_type_occurred
-    ON raw_events(event_type, occurred_at DESC);
+- 기본 로그인은 `admin / admin123!`
+- 기본 published metamodel version은 `seed-v1`
+- demo view 1개를 seed한다.
+- demo view에는 `PhysicalServer`, `SoftwareProcess`, `MonitoringAgent`, `CommunicationLink`를 포함한다.
+- seed node/edge도 `semantic_type_code`, `notation_code`를 함께 저장한다.
+- `layer_order`는 seed 단계부터 명시해 초기 렌더 순서를 고정한다.
 
-CREATE INDEX IF NOT EXISTS idx_debug_payload_logs_channel_occurred
-    ON debug_payload_logs(channel, occurred_at DESC);
+## 8. 구현 시 주의사항
 
-CREATE INDEX IF NOT EXISTS idx_debug_payload_logs_trace_id_occurred
-    ON debug_payload_logs(trace_id, occurred_at DESC);
-```
+- SQLite에도 transaction은 있다. 핵심은 어떤 단위로 commit/rollback 하느냐다.
+- ingest ack는 `receipt ack`로 정의하고, worker 처리 성공과 분리해야 한다.
+- agent 로컬 저장소도 SQLite를 계속 사용한다.
+- backend cleanup은 `raw_events`, `debug_payload_logs`, `processed/failed ingest_inbox`에 대해 보존 정책을 적용한다.
+- metamodel registry는 backend가 관리하고, frontend는 선언형 schema를 해석한다.
 
-## 5. Seed 데이터 초안 방향
+## 9. 현재 문서의 역할
 
-- `users` 에는 최소 `admin` 계정 1개를 seed 한다.
-- 기본 seed 로그인 예시는 `admin / admin123!` 로 둔다.
-- `views` 와 `view_nodes` 는 demo view 1개와 `PhysicalServer`, `SoftwareProcess`, `MonitoringAgent` 노드 3개를 seed 할 수 있다.
-- `view_nodes.id` 는 backend 가 생성해서 frontend 에 반환하는 정수 PK 로 사용한다.
-- `view_nodes.layer_order`, `view_edges.layer_order` 는 demo seed 에도 함께 넣어 초기 렌더 순서를 안정화하는 것이 좋다.
-- `latest_states`, `raw_events`, `ingest_inbox`, `processed_item_receipts`, `debug_payload_logs` 는 기본적으로 빈 상태로 시작한다.
-
-## 6. 구현 시 주의사항
-
-- `latest_states.id` 는 단순 PK 용 내부 식별자이지만, 실제 upsert 키는 `target_id + state_type` 를 사용한다.
-- `processed_item_receipts` 는 `(agent_id, boot_id, item_seq)` 를 worker idempotency 키로 사용한다.
-- `view_nodes` 생성과 삭제는 frontend 임시 ID 기반이 아니라 backend 생성/관리 방식으로 진행하는 것을 전제로 한다.
-- `layer_order` 는 값이 낮을수록 먼저 렌더링되는 기본 계층 값으로 사용한다.
-- 삭제는 즉시 hard delete 가 아니어도 되며, 필요 시 soft delete 후 background cleanup 정책으로 확장 가능하다.
-- 최소 E2E 에서는 `view_nodes.is_deleted` 를 0으로 유지하는 단순 정책으로 시작하고, 후속 단계에서 soft delete 활용을 확장할 수 있다.
-- `payload_json`, `state_json`, `event_json`, `style_json` 은 최소 E2E 단계에서는 JSON TEXT 로 저장한다.
-- `CommunicationLink` 는 `view_nodes` 가 아니라 `view_edges` 로 저장하는 것을 전제로 한다.
-- 최소 E2E 에서는 `view_edges` 를 단순 직선 connection 저장 용도로만 사용하고, 고급 edge 편집은 후속 단계로 미룬다.
-- grouped event 도입 시에는 `raw_events` 와 별도의 요약 테이블을 추가하는 것이 좋다.
-
-## 7. 다음 단계 입력
-
-- 이 문서를 기준으로 Flask 초기 DB 생성 스크립트를 작성할 수 있어야 한다.
-- 이 문서를 기준으로 pytest fixture 에서 테스트용 DB 를 초기화할 수 있어야 한다.
-- 이 문서를 기준으로 seed 스크립트 초안을 만들 수 있어야 한다.
+- 이 문서는 지금 구현된 `db/schema.sql`을 사람이 읽기 쉬운 설계 문서로 요약한다.
+- 이후 PostgreSQL 전환 시에도 도메인 구조를 유지하면서 저장소만 바꾸는 기준 문서로 쓸 수 있다.

@@ -1,17 +1,18 @@
-# Software Architecture Runtime Monitoring System
+﻿# Software Architecture Runtime Monitoring System
 
 ## 최소 API 명세 초안
 
-버전: Draft 0.1
-작성일: 2026-04-10
-목적: 본 문서는 최소 E2E 구현에 필요한 backend API 계약을 정의한다. 본 문서는 전체 MVP API 가 아니라, `로그인 -> view 저장 -> agent ingest -> monitoring 조회 -> raw event 조회 -> debug payload 저장` 흐름에 필요한 최소 범위만 다룬다.
+버전: Draft 0.2  
+작성일: 2026-04-15
+
+목적: 본 문서는 현재 구현된 minimal end-to-end와 metamodel registry 조회 기능을 기준으로, 핵심 backend API 계약을 간결하게 정리한 초안이다. 전체 MVP API가 아니라, 지금 코드에서 이미 동작하거나 바로 이어서 확장될 수 있는 최소 계약을 대상으로 한다.
 
 ## 1. 설계 원칙
 
-- [필수] API 는 최소 E2E 구현에 필요한 범위로만 제한한다.
-- [필수] request/response 는 단순 JSON 구조를 우선한다.
-- [필수] backend ingest ack 는 처리 완료가 아니라 durable receive 완료 의미로 정의한다.
-- [필수] grouped event, 동적 metamodel 편집, 관리자 전체 API 는 이후 확장으로 미룬다.
+- API는 JSON 기반으로 단순하게 유지한다.
+- ingest ack는 item 처리 완료가 아니라 `ingest_inbox` 영속 저장 완료를 뜻한다.
+- editor와 monitoring은 같은 `view` 구조를 공유한다.
+- metamodel registry는 backend가 제공하고 frontend가 해석하는 선언형 구조를 따른다.
 
 ## 2. 인증 API
 
@@ -19,7 +20,6 @@
 
 - Method: `POST`
 - Path: `/api/auth/login`
-- 목적: 사용자 로그인과 세션 시작
 
 Request JSON:
 ```json
@@ -40,15 +40,10 @@ Response JSON 200:
 }
 ```
 
-오류:
-- `401`: 잘못된 계정 정보
-- `400`: 필수 필드 누락
-
 ### 2.2 로그아웃
 
 - Method: `POST`
 - Path: `/api/auth/logout`
-- 목적: 세션 종료
 
 Response JSON 200:
 ```json
@@ -63,7 +58,6 @@ Response JSON 200:
 
 - Method: `GET`
 - Path: `/api/views`
-- 목적: 로그인 사용자가 접근 가능한 최소 view 목록 조회
 
 Response JSON 200:
 ```json
@@ -72,9 +66,9 @@ Response JSON 200:
     {
       "id": 1,
       "name": "Demo View",
-      "description": "Minimal E2E view",
+      "description": "Minimal E2E demo view",
       "revision": 1,
-      "updated_at": "2026-04-10T10:00:00.123+09:00"
+      "updated_at": "2026-04-12T10:00:00.000+09:00"
     }
   ]
 }
@@ -84,7 +78,6 @@ Response JSON 200:
 
 - Method: `GET`
 - Path: `/api/views/{view_id}`
-- 목적: editor 와 monitoring 가 공유할 view 구조 조회
 
 Response JSON 200:
 ```json
@@ -100,69 +93,48 @@ Response JSON 200:
       "id": 101,
       "parent_node_id": null,
       "node_type": "PhysicalServer",
+      "semantic_type_code": "PhysicalServer",
+      "notation_code": "server.physical.rect",
       "display_name": "Host A",
       "target_id": null,
       "layer_order": 10,
       "x": 40,
       "y": 40,
       "width": 480,
-      "height": 260
-    },
-    {
-      "id": 102,
-      "parent_node_id": 101,
-      "node_type": "SoftwareProcess",
-      "display_name": "App Process",
-      "target_id": "app_main",
-      "layer_order": 20,
-      "x": 80,
-      "y": 90,
-      "width": 160,
-      "height": 56
-    },
-    {
-      "id": 103,
-      "parent_node_id": 101,
-      "node_type": "MonitoringAgent",
-      "display_name": "Local Agent",
-      "target_id": "agent_local",
-      "layer_order": 30,
-      "x": 280,
-      "y": 90,
-      "width": 150,
-      "height": 56
+      "height": 260,
+      "style": {
+        "shape": "rect"
+      }
     }
   ],
   "edges": [
     {
       "id": 201,
       "edge_type": "CommunicationLink",
+      "semantic_type_code": "CommunicationLink",
+      "notation_code": "communication.line",
       "source_node_id": 102,
       "target_node_id": 103,
       "layer_order": 10,
       "source_anchor": "right",
       "target_anchor": "left",
-      "control_points": []
+      "control_points": [],
+      "label": "agent link"
     }
   ]
 }
 ```
 
-오류:
-- `404`: view 없음
-- `403`: 권한 없음
-
 ### 3.3 view 생성
 
 - Method: `POST`
 - Path: `/api/views`
-- 목적: 최소 view 메타데이터 생성
 
 Request JSON:
 ```json
 {
-  "name": "Demo View",
-  "description": "Minimal E2E view"
+  "name": "New View",
+  "description": "Created in API test"
 }
 ```
 
@@ -170,20 +142,17 @@ Response JSON 201:
 ```json
 {
   "view": {
-    "id": 1,
-    "name": "Demo View",
+    "id": 2,
+    "name": "New View",
     "revision": 1
   }
 }
 ```
 
-### 3.4 view 저장
+### 3.4 view 전체 저장
 
 - Method: `PUT`
 - Path: `/api/views/{view_id}`
-- 목적: node layout, edge 연결, 최소 속성 저장
-- 비고: 새 node 와 edge 는 frontend 임시 ID가 아니라 backend 가 생성한 정수 ID를 사용한다고 가정한다.
-- 비고: `layer_order` 가 낮은 항목이 먼저 렌더링되며, 값이 없으면 backend 가 기본 계층 값을 부여할 수 있다.
 
 Request JSON:
 ```json
@@ -194,6 +163,8 @@ Request JSON:
       "id": 101,
       "parent_node_id": null,
       "node_type": "PhysicalServer",
+      "semantic_type_code": "PhysicalServer",
+      "notation_code": "server.physical.rect",
       "display_name": "Host A",
       "target_id": null,
       "layer_order": 10,
@@ -201,44 +172,9 @@ Request JSON:
       "y": 40,
       "width": 480,
       "height": 260
-    },
-    {
-      "id": 102,
-      "parent_node_id": 101,
-      "node_type": "SoftwareProcess",
-      "display_name": "App Process",
-      "target_id": "app_main",
-      "layer_order": 20,
-      "x": 80,
-      "y": 90,
-      "width": 160,
-      "height": 56
-    },
-    {
-      "id": 103,
-      "parent_node_id": 101,
-      "node_type": "MonitoringAgent",
-      "display_name": "Local Agent",
-      "target_id": "agent_local",
-      "layer_order": 30,
-      "x": 280,
-      "y": 90,
-      "width": 150,
-      "height": 56
     }
   ],
-  "edges": [
-    {
-      "id": 201,
-      "edge_type": "CommunicationLink",
-      "source_node_id": 102,
-      "target_node_id": 103,
-      "layer_order": 10,
-      "source_anchor": "right",
-      "target_anchor": "left",
-      "control_points": []
-    }
-  ]
+  "edges": []
 }
 ```
 
@@ -247,21 +183,133 @@ Response JSON 200:
 {
   "ok": true,
   "revision": 2,
-  "updated_at": "2026-04-10T10:15:00.456+09:00"
+  "updated_at": "2026-04-15T09:30:00.000+09:00"
 }
 ```
 
-오류:
-- `409`: revision mismatch
-- `400`: containment 위반, edge 연결 규칙 위반 또는 필수 필드 누락
+비고:
+- `revision` mismatch 시 `409`를 반환한다.
+- `node_type`와 `semantic_type_code`, `notation_code` 조합이 맞지 않으면 validation error를 반환한다.
 
-## 4. Monitoring 조회 API
+## 4. Editor Unit API
 
-### 4.1 latest state 조회
+### 4.1 node 생성
+
+- Method: `POST`
+- Path: `/api/views/{view_id}/nodes`
+
+Request JSON 예:
+```json
+{
+  "revision": 1,
+  "node_type": "SoftwareProcess",
+  "semantic_type_code": "SoftwareProcess",
+  "notation_code": "process.rounded_rect",
+  "parent_node_id": 101,
+  "display_name": "Worker Process",
+  "target_id": "worker_1",
+  "x": 90,
+  "y": 170,
+  "width": 160,
+  "height": 56,
+  "style": {
+    "shape": "rounded-rect"
+  }
+}
+```
+
+Response JSON 201:
+```json
+{
+  "node": {
+    "id": 104,
+    "node_type": "SoftwareProcess",
+    "semantic_type_code": "SoftwareProcess",
+    "notation_code": "process.rounded_rect",
+    "display_name": "Worker Process",
+    "target_id": "worker_1",
+    "layer_order": 40,
+    "x": 90,
+    "y": 170,
+    "width": 160,
+    "height": 56,
+    "style": {
+      "shape": "rounded-rect"
+    }
+  },
+  "revision": 2,
+  "updated_at": "2026-04-15T09:31:00.000+09:00"
+}
+```
+
+### 4.2 node 수정
+
+- Method: `PATCH`
+- Path: `/api/views/{view_id}/nodes/{node_id}`
+
+### 4.3 node 삭제
+
+- Method: `DELETE`
+- Path: `/api/views/{view_id}/nodes/{node_id}`
+
+### 4.4 edge 생성
+
+- Method: `POST`
+- Path: `/api/views/{view_id}/edges`
+
+Request JSON 예:
+```json
+{
+  "revision": 2,
+  "edge_type": "CommunicationLink",
+  "semantic_type_code": "CommunicationLink",
+  "notation_code": "communication.line",
+  "source_node_id": 102,
+  "target_node_id": 104,
+  "source_anchor": "right",
+  "target_anchor": "left",
+  "control_points": [],
+  "label": "new edge"
+}
+```
+
+Response JSON 201:
+```json
+{
+  "edge": {
+    "id": 202,
+    "edge_type": "CommunicationLink",
+    "semantic_type_code": "CommunicationLink",
+    "notation_code": "communication.line",
+    "source_node_id": 102,
+    "target_node_id": 104,
+    "layer_order": 20,
+    "source_anchor": "right",
+    "target_anchor": "left",
+    "control_points": [],
+    "label": "new edge"
+  },
+  "revision": 3,
+  "updated_at": "2026-04-15T09:32:00.000+09:00"
+}
+```
+
+### 4.5 edge 수정
+
+- Method: `PATCH`
+- Path: `/api/views/{view_id}/edges/{edge_id}`
+
+### 4.6 edge 삭제
+
+- Method: `DELETE`
+- Path: `/api/views/{view_id}/edges/{edge_id}`
+
+## 5. Monitoring 조회 API
+
+### 5.1 latest state 조회
 
 - Method: `GET`
 - Path: `/api/views/{view_id}/latest-state`
-- 목적: monitoring overlay 에 필요한 최신 상태 조회
 
 Response JSON 200:
 ```json
@@ -279,32 +327,15 @@ Response JSON 200:
         "cpu_usage": 3.2,
         "memory_rss": 10485760
       }
-    },
-    {
-      "target_id": "agent_local",
-      "state_type": "agent",
-      "status": "up",
-      "severity": "normal",
-      "occurred_at": "2026-04-10T10:20:00.100+09:00",
-      "received_at": "2026-04-10T10:20:00.220+09:00",
-      "state": {
-        "heartbeat_time": "2026-04-10T10:20:00.100+09:00",
-        "outbox_queue_depth": 0,
-        "backend_connection_status": "connected"
-      }
     }
   ]
 }
 ```
 
-### 4.2 recent raw event 조회
+### 5.2 recent event 조회
 
 - Method: `GET`
-- Path: `/api/views/{view_id}/events`
-- 목적: 최소 event panel 에 최근 raw event 조회
-
-Query:
-- `limit` optional, default `20`
+- Path: `/api/views/{view_id}/events?limit=20`
 
 Response JSON 200:
 ```json
@@ -323,14 +354,12 @@ Response JSON 200:
 }
 ```
 
-## 5. Agent ingest API
+## 6. Agent ingest API
 
-### 5.1 batch ingest
+### 6.1 batch ingest
 
 - Method: `POST`
 - Path: `/api/agents/ingest`
-- 목적: agent 가 batch payload 를 durable 하게 전달
-- 인증: `X-Agent-Id`, `X-Agent-Token` 또는 동등한 방식
 
 Request JSON:
 ```json
@@ -351,28 +380,6 @@ Request JSON:
         "outbox_queue_depth": 0,
         "backend_connection_status": "connected"
       }
-    },
-    {
-      "seq": 11,
-      "payload_type": "process_snapshot",
-      "occurred_at": "2026-04-10T10:20:00.100+09:00",
-      "target_id": "app_main",
-      "payload": {
-        "pid": 1234,
-        "state": "running",
-        "cpu_usage": 3.2,
-        "memory_rss": 10485760
-      }
-    },
-    {
-      "seq": 12,
-      "payload_type": "process_event",
-      "occurred_at": "2026-04-10T10:21:10.100+09:00",
-      "target_id": "app_main",
-      "payload": {
-        "event_type": "process_stopped",
-        "message": "process not found"
-      }
     }
   ]
 }
@@ -387,27 +394,64 @@ Response JSON 202:
 }
 ```
 
-오류:
-- `401`: agent 인증 실패
-- `400`: payload 형식 오류
+중요한 의미:
+- `ack_seq`는 item 처리 성공 ack가 아니다.
+- `ack_seq`는 batch가 `ingest_inbox`에 영속 저장되었다는 receipt ack다.
+- 이후 `latest_states`, `raw_events` 반영은 worker가 처리한다.
 
-비고:
-- 이 응답은 inbox 에 durable write 완료를 의미한다.
-- latest state 반영과 raw event 생성은 worker 가 후처리한다.
+## 7. Metamodel Registry 조회 API
 
-## 6. Debug payload API
+### 7.1 published versions
 
-### 6.1 최소 범위 결정
+- Method: `GET`
+- Path: `/api/metamodel/versions/published`
 
-- 최소 E2E 단계에서는 debug payload 조회 UI 를 구현하지 않아도 된다.
-- 따라서 debug payload 조회용 공개 API 는 이번 단계에서 생략 가능하다.
-- 단, backend 내부 저장은 반드시 동작해야 한다.
+### 7.2 version detail
 
-## 7. 공통 응답/오류 규칙
+- Method: `GET`
+- Path: `/api/metamodel/versions/{id}`
 
-- 시간 값은 밀리초(1/1000초) 단위까지 표현한다.
-- 성공 응답은 가능한 한 `ok`, `id`, `revision`, `updated_at`, `items` 같은 단순 키를 사용한다.
-- 오류 응답은 최소한 다음 구조를 따른다.
+### 7.3 palette
+
+- Method: `GET`
+- Path: `/api/metamodel/versions/{id}/palette`
+
+### 7.4 semantic types
+
+- Method: `GET`
+- Path: `/api/metamodel/versions/{id}/semantic-types`
+
+### 7.5 properties
+
+- Method: `GET`
+- Path: `/api/metamodel/versions/{id}/semantic-types/{type_code}/properties`
+
+### 7.6 containment rules
+
+- Method: `GET`
+- Path: `/api/metamodel/versions/{id}/containment-rules`
+
+### 7.7 associations
+
+- Method: `GET`
+- Path: `/api/metamodel/versions/{id}/associations`
+
+### 7.8 notations
+
+- Method: `GET`
+- Path: `/api/metamodel/versions/{id}/notations`
+
+## 8. Admin API
+
+현재 구현된 핵심 read-only API:
+- `GET /api/admin/summary`
+- `GET /api/admin/ingest-inbox`
+- `GET /api/admin/latest-states`
+- `GET /api/admin/raw-events`
+- `GET /api/admin/debug-payloads`
+- `GET /api/admin/cleanup-runs`
+
+## 9. 공통 오류 응답
 
 Error JSON:
 ```json
@@ -419,14 +463,7 @@ Error JSON:
 }
 ```
 
-## 8. 최소 API에 대한 판단
-
-- 이 API 집합은 최소 E2E 구현에 필요한 가장 작은 계약만 담고 있다.
-- grouped event, SSE, metamodel registry, admin API 전체는 일부러 제외했다.
-- 중요한 것은 `view 저장`, `agent ingest`, `latest state 조회`, `raw event 조회` 네 계약이 흔들리지 않는 것이다.
-
-## 9. 다음 단계 입력
-
-- 이 문서를 기준으로 Flask blueprint 와 route skeleton 을 만들 수 있어야 한다.
-- 이 문서를 기준으로 pytest API 테스트 케이스를 바로 작성할 수 있어야 한다.
-- 이 문서를 기준으로 frontend 와 agent 의 최소 연동 코드를 구현할 수 있어야 한다.
+공통 규칙:
+- 시간값은 ISO 8601 문자열로 반환한다.
+- 밀리초(1/1000초) 단위까지 유지한다.
+- 인증 실패는 `401`, 권한 실패는 `403`, revision 충돌은 `409`, 입력 오류는 `400`을 사용한다.
