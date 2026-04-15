@@ -157,6 +157,48 @@ def seed_monitoring_rows(app) -> None:
                 "2026-04-10T10:21:10.230+09:00",
             ),
         )
+        db_conn.execute(
+            """
+            INSERT INTO grouped_events (
+                monitored_object_id, target_id, event_type, severity, first_occurred_at, last_occurred_at,
+                repeat_count, latest_message, latest_event_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1302,
+                "app_main",
+                "process_stopped",
+                "warning",
+                "2026-04-10T10:21:10.100+09:00",
+                "2026-04-10T10:21:10.100+09:00",
+                1,
+                "process not found",
+                json.dumps({"pid": 1234}),
+                "2026-04-10T10:21:10.230+09:00",
+                "2026-04-10T10:21:10.230+09:00",
+            ),
+        )
+        db_conn.execute(
+            """
+            INSERT INTO grouped_events (
+                monitored_object_id, target_id, event_type, severity, first_occurred_at, last_occurred_at,
+                repeat_count, latest_message, latest_event_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1303,
+                "agent_local",
+                "agent_heartbeat_lost",
+                "warning",
+                "2026-04-10T10:20:10.100+09:00",
+                "2026-04-10T10:20:10.100+09:00",
+                1,
+                "heartbeat delayed",
+                json.dumps({"delay_ms": 5000}),
+                "2026-04-10T10:20:10.230+09:00",
+                "2026-04-10T10:20:10.230+09:00",
+            ),
+        )
         db_conn.commit()
 
 
@@ -524,7 +566,8 @@ def test_events_returns_recent_items_filtered_by_view_targets(seeded_app, seeded
     assert response.status_code == 200
     payload = response.get_json()
     assert len(payload["items"]) == 2
-    assert [item["id"] for item in payload["items"]] == [101, 102]
+    assert [item["event_type"] for item in payload["items"]] == ["process_stopped", "agent_heartbeat_lost"]
+    assert payload["items"][0]["repeat_count"] == 1
     assert all(item["target_id"] in {"app_main", "agent_local"} for item in payload["items"])
 
 

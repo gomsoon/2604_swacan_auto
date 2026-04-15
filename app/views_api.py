@@ -109,6 +109,23 @@ def serialize_raw_event(event_row) -> dict[str, Any]:
     return payload
 
 
+def serialize_grouped_event(event_row) -> dict[str, Any]:
+    payload = {
+        "id": event_row["id"],
+        "monitored_object_id": event_row["monitored_object_id"],
+        "target_id": event_row["target_id"],
+        "event_type": event_row["event_type"],
+        "severity": event_row["severity"],
+        "first_occurred_at": event_row["first_occurred_at"],
+        "last_occurred_at": event_row["last_occurred_at"],
+        "repeat_count": event_row["repeat_count"],
+        "latest_message": event_row["latest_message"],
+    }
+    if event_row["latest_event_json"]:
+        payload["event"] = json.loads(event_row["latest_event_json"])
+    return payload
+
+
 def serialize_alert_instance(alert_row) -> dict[str, Any]:
     payload = {
         "id": alert_row["id"],
@@ -494,10 +511,11 @@ def get_view_events(view_id: int):
 
     rows = query_by_runtime_targets(
         """
-        SELECT id, monitored_object_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
-        FROM raw_events
+        SELECT id, monitored_object_id, target_id, event_type, severity,
+               first_occurred_at, last_occurred_at, repeat_count, latest_message, latest_event_json
+        FROM grouped_events
         WHERE {runtime_filter}
-        ORDER BY occurred_at DESC, id DESC
+        ORDER BY last_occurred_at DESC, id DESC
         LIMIT ?
         """,
         target_ids=target_ids,
@@ -505,7 +523,7 @@ def get_view_events(view_id: int):
         extra_params=(limit,),
     )
 
-    return {"items": [serialize_raw_event(row) for row in rows]}
+    return {"items": [serialize_grouped_event(row) for row in rows]}
 
 
 @bp.get("/<int:view_id>/alerts")

@@ -65,6 +65,11 @@ def format_iso(value: datetime) -> str:
     return value.astimezone().isoformat(timespec="milliseconds")
 
 
+def parse_iso(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    return parsed if parsed.tzinfo is not None else parsed.astimezone()
+
+
 def is_older_than(timestamp: str | None, cutoff: datetime) -> bool:
     if not timestamp:
         return False
@@ -497,6 +502,94 @@ def upsert_latest_state(*, target_id: str, state_type: str, status: str, severit
     )
 
 
+def sync_grouped_event(
+    *,
+    monitored_object_id: int | None,
+    target_id: str,
+    event_type: str,
+    severity: str,
+    message: str | None,
+    event_payload: dict,
+    occurred_at: str,
+    received_at: str,
+) -> None:
+    db_conn = get_db()
+    window_seconds = int(current_app.config.get("GROUPED_EVENT_WINDOW_SECONDS", 60))
+
+    if monitored_object_id is not None:
+        existing = db_conn.execute(
+            """
+            SELECT id, last_occurred_at
+            FROM grouped_events
+            WHERE monitored_object_id = ?
+              AND event_type = ?
+              AND severity = ?
+            ORDER BY last_occurred_at DESC, id DESC
+            LIMIT 1
+            """,
+            (monitored_object_id, event_type, severity),
+        ).fetchone()
+    else:
+        existing = db_conn.execute(
+            """
+            SELECT id, last_occurred_at
+            FROM grouped_events
+            WHERE monitored_object_id IS NULL
+              AND target_id = ?
+              AND event_type = ?
+              AND severity = ?
+            ORDER BY last_occurred_at DESC, id DESC
+            LIMIT 1
+            """,
+            (target_id, event_type, severity),
+        ).fetchone()
+
+    if existing is not None:
+        occurred_dt = parse_iso(occurred_at)
+        last_dt = parse_iso(existing["last_occurred_at"])
+        if abs((occurred_dt - last_dt).total_seconds()) <= window_seconds:
+            db_conn.execute(
+                """
+                UPDATE grouped_events
+                SET last_occurred_at = ?,
+                    repeat_count = repeat_count + 1,
+                    latest_message = ?,
+                    latest_event_json = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    occurred_at,
+                    message,
+                    json.dumps(event_payload, ensure_ascii=False),
+                    received_at,
+                    existing["id"],
+                ),
+            )
+            return
+
+    db_conn.execute(
+        """
+        INSERT INTO grouped_events (
+            monitored_object_id, target_id, event_type, severity, first_occurred_at, last_occurred_at,
+            repeat_count, latest_message, latest_event_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+        """,
+        (
+            monitored_object_id,
+            target_id,
+            event_type,
+            severity,
+            occurred_at,
+            occurred_at,
+            message,
+            json.dumps(event_payload, ensure_ascii=False),
+            received_at,
+            received_at,
+        ),
+    )
+
+
 def insert_raw_event(*, agent_id: str, target_id: str, event_type: str, severity: str, message: str | None, event_payload: dict, occurred_at: str, received_at: str) -> None:
     monitored_object_id = resolve_monitored_object_id(target_id)
     get_db().execute(
@@ -516,6 +609,16 @@ def insert_raw_event(*, agent_id: str, target_id: str, event_type: str, severity
             occurred_at,
             received_at,
         ),
+    )
+    sync_grouped_event(
+        monitored_object_id=monitored_object_id,
+        target_id=target_id,
+        event_type=event_type,
+        severity=severity,
+        message=message,
+        event_payload=event_payload,
+        occurred_at=occurred_at,
+        received_at=received_at,
     )
 
 

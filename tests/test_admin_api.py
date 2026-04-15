@@ -320,6 +320,7 @@ def test_admin_summary_returns_counts_and_recent_failures(seeded_app, seeded_cli
         "view_edges": 1,
         "latest_states": 3,
         "raw_events": 2,
+        "grouped_events": 0,
         "open_alerts": 1,
         "alert_rules": 3,
         "debug_payload_logs": 2,
@@ -379,6 +380,43 @@ def test_admin_raw_events_accept_boundary_limits(seeded_app, seeded_client) -> N
     assert high_response.status_code == 200
     assert len(low_response.get_json()["items"]) == 1
     assert len(high_response.get_json()["items"]) == 2
+
+
+def test_admin_grouped_events_returns_recent_groups(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO grouped_events (
+                monitored_object_id, target_id, event_type, severity, first_occurred_at, last_occurred_at,
+                repeat_count, latest_message, latest_event_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1302,
+                "app_main",
+                "process_stopped",
+                "warning",
+                "2026-04-12T11:05:00.100+09:00",
+                "2026-04-12T11:05:10.100+09:00",
+                3,
+                "process not found",
+                json.dumps({"pid": 1234}),
+                "2026-04-12T11:05:00.200+09:00",
+                "2026-04-12T11:05:10.200+09:00",
+            ),
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/grouped-events?limit=1")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["event_type"] == "process_stopped"
+    assert payload["items"][0]["repeat_count"] == 3
 
 
 def test_admin_raw_events_reject_out_of_range_limits(seeded_client) -> None:

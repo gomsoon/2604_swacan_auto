@@ -204,8 +204,9 @@ function renderEvents() {
             (event) => `
             <article class="event-item">
                 <h3>${escapeHtml(event.event_type)}</h3>
-                <p>${escapeHtml(event.message || "메시지 없음")}</p>
-                <p>${escapeHtml(event.target_id)} | ${escapeHtml(event.severity)} | ${escapeHtml(formatTimestamp(event.occurred_at))}</p>
+                <p>${escapeHtml(event.latest_message || event.message || "메시지 없음")}</p>
+                <p>${escapeHtml(event.target_id)} | ${escapeHtml(event.severity)} | 반복 ${escapeHtml(event.repeat_count ?? 1)}회</p>
+                <p>${escapeHtml(formatTimestamp(event.last_occurred_at || event.occurred_at))}</p>
             </article>
         `
         )

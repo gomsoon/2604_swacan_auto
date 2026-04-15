@@ -796,6 +796,115 @@ def test_agent_threshold_alert_opens_on_exact_queue_depth_boundaries(seeded_app,
     assert "500.000" in rule_alert["latest_message"]
 
 
+def test_grouped_events_merge_at_exact_window_boundary(seeded_app, seeded_client) -> None:
+    seeded_app.config["GROUPED_EVENT_WINDOW_SECONDS"] = 60
+    first_batch = {
+        "agent_id": "agent_local",
+        "boot_id": "boot_group_exact",
+        "seq_start": 91,
+        "seq_end": 91,
+        "sent_at": "2026-04-10T11:20:00.150+09:00",
+        "items": [
+            {
+                "seq": 91,
+                "payload_type": "process_event",
+                "occurred_at": "2026-04-10T11:20:00.100+09:00",
+                "target_id": "app_main",
+                "payload": {
+                    "event_type": "process_stopped",
+                    "severity": "warning",
+                    "message": "storm stop",
+                },
+            }
+        ],
+    }
+    second_batch = {
+        **first_batch,
+        "seq_start": 92,
+        "seq_end": 92,
+        "items": [
+            {
+                **first_batch["items"][0],
+                "seq": 92,
+                "occurred_at": "2026-04-10T11:21:00.100+09:00",
+            }
+        ],
+    }
+
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=first_batch).status_code == 202
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=second_batch).status_code == 202
+
+    with seeded_app.app_context():
+        first_result = process_pending_ingest(limit=1)
+        second_result = process_pending_ingest(limit=1)
+        db_conn = get_db()
+        group_rows = db_conn.execute(
+            """
+            SELECT event_type, repeat_count
+            FROM grouped_events
+            WHERE monitored_object_id = 1302
+            ORDER BY id
+            """
+        ).fetchall()
+
+    assert first_result["processed_items"] == 1
+    assert second_result["processed_items"] == 1
+    assert len(group_rows) == 1
+    assert group_rows[0]["event_type"] == "process_stopped"
+    assert group_rows[0]["repeat_count"] == 2
+
+
+def test_grouped_events_split_beyond_window_boundary(seeded_app, seeded_client) -> None:
+    seeded_app.config["GROUPED_EVENT_WINDOW_SECONDS"] = 60
+    first_batch = {
+        "agent_id": "agent_local",
+        "boot_id": "boot_group_split",
+        "seq_start": 93,
+        "seq_end": 93,
+        "sent_at": "2026-04-10T11:22:00.150+09:00",
+        "items": [
+            {
+                "seq": 93,
+                "payload_type": "process_event",
+                "occurred_at": "2026-04-10T11:22:00.100+09:00",
+                "target_id": "app_main",
+                "payload": {
+                    "event_type": "process_stopped",
+                    "severity": "warning",
+                    "message": "storm stop",
+                },
+            }
+        ],
+    }
+    second_batch = {
+        **first_batch,
+        "seq_start": 94,
+        "seq_end": 94,
+        "items": [
+            {
+                **first_batch["items"][0],
+                "seq": 94,
+                "occurred_at": "2026-04-10T11:23:01.100+09:00",
+            }
+        ],
+    }
+
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=first_batch).status_code == 202
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=second_batch).status_code == 202
+
+    with seeded_app.app_context():
+        first_result = process_pending_ingest(limit=1)
+        second_result = process_pending_ingest(limit=1)
+        db_conn = get_db()
+        group_count = db_conn.execute(
+            "SELECT COUNT(*) AS count FROM grouped_events WHERE monitored_object_id = 1302 AND event_type = 'process_stopped'"
+        ).fetchone()["count"]
+
+    assert first_result["processed_items"] == 1
+    assert second_result["processed_items"] == 1
+    assert group_count == 2
+
+
 def test_process_ingest_cli_command(seeded_client, seeded_runner) -> None:
     ingest_response = seeded_client.post(
         "/api/agents/ingest",

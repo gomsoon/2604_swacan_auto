@@ -98,6 +98,23 @@ def serialize_raw_event(row) -> dict[str, Any]:
     return payload
 
 
+def serialize_grouped_event(row) -> dict[str, Any]:
+    payload = {
+        "id": row["id"],
+        "monitored_object_id": row["monitored_object_id"],
+        "target_id": row["target_id"],
+        "event_type": row["event_type"],
+        "severity": row["severity"],
+        "first_occurred_at": row["first_occurred_at"],
+        "last_occurred_at": row["last_occurred_at"],
+        "repeat_count": row["repeat_count"],
+        "latest_message": row["latest_message"],
+    }
+    if row["latest_event_json"]:
+        payload["event"] = parse_json_or_text(row["latest_event_json"])
+    return payload
+
+
 def serialize_debug_payload(row) -> dict[str, Any]:
     return {
         "id": row["id"],
@@ -297,6 +314,7 @@ def get_summary():
         "view_edges": fetch_count("SELECT COUNT(*) FROM view_edges WHERE is_deleted = 0"),
         "latest_states": fetch_count("SELECT COUNT(*) FROM latest_states"),
         "raw_events": fetch_count("SELECT COUNT(*) FROM raw_events"),
+        "grouped_events": fetch_count("SELECT COUNT(*) FROM grouped_events"),
         "open_alerts": fetch_count("SELECT COUNT(*) FROM alert_instances WHERE status = 'open'"),
         "alert_rules": fetch_count("SELECT COUNT(*) FROM alert_rules"),
         "debug_payload_logs": fetch_count("SELECT COUNT(*) FROM debug_payload_logs"),
@@ -415,6 +433,26 @@ def list_raw_events():
         (limit,),
     ).fetchall()
     return {"items": [serialize_raw_event(row) for row in rows]}
+
+
+@bp.get("/grouped-events")
+@admin_required
+def list_grouped_events():
+    limit, error = parse_limit()
+    if error:
+        return error
+
+    rows = get_db().execute(
+        """
+        SELECT id, monitored_object_id, target_id, event_type, severity,
+               first_occurred_at, last_occurred_at, repeat_count, latest_message, latest_event_json
+        FROM grouped_events
+        ORDER BY last_occurred_at DESC, id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    return {"items": [serialize_grouped_event(row) for row in rows]}
 
 
 @bp.get("/latest-states")

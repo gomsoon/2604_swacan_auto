@@ -401,6 +401,22 @@ CREATE TABLE IF NOT EXISTS raw_events (
     FOREIGN KEY (monitored_object_id) REFERENCES monitored_objects(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS grouped_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    monitored_object_id INTEGER,
+    target_id TEXT NOT NULL,
+    event_type TEXT NOT NULL CHECK (event_type IN ('process_started', 'process_stopped', 'process_restarted', 'agent_heartbeat_lost')),
+    severity TEXT NOT NULL,
+    first_occurred_at TEXT NOT NULL,
+    last_occurred_at TEXT NOT NULL,
+    repeat_count INTEGER NOT NULL DEFAULT 1,
+    latest_message TEXT,
+    latest_event_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (monitored_object_id) REFERENCES monitored_objects(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS debug_payload_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     channel TEXT NOT NULL,
@@ -544,6 +560,12 @@ CREATE INDEX IF NOT EXISTS idx_raw_events_monitored_object_occurred
 
 CREATE INDEX IF NOT EXISTS idx_raw_events_event_type_occurred
     ON raw_events(event_type, occurred_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_grouped_events_target_type_occurred
+    ON grouped_events(target_id, event_type, severity, last_occurred_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_grouped_events_monitored_object_occurred
+    ON grouped_events(monitored_object_id, event_type, severity, last_occurred_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_debug_payload_logs_channel_occurred
     ON debug_payload_logs(channel, occurred_at DESC);
