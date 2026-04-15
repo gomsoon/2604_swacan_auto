@@ -1,4 +1,4 @@
-import { apiFetch, clearBanner, formatTimestamp, showBanner } from "./common.js";
+﻿import { apiFetch, clearBanner, formatTimestamp, showBanner } from "./common.js";
 import { renderDiagram } from "./diagram.js";
 
 const POLL_INTERVAL_MS = 5000;
@@ -114,13 +114,13 @@ function agentStatusText(payload, stateRow) {
     if (payload.heartbeat_timeout_level === "warning") {
         return "heartbeat 지연";
     }
-    return payload.backend_connection_status || stateRow?.status || "미수신";
+    return payload.backend_connection_status || stateRow?.status || "미수집";
 }
 
 function buildStateDetailRows(node, stateRow) {
     const payload = stateRow.state || {};
     const rows = [
-        { label: "대상", value: node.target_id || "-" },
+        { label: "타겟", value: node.target_id || "-" },
         { label: "구성 요소", value: node.node_type },
         { label: "상태 종류", value: stateRow.state_type },
         { label: "상태", value: stateRow.status },
@@ -184,7 +184,7 @@ function renderEvents() {
             <article class="event-item">
                 <h3>${escapeHtml(event.event_type)}</h3>
                 <p>${escapeHtml(event.message || "메시지 없음")}</p>
-                <p>${escapeHtml(event.target_id)} · ${escapeHtml(event.severity)} · ${escapeHtml(formatTimestamp(event.occurred_at))}</p>
+                <p>${escapeHtml(event.target_id)} | ${escapeHtml(event.severity)} | ${escapeHtml(formatTimestamp(event.occurred_at))}</p>
             </article>
         `
         )
@@ -220,7 +220,7 @@ function renderAgentSummary() {
                         <span>outbox ${escapeHtml(queueDepth)}</span>
                         <span>ack ${escapeHtml(lastAckSeq)}</span>
                     </div>
-                    <p class="agent-state-meta">최근 heartbeat ${escapeHtml(heartbeat)} · 경과 ${escapeHtml(heartbeatAge)}</p>
+                    <p class="agent-state-meta">최근 heartbeat ${escapeHtml(heartbeat)} | 경과 ${escapeHtml(heartbeatAge)}</p>
                 </article>
             `;
         })
@@ -239,7 +239,7 @@ function renderSelection() {
         selectionSummary.innerHTML = `
             <p><strong>${escapeHtml(node.display_name)}</strong></p>
             <p>아직 runtime state가 없습니다.</p>
-            <p class="selection-kind">대상 ID: ${escapeHtml(node.target_id || "-")}</p>
+            <p class="selection-kind">타겟 ID: ${escapeHtml(node.target_id || "-")}</p>
         `;
         return;
     }

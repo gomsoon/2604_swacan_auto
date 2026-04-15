@@ -1,4 +1,4 @@
-import { apiFetch, clearBanner, formatTimestamp, showBanner } from "./common.js";
+﻿import { apiFetch, clearBanner, formatTimestamp, showBanner } from "./common.js";
 
 const summaryCards = document.getElementById("admin-summary-cards");
 const generatedAt = document.getElementById("admin-generated-at");
@@ -249,7 +249,7 @@ function renderEvents(items) {
                 <article class="event-item">
                     <h3>${escapeHtml(event.event_type)}</h3>
                     <p>${escapeHtml(event.message || "메시지 없음")}</p>
-                    <p>${escapeHtml(event.target_id)} · ${escapeHtml(event.severity)} · ${escapeHtml(formatTimestamp(event.occurred_at))}</p>
+                    <p>${escapeHtml(event.target_id)} | ${escapeHtml(event.severity)} | ${escapeHtml(formatTimestamp(event.occurred_at))}</p>
                 </article>
             `
         )

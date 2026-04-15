@@ -35,6 +35,8 @@ def test_create_node_returns_backend_generated_id_and_revision(seeded_client) ->
     payload = response.get_json()
     assert payload["node"]["id"] > 103
     assert payload["node"]["node_type"] == "SoftwareProcess"
+    assert payload["node"]["semantic_type_code"] == "SoftwareProcess"
+    assert payload["node"]["notation_code"] == "process.rounded_rect"
     assert payload["node"]["layer_order"] == 40
     assert payload["revision"] == 2
 
@@ -165,6 +167,8 @@ def test_create_edge_returns_backend_generated_id(seeded_client) -> None:
     payload = response.get_json()
     assert payload["edge"]["id"] > 201
     assert payload["edge"]["target_node_id"] == node_id
+    assert payload["edge"]["semantic_type_code"] == "CommunicationLink"
+    assert payload["edge"]["notation_code"] == "communication.line"
     assert payload["edge"]["layer_order"] == 20
     assert payload["revision"] == next_revision + 1
 

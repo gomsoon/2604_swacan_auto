@@ -13,6 +13,17 @@ bp = Blueprint("editor_api", __name__, url_prefix="/api/views")
 
 ALLOWED_NODE_TYPES = {"PhysicalServer", "SoftwareProcess", "MonitoringAgent"}
 ALLOWED_EDGE_TYPES = {"CommunicationLink"}
+NODE_METAMODEL_DEFAULTS = {
+    "PhysicalServer": {"semantic_type_code": "PhysicalServer", "notation_code": "server.physical.rect"},
+    "SoftwareProcess": {"semantic_type_code": "SoftwareProcess", "notation_code": "process.rounded_rect"},
+    "MonitoringAgent": {
+        "semantic_type_code": "MonitoringAgent",
+        "notation_code": "agent.rounded_rect.double_border",
+    },
+}
+EDGE_METAMODEL_DEFAULTS = {
+    "CommunicationLink": {"semantic_type_code": "CommunicationLink", "notation_code": "communication.line"},
+}
 NODE_MUTABLE_FIELDS = {
     "parent_node_id",
     "display_name",
@@ -64,6 +75,8 @@ def serialize_node(node_row) -> dict[str, Any]:
         "id": node_row["id"],
         "parent_node_id": node_row["parent_node_id"],
         "node_type": node_row["node_type"],
+        "semantic_type_code": node_row["semantic_type_code"],
+        "notation_code": node_row["notation_code"],
         "display_name": node_row["display_name"],
         "target_id": node_row["target_id"],
         "layer_order": node_row["layer_order"],
@@ -81,6 +94,8 @@ def serialize_edge(edge_row) -> dict[str, Any]:
     payload = {
         "id": edge_row["id"],
         "edge_type": edge_row["edge_type"],
+        "semantic_type_code": edge_row["semantic_type_code"],
+        "notation_code": edge_row["notation_code"],
         "source_node_id": edge_row["source_node_id"],
         "target_node_id": edge_row["target_node_id"],
         "layer_order": edge_row["layer_order"],
@@ -98,7 +113,8 @@ def serialize_edge(edge_row) -> dict[str, Any]:
 def get_current_nodes(view_id: int) -> list[dict[str, Any]]:
     rows = get_db().execute(
         """
-        SELECT id, parent_node_id, node_type, display_name, target_id, layer_order, x, y, width, height, style_json
+        SELECT id, parent_node_id, node_type, semantic_type_code, notation_code,
+               display_name, target_id, layer_order, x, y, width, height, style_json
         FROM view_nodes
         WHERE view_id = ? AND is_deleted = 0
         ORDER BY layer_order ASC, id ASC
@@ -111,7 +127,7 @@ def get_current_nodes(view_id: int) -> list[dict[str, Any]]:
 def get_current_edges(view_id: int) -> list[dict[str, Any]]:
     rows = get_db().execute(
         """
-        SELECT id, edge_type, source_node_id, target_node_id, layer_order, source_anchor, target_anchor,
+        SELECT id, edge_type, semantic_type_code, notation_code, source_node_id, target_node_id, layer_order, source_anchor, target_anchor,
                control_points_json, label, style_json
         FROM view_edges
         WHERE view_id = ? AND is_deleted = 0
@@ -125,7 +141,8 @@ def get_current_edges(view_id: int) -> list[dict[str, Any]]:
 def get_node_row(view_id: int, node_id: int):
     return get_db().execute(
         """
-        SELECT id, parent_node_id, node_type, display_name, target_id, layer_order, x, y, width, height, style_json
+        SELECT id, parent_node_id, node_type, semantic_type_code, notation_code,
+               display_name, target_id, layer_order, x, y, width, height, style_json
         FROM view_nodes
         WHERE view_id = ? AND id = ? AND is_deleted = 0
         """,
@@ -136,7 +153,7 @@ def get_node_row(view_id: int, node_id: int):
 def get_edge_row(view_id: int, edge_id: int):
     return get_db().execute(
         """
-        SELECT id, edge_type, source_node_id, target_node_id, layer_order, source_anchor, target_anchor,
+        SELECT id, edge_type, semantic_type_code, notation_code, source_node_id, target_node_id, layer_order, source_anchor, target_anchor,
                control_points_json, label, style_json
         FROM view_edges
         WHERE view_id = ? AND id = ? AND is_deleted = 0
@@ -194,6 +211,12 @@ def validate_nodes(nodes: list[dict[str, Any]]) -> str | None:
         if node["node_type"] not in ALLOWED_NODE_TYPES:
             return "invalid node_type"
 
+        metamodel_defaults = NODE_METAMODEL_DEFAULTS[node["node_type"]]
+        if node.get("semantic_type_code", metamodel_defaults["semantic_type_code"]) != metamodel_defaults["semantic_type_code"]:
+            return "semantic_type_code does not match node_type"
+        if node.get("notation_code", metamodel_defaults["notation_code"]) != metamodel_defaults["notation_code"]:
+            return "notation_code does not match node_type"
+
         if not isinstance(node["id"], int):
             return "node id must be an integer"
 
@@ -234,6 +257,12 @@ def validate_edges(edges: list[dict[str, Any]], node_ids: set[int]) -> str | Non
 
         if edge["edge_type"] not in ALLOWED_EDGE_TYPES:
             return "invalid edge_type"
+
+        metamodel_defaults = EDGE_METAMODEL_DEFAULTS[edge["edge_type"]]
+        if edge.get("semantic_type_code", metamodel_defaults["semantic_type_code"]) != metamodel_defaults["semantic_type_code"]:
+            return "semantic_type_code does not match edge_type"
+        if edge.get("notation_code", metamodel_defaults["notation_code"]) != metamodel_defaults["notation_code"]:
+            return "notation_code does not match edge_type"
 
         if not isinstance(edge["id"], int):
             return "edge id must be an integer"
@@ -280,6 +309,8 @@ def create_node(view_id: int):
         "id": temp_id,
         "parent_node_id": payload.get("parent_node_id"),
         "node_type": payload["node_type"],
+        "semantic_type_code": payload.get("semantic_type_code", NODE_METAMODEL_DEFAULTS[payload["node_type"]]["semantic_type_code"]),
+        "notation_code": payload.get("notation_code", NODE_METAMODEL_DEFAULTS[payload["node_type"]]["notation_code"]),
         "display_name": payload["display_name"],
         "target_id": payload.get("target_id"),
         "layer_order": layer_order,
@@ -301,14 +332,16 @@ def create_node(view_id: int):
     cursor = db_conn.execute(
         """
         INSERT INTO view_nodes (
-            view_id, parent_node_id, node_type, display_name, target_id,
+            view_id, parent_node_id, node_type, semantic_type_code, notation_code, display_name, target_id,
             layer_order, x, y, width, height, is_deleted, style_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
         """,
         (
             view_id,
             payload.get("parent_node_id"),
             payload["node_type"],
+            candidate["semantic_type_code"],
+            candidate["notation_code"],
             payload["display_name"],
             payload.get("target_id"),
             candidate["layer_order"],
@@ -449,6 +482,8 @@ def create_edge(view_id: int):
     candidate = {
         "id": temp_id,
         "edge_type": payload["edge_type"],
+        "semantic_type_code": payload.get("semantic_type_code", EDGE_METAMODEL_DEFAULTS[payload["edge_type"]]["semantic_type_code"]),
+        "notation_code": payload.get("notation_code", EDGE_METAMODEL_DEFAULTS[payload["edge_type"]]["notation_code"]),
         "source_node_id": payload["source_node_id"],
         "target_node_id": payload["target_node_id"],
         "layer_order": layer_order,
@@ -470,14 +505,16 @@ def create_edge(view_id: int):
     cursor = db_conn.execute(
         """
         INSERT INTO view_edges (
-            view_id, edge_type, source_node_id, target_node_id,
+            view_id, edge_type, semantic_type_code, notation_code, source_node_id, target_node_id,
             layer_order, source_anchor, target_anchor, control_points_json, label, style_json,
             is_deleted, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
         """,
         (
             view_id,
             payload["edge_type"],
+            candidate["semantic_type_code"],
+            candidate["notation_code"],
             payload["source_node_id"],
             payload["target_node_id"],
             candidate["layer_order"],

@@ -62,8 +62,20 @@ def test_get_view_detail_returns_seed_nodes_and_edges(seeded_client) -> None:
         "SoftwareProcess",
         "MonitoringAgent",
     ]
+    assert [node["semantic_type_code"] for node in payload["nodes"]] == [
+        "PhysicalServer",
+        "SoftwareProcess",
+        "MonitoringAgent",
+    ]
+    assert [node["notation_code"] for node in payload["nodes"]] == [
+        "server.physical.rect",
+        "process.rounded_rect",
+        "agent.rounded_rect.double_border",
+    ]
     assert [node["layer_order"] for node in payload["nodes"]] == [10, 20, 30]
     assert payload["edges"][0]["edge_type"] == "CommunicationLink"
+    assert payload["edges"][0]["semantic_type_code"] == "CommunicationLink"
+    assert payload["edges"][0]["notation_code"] == "communication.line"
     assert payload["edges"][0]["layer_order"] == 10
 
 

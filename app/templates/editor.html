@@ -15,10 +15,12 @@
     </div>
 
     <div class="editor-toolbar card">
-        <div class="toolbar-group">
-            <button id="add-server-button" class="button primary" type="button">물리 서버 추가</button>
-            <button id="add-process-button" class="button ghost" type="button">프로세스 추가</button>
-            <button id="add-agent-button" class="button ghost" type="button">에이전트 추가</button>
+        <div class="toolbar-group palette-toolbar-group">
+            <div class="palette-toolbar-copy">
+                <strong>Palette</strong>
+                <span id="palette-status-label" class="status-text">메타모델 palette를 불러오는 중입니다.</span>
+            </div>
+            <div id="palette-groups" class="palette-groups"></div>
         </div>
         <div class="toolbar-group">
             <button id="start-connect-button" class="button ghost" type="button">통신선 시작</button>

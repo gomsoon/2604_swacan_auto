@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from werkzeug.security import generate_password_hash
 
@@ -71,6 +71,7 @@ def test_editor_page_renders_after_login(seeded_client) -> None:
     assert response.status_code == 200
     assert "Demo View".encode("utf-8") in response.data
     assert "SVG".encode("utf-8") in response.data
+    assert "Palette".encode("utf-8") in response.data
 
 
 def test_monitor_page_renders_after_login(seeded_client) -> None:
