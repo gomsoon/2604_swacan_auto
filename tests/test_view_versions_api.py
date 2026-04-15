@@ -55,6 +55,7 @@ def test_get_active_view_version_detail_returns_seed_snapshot(seeded_client) -> 
     assert payload["view"]["id"] == 1
     assert payload["version"]["id"] == 1001
     assert payload["version"]["status"] == "active"
+    assert payload["version"]["metamodel_version_code"] == "seed-v1"
     assert [node["element_key"] for node in payload["nodes"]] == [
         "server_host_a",
         "process_app_main",

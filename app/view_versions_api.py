@@ -4,9 +4,9 @@ from flask import Blueprint, g, request
 
 from .auth import error_response, login_required
 from .view_versioning import (
+    fetch_active_view_detail,
     create_draft_view_version,
     fetch_version_detail,
-    get_active_view_version,
     get_owned_view,
     get_owned_view_version,
     list_view_versions,
@@ -32,11 +32,7 @@ def get_active_version(view_id: int):
     if view_row is None:
         return error_response("not_found", "view not found", 404)
 
-    active_row = get_active_view_version(view_id)
-    if active_row is None:
-        return error_response("not_found", "active version not found", 404)
-
-    detail = fetch_version_detail(active_row["id"])
+    detail = fetch_active_view_detail(view_id)
     if detail is None:
         return error_response("not_found", "active version not found", 404)
 

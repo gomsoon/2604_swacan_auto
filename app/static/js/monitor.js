@@ -278,9 +278,22 @@ function render() {
 }
 
 async function loadView() {
-    const payload = await apiFetch(`/api/views/${state.viewId}`);
-    if (state.metamodelVersionCode !== payload.view.metamodel_version || state.notationDefinitionsByCode.size === 0) {
-        const registry = await loadMetamodelRegistry(payload.view.metamodel_version);
+    let payload;
+    let metamodelVersionCode;
+
+    try {
+        payload = await apiFetch(`/api/views/${state.viewId}/active`);
+        metamodelVersionCode = payload.version?.metamodel_version_code || payload.view.metamodel_version;
+    } catch (error) {
+        if (error.status !== 404) {
+            throw error;
+        }
+        payload = await apiFetch(`/api/views/${state.viewId}`);
+        metamodelVersionCode = payload.view.metamodel_version;
+    }
+
+    if (state.metamodelVersionCode !== metamodelVersionCode || state.notationDefinitionsByCode.size === 0) {
+        const registry = await loadMetamodelRegistry(metamodelVersionCode);
         state.metamodelVersionCode = registry.versionCode;
         state.notationDefinitionsByCode = registry.notationDefinitionsByCode;
     }

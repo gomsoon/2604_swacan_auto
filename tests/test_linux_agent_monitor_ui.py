@@ -41,6 +41,19 @@ def create_monitor_view(app) -> int:
         server_id = next_node_id
         process_id = server_id + 1
         agent_id = server_id + 2
+        next_version_id = db_conn.execute(
+            "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM view_versions"
+        ).fetchone()["next_id"]
+        version_id = next_version_id
+        version_node_id = db_conn.execute(
+            "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM view_version_nodes"
+        ).fetchone()["next_id"]
+        version_server_id = version_node_id
+        version_process_id = version_server_id + 1
+        version_agent_id = version_server_id + 2
+        version_edge_id = db_conn.execute(
+            "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM view_version_edges"
+        ).fetchone()["next_id"]
 
         db_conn.executemany(
             """
@@ -55,7 +68,7 @@ def create_monitor_view(app) -> int:
                     view_id,
                     None,
                     "PhysicalServer",
-                    "Remote Host",
+                    "Legacy Host",
                     "agent_ssh_smoke:host",
                     100,
                     100,
@@ -69,7 +82,7 @@ def create_monitor_view(app) -> int:
                     view_id,
                     server_id,
                     "SoftwareProcess",
-                    "Sleep Worker",
+                    "Legacy Sleep Worker",
                     "ssh_smoke_target",
                     150,
                     180,
@@ -83,7 +96,7 @@ def create_monitor_view(app) -> int:
                     view_id,
                     server_id,
                     "MonitoringAgent",
-                    "Remote Agent",
+                    "Legacy Remote Agent",
                     "agent_ssh_smoke",
                     150,
                     280,
@@ -108,6 +121,140 @@ def create_monitor_view(app) -> int:
                 "CommunicationLink",
                 agent_id,
                 process_id,
+                "right",
+                "left",
+                "[]",
+                "agent link",
+                '{"strokeStyle":"solid"}',
+                timestamp,
+                timestamp,
+            ),
+        )
+        db_conn.execute(
+            """
+            INSERT INTO view_versions (
+                id, view_id, version_no, version_code, status, based_on_version_id, metamodel_version_id,
+                created_by_user_id, approved_by_user_id, activated_by_user_id, description,
+                published_at, activated_at, is_edit_locked, lock_owner_user_id, lock_acquired_at, lock_expires_at,
+                revision, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 'active', NULL, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, 1, ?, ?)
+            """,
+            (
+                version_id,
+                view_id,
+                1,
+                "v1-active",
+                1,
+                1,
+                1,
+                1,
+                "SSH monitor active snapshot",
+                timestamp,
+                timestamp,
+                timestamp,
+                timestamp,
+            ),
+        )
+        db_conn.executemany(
+            """
+            INSERT INTO view_version_nodes (
+                id, view_version_id, element_key, parent_node_id, node_type, semantic_type_code, notation_code,
+                display_name, target_id, instance_mode, cardinality_scope, expected_min, expected_max,
+                layer_order, x, y, width, height, collapsed_state, is_deleted, style_json, properties_json,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, NULL, NULL, ?, ?)
+            """,
+            [
+                (
+                    version_server_id,
+                    version_id,
+                    "ssh_server",
+                    None,
+                    "PhysicalServer",
+                    "PhysicalServer",
+                    "server.physical.rect",
+                    "Remote Host",
+                    "agent_ssh_smoke:host",
+                    "single",
+                    "group_total",
+                    1,
+                    1,
+                    10,
+                    100,
+                    100,
+                    340,
+                    220,
+                    timestamp,
+                    timestamp,
+                ),
+                (
+                    version_process_id,
+                    version_id,
+                    "ssh_process",
+                    version_server_id,
+                    "SoftwareProcess",
+                    "SoftwareProcess",
+                    "process.rounded_rect",
+                    "Sleep Worker",
+                    "ssh_smoke_target",
+                    "single",
+                    "group_total",
+                    1,
+                    1,
+                    20,
+                    150,
+                    180,
+                    150,
+                    76,
+                    timestamp,
+                    timestamp,
+                ),
+                (
+                    version_agent_id,
+                    version_id,
+                    "ssh_agent",
+                    version_server_id,
+                    "MonitoringAgent",
+                    "MonitoringAgent",
+                    "agent.rounded_rect.double_border",
+                    "Remote Agent",
+                    "agent_ssh_smoke",
+                    "single",
+                    "group_total",
+                    1,
+                    1,
+                    30,
+                    150,
+                    280,
+                    150,
+                    76,
+                    timestamp,
+                    timestamp,
+                ),
+            ],
+        )
+        db_conn.execute(
+            """
+            INSERT INTO view_version_edges (
+                id, view_version_id, element_key, edge_type, association_code, semantic_type_code, notation_code,
+                source_node_id, target_node_id, source_element_key, target_element_key,
+                layer_order, source_anchor, target_anchor, control_points_json, label, style_json, is_deleted,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+            """,
+            (
+                version_edge_id,
+                version_id,
+                "ssh_edge",
+                "CommunicationLink",
+                "communicates_with",
+                "CommunicationLink",
+                "communication.line",
+                version_agent_id,
+                version_process_id,
+                "ssh_agent",
+                "ssh_process",
+                10,
                 "right",
                 "left",
                 "[]",

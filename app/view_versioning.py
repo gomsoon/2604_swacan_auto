@@ -12,7 +12,7 @@ def now_iso() -> str:
 
 
 def serialize_view_version(row) -> dict[str, Any]:
-    return {
+    payload = {
         "id": row["id"],
         "view_id": row["view_id"],
         "version_no": row["version_no"],
@@ -27,6 +27,9 @@ def serialize_view_version(row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+    if "metamodel_version_code" in row.keys():
+        payload["metamodel_version_code"] = row["metamodel_version_code"]
+    return payload
 
 
 def serialize_view_version_summary(row) -> dict[str, Any]:
@@ -153,6 +156,22 @@ def get_active_view_version(view_id: int):
     ).fetchone()
 
 
+def get_active_view_target_rows(view_id: int):
+    active_row = get_active_view_version(view_id)
+    if active_row is None:
+        return None
+    rows = get_db().execute(
+        """
+        SELECT id, target_id
+        FROM view_version_nodes
+        WHERE view_version_id = ? AND is_deleted = 0 AND target_id IS NOT NULL
+        ORDER BY layer_order ASC, id ASC
+        """,
+        (active_row["id"],),
+    ).fetchall()
+    return rows
+
+
 def get_current_draft_view_version(view_id: int):
     return get_db().execute(
         """
@@ -173,7 +192,8 @@ def fetch_version_detail(version_id: int) -> tuple[dict[str, Any], list[dict[str
         """
         SELECT id, view_id, version_no, version_code, status, based_on_version_id,
                metamodel_version_id, description, published_at, activated_at, revision,
-               created_at, updated_at
+               created_at, updated_at,
+               (SELECT version_code FROM metamodel_versions WHERE id = view_versions.metamodel_version_id) AS metamodel_version_code
         FROM view_versions
         WHERE id = ?
         """,
@@ -209,6 +229,13 @@ def fetch_version_detail(version_id: int) -> tuple[dict[str, Any], list[dict[str
         [serialize_view_version_node(row) for row in node_rows],
         [serialize_view_version_edge(row) for row in edge_rows],
     )
+
+
+def fetch_active_view_detail(view_id: int) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]] | None:
+    active_row = get_active_view_version(view_id)
+    if active_row is None:
+        return None
+    return fetch_version_detail(active_row["id"])
 
 
 def resolve_default_metamodel_version_id(view_row) -> int | None:

@@ -156,6 +156,76 @@ def test_latest_state_returns_only_view_targets_in_view_order(seeded_app, seeded
     assert payload["items"][1]["state"]["heartbeat_timeout_level"] == "normal"
 
 
+def test_latest_state_prefers_active_version_targets_over_legacy_view_nodes(seeded_app, seeded_client) -> None:
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T10:20:05.000+09:00")
+    seed_monitoring_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE view_nodes
+            SET target_id = CASE
+                WHEN node_type = 'SoftwareProcess' THEN 'legacy_process_target'
+                WHEN node_type = 'MonitoringAgent' THEN 'legacy_agent_target'
+                ELSE target_id
+            END
+            WHERE view_id = 1
+            """
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/1/latest-state")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert [item["target_id"] for item in payload["items"]] == ["app_main", "agent_local"]
+
+
+def test_events_prefers_active_version_targets_over_legacy_view_nodes(seeded_app, seeded_client) -> None:
+    seed_monitoring_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE view_nodes
+            SET target_id = CASE
+                WHEN node_type = 'SoftwareProcess' THEN 'legacy_process_target'
+                WHEN node_type = 'MonitoringAgent' THEN 'legacy_agent_target'
+                ELSE target_id
+            END
+            WHERE view_id = 1
+            """
+        )
+        db_conn.execute(
+            """
+            INSERT INTO raw_events (
+                id, agent_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                104,
+                "agent_local",
+                "legacy_process_target",
+                "process_stopped",
+                "warning",
+                "legacy only",
+                json.dumps({"pid": 8080}),
+                "2026-04-10T10:40:10.100+09:00",
+                "2026-04-10T10:40:10.230+09:00",
+            ),
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/1/events?limit=10")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert all(item["target_id"] in {"app_main", "agent_local"} for item in payload["items"])
+    assert not any(item["target_id"] == "legacy_process_target" for item in payload["items"])
+
+
 def test_latest_state_marks_agent_warning_when_heartbeat_is_delayed(seeded_app, seeded_client) -> None:
     seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T10:20:20.000+09:00")
     seeded_app.config["AGENT_HEARTBEAT_WARNING_SECONDS"] = 10

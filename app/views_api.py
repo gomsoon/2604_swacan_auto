@@ -9,6 +9,7 @@ from flask import Blueprint, g, request
 from .auth import error_response, login_required
 from .db import get_db
 from .runtime_state import derive_latest_state
+from .view_versioning import get_active_view_target_rows
 
 bp = Blueprint("views_api", __name__, url_prefix="/api/views")
 
@@ -117,6 +118,13 @@ def get_view_target_rows(view_id: int):
         """,
         (view_id,),
     ).fetchall()
+
+
+def get_monitor_target_rows(view_id: int):
+    active_rows = get_active_view_target_rows(view_id)
+    if active_rows is not None:
+        return active_rows
+    return get_view_target_rows(view_id)
 
 
 def query_by_targets(sql_prefix: str, target_ids: list[str], extra_params: tuple[Any, ...] = ()):  # noqa: ANN401
@@ -377,7 +385,7 @@ def get_latest_state(view_id: int):
     if error:
         return error
 
-    target_rows = get_view_target_rows(view_row["id"])
+    target_rows = get_monitor_target_rows(view_row["id"])
     target_ids = [row["target_id"] for row in target_rows]
     if not target_ids:
         return {"items": []}
@@ -413,7 +421,7 @@ def get_view_events(view_id: int):
     if limit <= 0 or limit > MAX_EVENTS_LIMIT:
         return error_response("validation_error", f"limit must be between 1 and {MAX_EVENTS_LIMIT}", 400)
 
-    target_rows = get_view_target_rows(view_row["id"])
+    target_rows = get_monitor_target_rows(view_row["id"])
     target_ids = [row["target_id"] for row in target_rows]
     if not target_ids:
         return {"items": []}
