@@ -64,6 +64,9 @@
 - [필수] 사용자는 로그인 후 접근 가능한 workspace 와 view 목록을 볼 수 있어야 한다.
 - [필수] 각 view 항목에는 최소한 이름, 설명, 최근 수정 시각, metamodel version 정보가 표시되어야 한다.
 - [필수] 사용자는 view 를 editor 모드 또는 monitoring 모드로 열 수 있어야 한다.
+- [필수] editor 모드와 monitoring 모드는 동일한 논리 view 를 대상으로 하더라도 서로 다른 version snapshot 을 바라볼 수 있어야 한다.
+- [필수] editor 는 `draft version` 을 열고, monitoring 은 `active operational version` 을 열도록 구분되어야 한다.
+- [필수] 사용자는 현재 자신이 보고 있는 대상이 draft 인지, published/active 인지 화면에서 명확히 구분할 수 있어야 한다.
 - [필수] backend 에서 edit lock 정책을 사용할 경우, 목록 또는 진입 시점에 현재 편집 중 여부를 볼 수 있어야 한다.
 - [필수] metamodel 이 `deprecated` 상태인 view 라도 읽기 전용 또는 기존 버전 기준으로 열 수 있어야 한다.
 - [선택] 최근 열람한 view, 즐겨찾기 view 는 후속 단계에서 추가할 수 있다.
@@ -132,12 +135,22 @@
 
 ## 9. View 저장과 복사 요구사항
 
-- [필수] 사용자는 현재 view 를 저장할 수 있어야 한다.
+- [필수] 사용자는 현재 draft view version 을 저장할 수 있어야 한다.
 - [필수] 저장 시 dirty 상태가 해제되고 최근 저장 시각이 갱신되어야 한다.
+- [필수] draft 저장만으로 운영 중인 monitoring 화면이 즉시 바뀌어서는 안 된다.
+- [필수] 운영 화면 변경은 publish 및 active version 전환 이후에만 반영되어야 한다.
 - [필수] 사용자는 동일 model 을 공유하는 `view 복사`를 만들 수 있어야 한다.
 - [필수] 사용자는 model 과 view 를 함께 복제하는 `diagram 복사`를 만들 수 있어야 한다.
 - [필수] frontend 는 `view 복사` 와 `diagram 복사` 의 차이를 사용자에게 명확히 설명해야 한다.
 - [필수] 저장 충돌이나 revision mismatch 발생 시, 사용자는 재조회 또는 read-only 전환 같은 명확한 선택지를 받아야 한다.
+
+### 9.1 Publish 와 운영 전환
+
+- [필수] frontend 는 draft view version 을 publish 할 수 있는 명시적 동작을 제공해야 한다.
+- [필수] publish 는 현재 draft 를 기준으로 새로운 published snapshot 을 만드는 동작으로 안내되어야 한다.
+- [필수] published snapshot 과 active operational version 이 다를 수 있음을 사용자에게 보여줄 수 있어야 한다.
+- [필수] 관리자 또는 권한 있는 사용자는 어떤 published version 을 운영용 active version 으로 쓸지 전환할 수 있어야 한다.
+- [필수] 운영 중인 active version 이 바뀌더라도 monitoring 사용자가 현재 보고 있는 구조가 어떤 버전인지 화면에 표시되어야 한다.
 
 ## 10. 편집 잠금과 협업 요구사항
 

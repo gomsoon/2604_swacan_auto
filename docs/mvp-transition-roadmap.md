@@ -27,6 +27,7 @@
 - frontend는 backend가 제공하는 선언형 render schema를 해석하는 SVG 렌더러 역할을 맡는다.
 - 기존 minimal E2E 구조는 유지하되, `하드코딩된 타입 분기`를 점진적으로 `registry 기반 해석`으로 바꾼다.
 - agent와 runtime 파이프라인은 이미 닫힌 흐름을 유지하면서 운영성과 효율을 높이는 방향으로 확장한다.
+- 운영 안정성을 위해 `draft 편집본` 과 `active operational view` 는 분리하고, publish 기반 snapshot 전환 구조를 채택한다.
 
 ## 3. MVP 주요 단계
 
@@ -53,10 +54,12 @@
 - semantic type / notation / containment rule 추가 API
 - publish API와 최소 검증
 - 관리자 화면에서 published/draft 버전 조회
+- view versioning, publish, active operational view 전환 정책 설계
 
 완료 기준:
 - 코드 수정 없이 draft metamodel을 만들고 publish할 수 있다.
 - published version 기준으로 일반 editor와 monitor가 안정적으로 동작한다.
+- draft 편집이 운영 중 monitoring 화면에 직접 영향을 주지 않는다.
 
 ### Phase 3. event storm 대응과 운영 고도화
 목표:

@@ -59,17 +59,23 @@
 - 실제 Linux OS에서 실행 중인 PID, TID, host 정보는 runtime instance이다.
 - 하나의 모델 객체가 하나 이상의 런타임 인스턴스와 매핑될 수 있어야 한다.
 
-### 4.4 Containment 기반 모델링
+### 4.4 편집본과 운영본의 분리
+- 사용자가 편집 중인 architecture view 와 운영자가 관제 중인 architecture view 는 동일 row 를 직접 공유해서는 안 된다.
+- 편집은 `draft view version` 에 대해 수행하고, 운영 관제는 `published` 또는 `active operational view version` 을 기준으로 수행하는 것이 원칙이다.
+- publish 는 draft 를 운영 중인 원본에 덮어쓰는 것이 아니라, 새 snapshot 을 생성하는 방식이어야 한다.
+- 운영 화면은 특정 active version 에 고정되어야 하며, 다른 사용자의 편집 중 변경이 운영 화면에 즉시 반영되어서는 안 된다.
+
+### 4.5 Containment 기반 모델링
 - 본 시스템은 자유 드로잉 툴이 아니라 containment 규칙을 따르는 모델 편집기이다.
 - `Physical Server -> Virtual Machine -> Process -> Thread` 또는 `Physical Server -> Process -> Thread`와 같은 포함 관계를 메타모델에 정의하고 이를 canvas와 backend 검증에 모두 반영한다.
 - 잘못된 포함 구조는 저장할 수 없어야 한다.
 
 - A non-invasive `MonitoringAgent` is treated as a separate process-like element inside a `PhysicalServer` or `VirtualMachine`, and observes process or group elements through the `monitors` association.
-### 4.5 Group Abstraction
+### 4.6 Group Abstraction
 - 실제 runtime은 multi-server, multi-process, multi-thread 구조를 가지므로, canvas의 객체는 개별 실행 인스턴스가 아니라 논리 실행 단위 또는 실행 그룹을 표현할 수 있어야 한다.
 - 하나의 `Server`, `Process`, `Thread` 객체가 여러 runtime instance를 대표할 수 있어야 한다.
 
-### 4.6 실시간 처리의 균형
+### 4.7 실시간 처리의 균형
 - frontend는 실시간 이벤트 처리를 위해 event stream 기반 통신을 우선 사용하되, 주기적 snapshot 조회를 병행하여 장애 및 데이터 유실 상황을 보완한다.
 - backend와 agent는 과도한 고빈도 전송보다 안정적인 상태 수집과 순차 복구에 우선순위를 둔다.
 

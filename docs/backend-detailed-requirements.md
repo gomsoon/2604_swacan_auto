@@ -168,6 +168,17 @@
 - [필수] diagram 복사는 model 과 view 를 함께 복제하는 방식으로 지원해야 한다.
 - [선택] 이후 버전에서는 부분 복사와 템플릿 생성 기능을 검토할 수 있다.
 
+### 7.5 운영용 view 와 편집용 draft 분리
+
+- [필수] backend 는 편집 중인 view 와 운영 중인 view 를 동일 row 집합으로 직접 공유하지 않아야 한다.
+- [필수] 사용자가 편집하는 대상은 `draft view version` 이어야 하며, 운영자가 monitoring 에서 보는 대상은 `published` 또는 `active operational view version` 이어야 한다.
+- [필수] publish 는 기존 운영 view row 를 직접 수정하는 방식이 아니라, draft 를 기준으로 새 snapshot 을 생성하는 방식이어야 한다.
+- [필수] 운영 화면은 특정 `active operational view version` 에 고정되어야 하며, 다른 사용자의 draft 편집 내용이 실시간으로 섞여 들어가면 안 된다.
+- [필수] backend 는 동일한 논리 view 아래에 여러 version snapshot 을 보관할 수 있어야 하며, 최소한 `draft`, `published`, `active`, `deprecated` 상태를 구분할 수 있어야 한다.
+- [필수] 새 version 이 publish 되더라도 현재 active version 은 자동 전환하지 않고, 관리자 또는 권한 있는 사용자가 활성 운영 버전을 명시적으로 바꿀 수 있어야 한다.
+- [필수] rollback 을 위해 과거 published version 을 다시 active 로 전환할 수 있어야 한다.
+- [필수] view version 간 row id 는 달라질 수 있으므로, runtime binding 이나 이벤트 매핑을 이어가기 위한 안정적인 `element_key` 또는 동등한 논리 식별자를 별도로 가져야 한다.
+
 ## 8. Runtime Binding 요구사항
 
 ### 8.1 논리 객체와 runtime instance 매핑
