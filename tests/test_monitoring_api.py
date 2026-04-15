@@ -214,3 +214,64 @@ def test_events_reject_invalid_limit(seeded_client) -> None:
 
     assert response.status_code == 400
     assert response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_events_accept_boundary_limits(seeded_app, seeded_client) -> None:
+    seed_monitoring_rows(seeded_app)
+    login(seeded_client)
+
+    low_response = seeded_client.get("/api/views/1/events?limit=1")
+    high_response = seeded_client.get("/api/views/1/events?limit=100")
+
+    assert low_response.status_code == 200
+    assert high_response.status_code == 200
+    assert len(low_response.get_json()["items"]) == 1
+    assert len(high_response.get_json()["items"]) == 2
+
+
+def test_events_reject_out_of_range_limits(seeded_client) -> None:
+    login(seeded_client)
+
+    zero_response = seeded_client.get("/api/views/1/events?limit=0")
+    over_response = seeded_client.get("/api/views/1/events?limit=101")
+
+    assert zero_response.status_code == 400
+    assert zero_response.get_json()["error"]["code"] == "validation_error"
+    assert over_response.status_code == 400
+    assert over_response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_latest_state_marks_agent_warning_at_exact_warning_threshold(seeded_app, seeded_client) -> None:
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T10:20:10.100+09:00")
+    seeded_app.config["AGENT_HEARTBEAT_WARNING_SECONDS"] = 10
+    seeded_app.config["AGENT_HEARTBEAT_DOWN_SECONDS"] = 30
+    seed_monitoring_rows(seeded_app)
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/1/latest-state")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    agent_state = payload["items"][1]
+    assert agent_state["status"] == "warning"
+    assert agent_state["severity"] == "warning"
+    assert agent_state["state"]["heartbeat_age_seconds"] == 10.0
+    assert agent_state["state"]["heartbeat_timeout_level"] == "warning"
+
+
+def test_latest_state_marks_agent_down_at_exact_down_threshold(seeded_app, seeded_client) -> None:
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T10:20:30.100+09:00")
+    seeded_app.config["AGENT_HEARTBEAT_WARNING_SECONDS"] = 10
+    seeded_app.config["AGENT_HEARTBEAT_DOWN_SECONDS"] = 30
+    seed_monitoring_rows(seeded_app)
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/1/latest-state")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    agent_state = payload["items"][1]
+    assert agent_state["status"] == "down"
+    assert agent_state["severity"] == "critical"
+    assert agent_state["state"]["heartbeat_age_seconds"] == 30.0
+    assert agent_state["state"]["heartbeat_timeout_level"] == "down"

@@ -340,6 +340,31 @@ def test_admin_raw_events_rejects_invalid_limit(seeded_client) -> None:
     assert response.get_json()["error"]["code"] == "validation_error"
 
 
+def test_admin_raw_events_accept_boundary_limits(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    login(seeded_client)
+
+    low_response = seeded_client.get("/api/admin/raw-events?limit=1")
+    high_response = seeded_client.get("/api/admin/raw-events?limit=100")
+
+    assert low_response.status_code == 200
+    assert high_response.status_code == 200
+    assert len(low_response.get_json()["items"]) == 1
+    assert len(high_response.get_json()["items"]) == 2
+
+
+def test_admin_raw_events_reject_out_of_range_limits(seeded_client) -> None:
+    login(seeded_client)
+
+    zero_response = seeded_client.get("/api/admin/raw-events?limit=0")
+    over_response = seeded_client.get("/api/admin/raw-events?limit=101")
+
+    assert zero_response.status_code == 400
+    assert zero_response.get_json()["error"]["code"] == "validation_error"
+    assert over_response.status_code == 400
+    assert over_response.get_json()["error"]["code"] == "validation_error"
+
+
 def test_admin_debug_payloads_support_filters(seeded_app, seeded_client) -> None:
     seed_admin_dashboard_rows(seeded_app)
     login(seeded_client)

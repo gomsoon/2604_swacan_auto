@@ -134,6 +134,65 @@ def test_create_draft_rejects_second_open_draft(seeded_client) -> None:
     assert second.get_json()["error"]["code"] == "draft_conflict"
 
 
+def test_create_draft_rejects_non_integer_based_on_version_id(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/views/1/drafts",
+        json={"based_on_version_id": "1001"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_create_draft_rejects_unknown_based_on_version_id(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/views/1/drafts",
+        json={"based_on_version_id": 999999},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_create_draft_rejects_cross_view_based_on_version_id(seeded_client) -> None:
+    login(seeded_client)
+
+    create_view_response = seeded_client.post(
+        "/api/views",
+        json={"name": "Cross View Draft", "description": "cross view source test"},
+    )
+    assert create_view_response.status_code == 201
+    view_id = create_view_response.get_json()["view"]["id"]
+
+    response = seeded_client.post(
+        f"/api/views/{view_id}/drafts",
+        json={"based_on_version_id": 1001},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_get_active_view_version_returns_404_when_missing(seeded_client) -> None:
+    login(seeded_client)
+
+    create_view_response = seeded_client.post(
+        "/api/views",
+        json={"name": "No Active Version View", "description": "no active version"},
+    )
+    assert create_view_response.status_code == 201
+    view_id = create_view_response.get_json()["view"]["id"]
+
+    response = seeded_client.get(f"/api/views/{view_id}/active")
+
+    assert response.status_code == 404
+    assert response.get_json()["error"]["code"] == "not_found"
+
+
 def test_create_draft_for_new_view_without_source_creates_empty_draft(seeded_app, seeded_client) -> None:
     login(seeded_client)
     create_view_response = seeded_client.post(

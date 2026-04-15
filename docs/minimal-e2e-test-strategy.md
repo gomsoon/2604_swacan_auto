@@ -19,6 +19,8 @@
 - [필수] coverage 는 제품 코드 기준으로 `app` 패키지에 대해 분리 측정하고, `tests` 와 Playwright 시나리오 코드는 coverage 계산에서 분리한다.
 - [필수] Windows 개발 환경에서 실행하는 기본 테스트와, SSH 를 통해 Linux agent test server 에서 실행하는 실제 통합 테스트는 별도 실행 세트로 분리해야 한다.
 - [필수] SSH 기반 Linux 테스트는 기본 `pytest` 세트에 섞지 않고 별도 marker 또는 별도 실행 단계로 운영해야 한다.
+- [필수] 숫자 범위, 시간 임계치, 상태 전이, 배치 크기 같은 핵심 입력에는 boundary value analysis 관점의 테스트를 포함해야 한다.
+- [필수] 경계값 테스트는 최소한 `하한 미만 / 하한 / 대표 정상값 / 상한 / 상한 초과` 패턴을 우선 적용한다.
 
 ## 2. 도구 선택 기준
 
@@ -47,6 +49,7 @@
 - agent selector 와 snapshot 생성
 - agent SQLite outbox 저장/복구/재전송
 - backend worker 분기 경로와 agent transport/outbox 분기 경로에 대한 branch coverage 측정
+- limit, timeout, retention, batch size, revision, version 상태 전이 같은 경계값 입력 검증
 
 ### 3.2 agent 단위 테스트 범위
 
