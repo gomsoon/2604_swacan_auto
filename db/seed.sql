@@ -898,3 +898,87 @@ INSERT INTO view_version_edges (
     '2026-04-12T10:00:00.000+09:00',
     '2026-04-12T10:00:00.000+09:00'
 );
+
+INSERT INTO monitored_objects (
+    id,
+    object_key,
+    object_type,
+    display_name,
+    runtime_binding_key,
+    metadata_json,
+    created_at,
+    updated_at
+) VALUES
+(
+    1301,
+    'host.host-a',
+    'PhysicalServer',
+    'Host A',
+    NULL,
+    '{"seeded":true}',
+    '2026-04-12T10:00:00.000+09:00',
+    '2026-04-12T10:00:00.000+09:00'
+),
+(
+    1302,
+    'process.app-main',
+    'SoftwareProcess',
+    'App Process',
+    'app_main',
+    '{"seeded":true}',
+    '2026-04-12T10:00:00.000+09:00',
+    '2026-04-12T10:00:00.000+09:00'
+),
+(
+    1303,
+    'agent.local-main',
+    'MonitoringAgent',
+    'Local Agent',
+    'agent_local',
+    '{"seeded":true}',
+    '2026-04-12T10:00:00.000+09:00',
+    '2026-04-12T10:00:00.000+09:00'
+),
+(
+    1304,
+    'host.agent-local',
+    'HostSnapshot',
+    'Local Host Snapshot',
+    'agent_local:host',
+    '{"seeded":true}',
+    '2026-04-12T10:00:00.000+09:00',
+    '2026-04-12T10:00:00.000+09:00'
+);
+
+INSERT INTO node_bindings (
+    id,
+    view_version_node_id,
+    monitored_object_id,
+    binding_role,
+    created_at,
+    updated_at
+) VALUES
+(
+    1401,
+    1101,
+    1301,
+    'primary',
+    '2026-04-12T10:00:00.000+09:00',
+    '2026-04-12T10:00:00.000+09:00'
+),
+(
+    1402,
+    1102,
+    1302,
+    'primary',
+    '2026-04-12T10:00:00.000+09:00',
+    '2026-04-12T10:00:00.000+09:00'
+),
+(
+    1403,
+    1103,
+    1303,
+    'primary',
+    '2026-04-12T10:00:00.000+09:00',
+    '2026-04-12T10:00:00.000+09:00'
+);

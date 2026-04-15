@@ -242,10 +242,10 @@ def test_process_pending_ingest_updates_states_and_events(seeded_app, seeded_cli
             "SELECT status, processed_at FROM ingest_inbox ORDER BY id DESC LIMIT 1"
         ).fetchone()
         state_rows = db_conn.execute(
-            "SELECT target_id, state_type, status FROM latest_states ORDER BY id"
+            "SELECT target_id, monitored_object_id, state_type, status FROM latest_states ORDER BY id"
         ).fetchall()
         event_rows = db_conn.execute(
-            "SELECT target_id, event_type, severity FROM raw_events ORDER BY id"
+            "SELECT target_id, monitored_object_id, event_type, severity FROM raw_events ORDER BY id"
         ).fetchall()
 
     assert result == {
@@ -255,13 +255,13 @@ def test_process_pending_ingest_updates_states_and_events(seeded_app, seeded_cli
     }
     assert inbox_row["status"] == "processed"
     assert inbox_row["processed_at"] is not None
-    assert [(row["target_id"], row["state_type"], row["status"]) for row in state_rows] == [
-        ("agent_local", "agent", "up"),
-        ("agent_local:host", "host", "up"),
-        ("app_main", "process", "down"),
+    assert [(row["target_id"], row["monitored_object_id"], row["state_type"], row["status"]) for row in state_rows] == [
+        ("agent_local", 1303, "agent", "up"),
+        ("agent_local:host", 1304, "host", "up"),
+        ("app_main", 1302, "process", "down"),
     ]
-    assert [(row["target_id"], row["event_type"], row["severity"]) for row in event_rows] == [
-        ("app_main", "process_stopped", "warning"),
+    assert [(row["target_id"], row["monitored_object_id"], row["event_type"], row["severity"]) for row in event_rows] == [
+        ("app_main", 1302, "process_stopped", "warning"),
     ]
 
 
@@ -382,6 +382,58 @@ def test_failed_batch_rolls_back_all_item_side_effects(seeded_app, seeded_client
     assert latest_state == 0
     assert raw_event_count == 0
     assert receipt_count == 0
+
+
+def test_unmapped_target_keeps_monitored_object_id_null(seeded_app, seeded_client) -> None:
+    payload = {
+        "agent_id": "agent_local",
+        "boot_id": "boot_unmapped",
+        "seq_start": 31,
+        "seq_end": 31,
+        "sent_at": "2026-04-10T10:30:00.150+09:00",
+        "items": [
+            {
+                "seq": 31,
+                "payload_type": "process_snapshot",
+                "occurred_at": "2026-04-10T10:30:00.100+09:00",
+                "target_id": "unknown_process_target",
+                "payload": {
+                    "pid": 4321,
+                    "state": "running",
+                    "cpu_usage": 2.0,
+                    "memory_rss": 4096,
+                },
+            }
+        ],
+    }
+
+    response = seeded_client.post(
+        "/api/agents/ingest",
+        headers=agent_headers(),
+        json=payload,
+    )
+    assert response.status_code == 202
+
+    with seeded_app.app_context():
+        result = process_pending_ingest(limit=10)
+        db_conn = get_db()
+        state_row = db_conn.execute(
+            """
+            SELECT target_id, monitored_object_id, status
+            FROM latest_states
+            WHERE target_id = ?
+            """,
+            ("unknown_process_target",),
+        ).fetchone()
+
+    assert result == {
+        "processed_batches": 1,
+        "failed_batches": 0,
+        "processed_items": 1,
+    }
+    assert state_row["target_id"] == "unknown_process_target"
+    assert state_row["monitored_object_id"] is None
+    assert state_row["status"] == "up"
 
 
 def test_process_ingest_cli_command(seeded_client, seeded_runner) -> None:

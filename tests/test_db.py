@@ -39,6 +39,20 @@ def test_init_db_loads_seed_data(seeded_app) -> None:
             WHERE id = 1201
             """
         ).fetchone()
+        monitored_object_rows = db_conn.execute(
+            """
+            SELECT id, object_key, runtime_binding_key
+            FROM monitored_objects
+            ORDER BY id
+            """
+        ).fetchall()
+        node_binding_rows = db_conn.execute(
+            """
+            SELECT view_version_node_id, monitored_object_id, binding_role
+            FROM node_bindings
+            ORDER BY id
+            """
+        ).fetchall()
         node_rows = db_conn.execute(
             "SELECT id, node_type, display_name FROM view_nodes ORDER BY id"
         ).fetchall()
@@ -60,6 +74,23 @@ def test_init_db_loads_seed_data(seeded_app) -> None:
     assert version_edge_row["association_code"] == "communicates_with"
     assert version_edge_row["source_node_id"] == 1102
     assert version_edge_row["target_node_id"] == 1103
+    assert [row["object_key"] for row in monitored_object_rows] == [
+        "host.host-a",
+        "process.app-main",
+        "agent.local-main",
+        "host.agent-local",
+    ]
+    assert [row["runtime_binding_key"] for row in monitored_object_rows] == [
+        None,
+        "app_main",
+        "agent_local",
+        "agent_local:host",
+    ]
+    assert [(row["view_version_node_id"], row["monitored_object_id"], row["binding_role"]) for row in node_binding_rows] == [
+        (1101, 1301, "primary"),
+        (1102, 1302, "primary"),
+        (1103, 1303, "primary"),
+    ]
     assert [row["node_type"] for row in node_rows] == [
         "PhysicalServer",
         "SoftwareProcess",
@@ -85,6 +116,8 @@ def test_init_db_cli_command(runner, app) -> None:
                 (SELECT COUNT(*) FROM view_versions) AS versions_count,
                 (SELECT COUNT(*) FROM view_version_nodes) AS version_nodes_count,
                 (SELECT COUNT(*) FROM view_version_edges) AS version_edges_count,
+                (SELECT COUNT(*) FROM monitored_objects) AS monitored_objects_count,
+                (SELECT COUNT(*) FROM node_bindings) AS node_bindings_count,
                 (SELECT COUNT(*) FROM view_nodes) AS nodes_count,
                 (SELECT COUNT(*) FROM view_edges) AS edges_count
             """
@@ -94,5 +127,7 @@ def test_init_db_cli_command(runner, app) -> None:
     assert counts["versions_count"] >= 1
     assert counts["version_nodes_count"] >= 3
     assert counts["version_edges_count"] >= 1
+    assert counts["monitored_objects_count"] >= 4
+    assert counts["node_bindings_count"] >= 3
     assert counts["nodes_count"] >= 3
     assert counts["edges_count"] >= 1

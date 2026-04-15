@@ -89,6 +89,20 @@ def resolve_view_node_id(target_id: str):
     return row["id"] if row else None
 
 
+def resolve_monitored_object_id(target_id: str):
+    row = get_db().execute(
+        """
+        SELECT id
+        FROM monitored_objects
+        WHERE runtime_binding_key = ?
+        ORDER BY id
+        LIMIT 1
+        """,
+        (target_id,),
+    ).fetchone()
+    return row["id"] if row else None
+
+
 def upsert_latest_state(*, target_id: str, state_type: str, status: str, severity: str | None, state: dict, occurred_at: str, received_at: str) -> None:
     db_conn = get_db()
     existing = db_conn.execute(
@@ -97,19 +111,21 @@ def upsert_latest_state(*, target_id: str, state_type: str, status: str, severit
     ).fetchone()
     payload_json = json.dumps(state, ensure_ascii=False)
     view_node_id = resolve_view_node_id(target_id)
+    monitored_object_id = resolve_monitored_object_id(target_id)
 
     if existing is None:
         next_id = db_conn.execute("SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM latest_states").fetchone()["next_id"]
         db_conn.execute(
             """
             INSERT INTO latest_states (
-                id, view_node_id, target_id, state_type, status, severity,
+                id, view_node_id, monitored_object_id, target_id, state_type, status, severity,
                 state_json, occurred_at, received_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 next_id,
                 view_node_id,
+                monitored_object_id,
                 target_id,
                 state_type,
                 status,
@@ -125,11 +141,12 @@ def upsert_latest_state(*, target_id: str, state_type: str, status: str, severit
     db_conn.execute(
         """
         UPDATE latest_states
-        SET view_node_id = ?, status = ?, severity = ?, state_json = ?, occurred_at = ?, received_at = ?, updated_at = ?
+        SET view_node_id = ?, monitored_object_id = ?, status = ?, severity = ?, state_json = ?, occurred_at = ?, received_at = ?, updated_at = ?
         WHERE id = ?
         """,
         (
             view_node_id,
+            monitored_object_id,
             status,
             severity,
             payload_json,
@@ -142,14 +159,16 @@ def upsert_latest_state(*, target_id: str, state_type: str, status: str, severit
 
 
 def insert_raw_event(*, agent_id: str, target_id: str, event_type: str, severity: str, message: str | None, event_payload: dict, occurred_at: str, received_at: str) -> None:
+    monitored_object_id = resolve_monitored_object_id(target_id)
     get_db().execute(
         """
         INSERT INTO raw_events (
-            agent_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            agent_id, monitored_object_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             agent_id,
+            monitored_object_id,
             target_id,
             event_type,
             severity,

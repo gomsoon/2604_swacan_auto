@@ -290,6 +290,45 @@ CREATE TABLE IF NOT EXISTS view_version_edges (
     UNIQUE (view_version_id, element_key)
 );
 
+CREATE TABLE IF NOT EXISTS monitored_objects (
+    id INTEGER PRIMARY KEY,
+    object_key TEXT NOT NULL UNIQUE,
+    object_type TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    runtime_binding_key TEXT,
+    metadata_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS node_bindings (
+    id INTEGER PRIMARY KEY,
+    view_version_node_id INTEGER NOT NULL,
+    monitored_object_id INTEGER NOT NULL,
+    binding_role TEXT NOT NULL DEFAULT 'primary',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (view_version_node_id) REFERENCES view_version_nodes(id) ON DELETE CASCADE,
+    FOREIGN KEY (monitored_object_id) REFERENCES monitored_objects(id) ON DELETE CASCADE,
+    UNIQUE (view_version_node_id, monitored_object_id)
+);
+
+CREATE TABLE IF NOT EXISTS alert_instances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    monitored_object_id INTEGER NOT NULL,
+    alert_code TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    status TEXT NOT NULL,
+    first_occurred_at TEXT NOT NULL,
+    last_occurred_at TEXT NOT NULL,
+    repeat_count INTEGER NOT NULL DEFAULT 1,
+    latest_message TEXT,
+    metadata_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (monitored_object_id) REFERENCES monitored_objects(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS ingest_inbox (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_id TEXT NOT NULL,
@@ -318,6 +357,7 @@ CREATE TABLE IF NOT EXISTS processed_item_receipts (
 CREATE TABLE IF NOT EXISTS latest_states (
     id INTEGER PRIMARY KEY,
     view_node_id INTEGER,
+    monitored_object_id INTEGER,
     target_id TEXT NOT NULL,
     state_type TEXT NOT NULL CHECK (state_type IN ('process', 'agent', 'host')),
     status TEXT NOT NULL,
@@ -326,19 +366,22 @@ CREATE TABLE IF NOT EXISTS latest_states (
     occurred_at TEXT NOT NULL,
     received_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    FOREIGN KEY (view_node_id) REFERENCES view_nodes(id) ON DELETE SET NULL
+    FOREIGN KEY (view_node_id) REFERENCES view_nodes(id) ON DELETE SET NULL,
+    FOREIGN KEY (monitored_object_id) REFERENCES monitored_objects(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS raw_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_id TEXT NOT NULL,
+    monitored_object_id INTEGER,
     target_id TEXT NOT NULL,
     event_type TEXT NOT NULL CHECK (event_type IN ('process_started', 'process_stopped', 'process_restarted', 'agent_heartbeat_lost')),
     severity TEXT NOT NULL,
     message TEXT,
     event_json TEXT,
     occurred_at TEXT NOT NULL,
-    received_at TEXT NOT NULL
+    received_at TEXT NOT NULL,
+    FOREIGN KEY (monitored_object_id) REFERENCES monitored_objects(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS debug_payload_logs (
@@ -442,6 +485,19 @@ CREATE INDEX IF NOT EXISTS idx_view_version_edges_version_target
 CREATE INDEX IF NOT EXISTS idx_view_version_edges_version_layer
     ON view_version_edges(view_version_id, layer_order, id);
 
+CREATE INDEX IF NOT EXISTS idx_monitored_objects_object_key
+    ON monitored_objects(object_key);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_monitored_objects_runtime_binding_key
+    ON monitored_objects(runtime_binding_key)
+    WHERE runtime_binding_key IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_node_bindings_view_version_node
+    ON node_bindings(view_version_node_id);
+
+CREATE INDEX IF NOT EXISTS idx_node_bindings_monitored_object
+    ON node_bindings(monitored_object_id);
+
 CREATE INDEX IF NOT EXISTS idx_ingest_inbox_status_received
     ON ingest_inbox(status, received_at);
 
@@ -457,8 +513,14 @@ CREATE INDEX IF NOT EXISTS idx_processed_item_receipts_inbox_id
 CREATE UNIQUE INDEX IF NOT EXISTS uq_latest_states_target_state_type
     ON latest_states(target_id, state_type);
 
+CREATE INDEX IF NOT EXISTS idx_latest_states_monitored_object_state_type
+    ON latest_states(monitored_object_id, state_type);
+
 CREATE INDEX IF NOT EXISTS idx_raw_events_target_occurred
     ON raw_events(target_id, occurred_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_raw_events_monitored_object_occurred
+    ON raw_events(monitored_object_id, occurred_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_raw_events_event_type_occurred
     ON raw_events(event_type, occurred_at DESC);
