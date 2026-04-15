@@ -261,6 +261,10 @@ def fetch_current_draft_view_detail(view_id: int) -> tuple[dict[str, Any], list[
     return fetch_version_detail(draft_row["id"])
 
 
+def build_version_code(version_no: int, status: str) -> str:
+    return f"v{version_no}-{status}"
+
+
 def resolve_default_metamodel_version_id(view_row) -> int | None:
     if not view_row["metamodel_version"]:
         return None
@@ -449,3 +453,88 @@ def create_draft_view_version(*, view_row, user_id: int, based_on_version_id: in
 
     db_conn.commit()
     return new_version_id
+
+
+def publish_view_version(*, version_row, user_id: int) -> int:
+    if version_row["status"] != "draft":
+        raise RuntimeError("invalid_from_status")
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    next_revision = version_row["revision"] + 1
+    db_conn.execute(
+        """
+        UPDATE view_versions
+        SET status = 'published',
+            version_code = ?,
+            published_at = ?,
+            is_edit_locked = 0,
+            lock_owner_user_id = NULL,
+            lock_acquired_at = NULL,
+            lock_expires_at = NULL,
+            revision = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            build_version_code(version_row["version_no"], "published"),
+            timestamp,
+            next_revision,
+            timestamp,
+            version_row["id"],
+        ),
+    )
+    db_conn.commit()
+    return version_row["id"]
+
+
+def activate_view_version(*, version_row, user_id: int) -> int:
+    if version_row["status"] != "published":
+        raise RuntimeError("invalid_from_status")
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    current_active = get_active_view_version(version_row["view_id"])
+
+    if current_active is not None and current_active["id"] != version_row["id"]:
+        db_conn.execute(
+            """
+            UPDATE view_versions
+            SET status = 'deprecated',
+                version_code = ?,
+                revision = revision + 1,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                build_version_code(current_active["version_no"], "deprecated"),
+                timestamp,
+                current_active["id"],
+            ),
+        )
+
+    next_revision = version_row["revision"] + 1
+    db_conn.execute(
+        """
+        UPDATE view_versions
+        SET status = 'active',
+            version_code = ?,
+            approved_by_user_id = COALESCE(approved_by_user_id, ?),
+            activated_by_user_id = ?,
+            activated_at = ?,
+            revision = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            build_version_code(version_row["version_no"], "active"),
+            user_id,
+            user_id,
+            timestamp,
+            next_revision,
+            timestamp,
+            version_row["id"],
+        ),
+    )
+    db_conn.commit()
+    return version_row["id"]

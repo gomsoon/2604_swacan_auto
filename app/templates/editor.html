@@ -9,6 +9,10 @@
             <p class="section-copy">SVG 기반 최소 편집기입니다. 서버, 프로세스, 에이전트, 통신 선을 다룹니다.</p>
         </div>
         <div class="toolbar-inline">
+            <span id="editor-version-code-label" class="meta-pill">version -</span>
+            <span id="editor-version-status-label" class="meta-pill">status -</span>
+            <button id="publish-version-button" class="button ghost" type="button">Draft 발행</button>
+            <button id="activate-version-button" class="button ghost" type="button">운영 반영</button>
             <a class="button ghost" href="{{ url_for('web.monitor_page', view_id=view_id) }}">모니터링 보기</a>
             <a class="button ghost" href="{{ url_for('web.views_page') }}">목록으로</a>
         </div>

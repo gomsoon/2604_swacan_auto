@@ -6,6 +6,8 @@ const svg = document.getElementById("editor-canvas");
 const selectionKind = document.getElementById("selection-kind");
 const revisionLabel = document.getElementById("editor-revision-label");
 const statusLabel = document.getElementById("editor-status-label");
+const versionCodeLabel = document.getElementById("editor-version-code-label");
+const versionStatusLabel = document.getElementById("editor-version-status-label");
 const paletteStatusLabel = document.getElementById("palette-status-label");
 const paletteGroupsRoot = document.getElementById("palette-groups");
 const nodeForm = document.getElementById("node-form");
@@ -13,6 +15,8 @@ const edgeSummary = document.getElementById("edge-summary");
 const edgeIdText = document.getElementById("edge-id-text");
 const edgeLinkText = document.getElementById("edge-link-text");
 const startConnectButton = document.getElementById("start-connect-button");
+const publishVersionButton = document.getElementById("publish-version-button");
+const activateVersionButton = document.getElementById("activate-version-button");
 
 const state = {
     viewId: Number(appRoot.dataset.viewId),
@@ -93,6 +97,58 @@ function updateRevision(revision) {
 
 function getVersionApiBase() {
     return `/api/view-versions/${state.viewVersionId}`;
+}
+
+function isEditableVersion() {
+    return state.viewVersionStatus === "draft";
+}
+
+function refreshVersionPills() {
+    if (versionCodeLabel) {
+        versionCodeLabel.textContent = `version ${state.viewVersionCode || "-"}`;
+    }
+    if (versionStatusLabel) {
+        versionStatusLabel.textContent = `status ${state.viewVersionStatus || "-"}`;
+    }
+}
+
+function updateEditorMode() {
+    const editable = isEditableVersion();
+    const paletteButtons = paletteGroupsRoot?.querySelectorAll("button") || [];
+    paletteButtons.forEach((button) => {
+        button.disabled = !editable;
+    });
+    if (startConnectButton) {
+        startConnectButton.disabled = !editable;
+    }
+    const deleteSelectedButton = document.getElementById("delete-selected-button");
+    if (deleteSelectedButton) {
+        deleteSelectedButton.disabled = !editable;
+    }
+    const saveSelectedButton = nodeForm?.querySelector('button[type="submit"]');
+    if (saveSelectedButton) {
+        saveSelectedButton.disabled = !editable;
+    }
+    nodeForm?.querySelectorAll("input").forEach((input) => {
+        input.disabled = !editable;
+    });
+    if (publishVersionButton) {
+        publishVersionButton.hidden = state.viewVersionStatus !== "draft";
+        publishVersionButton.disabled = !editable;
+    }
+    if (activateVersionButton) {
+        activateVersionButton.hidden = state.viewVersionStatus !== "published";
+        activateVersionButton.disabled = state.viewVersionStatus !== "published";
+    }
+    refreshVersionPills();
+}
+
+function ensureEditableVersion(actionLabel) {
+    if (!isEditableVersion()) {
+        showBanner(`${actionLabel}은 draft 버전에서만 가능합니다.`, "error");
+        return false;
+    }
+    return true;
 }
 
 function getNode(nodeId) {
@@ -289,6 +345,7 @@ async function loadPalette(metamodelVersionCode) {
     if (registry.usedFallback) {
         setPaletteStatus("metamodel palette 조회에 실패해 기본 palette를 사용합니다.");
     }
+    updateEditorMode();
 }
 
 function syncSelectionPanel() {
@@ -384,6 +441,7 @@ async function loadView() {
         state.selectedEdgeId = null;
         state.connectSourceId = null;
         updateRevision(payload.version.revision);
+        updateEditorMode();
         render();
         setStatus(`${payload.version.version_code} draft가 준비되었습니다.`);
     } catch (error) {
@@ -393,6 +451,9 @@ async function loadView() {
 }
 
 async function addNode(nodeType) {
+    if (!ensureEditableVersion("노드 추가")) {
+        return;
+    }
     clearBanner();
     try {
         const payload = await apiFetch(`${getVersionApiBase()}/nodes`, {
@@ -415,6 +476,9 @@ async function addNode(nodeType) {
 }
 
 function startConnectMode() {
+    if (!ensureEditableVersion("통신선 생성")) {
+        return;
+    }
     if (!state.selectedNodeId) {
         showBanner("먼저 연결의 시작점이 될 노드를 선택해 주세요.", "error");
         return;
@@ -426,6 +490,11 @@ function startConnectMode() {
 }
 
 async function createEdge(targetNodeId) {
+    if (!ensureEditableVersion("통신선 생성")) {
+        state.connectSourceId = null;
+        render();
+        return;
+    }
     if (!state.connectSourceId || state.connectSourceId === targetNodeId) {
         state.connectSourceId = null;
         render();
@@ -466,6 +535,9 @@ async function createEdge(targetNodeId) {
 }
 
 async function deleteSelected() {
+    if (!ensureEditableVersion("삭제")) {
+        return;
+    }
     clearBanner();
     try {
         if (state.selectedNodeId) {
@@ -500,6 +572,9 @@ async function deleteSelected() {
 
 async function saveSelectedNode(event) {
     event.preventDefault();
+    if (!ensureEditableVersion("저장")) {
+        return;
+    }
     const node = getNode(state.selectedNodeId);
     if (!node) {
         return;
@@ -555,7 +630,7 @@ function handleNodeClick(node, event) {
 }
 
 function handleNodePointerDown(node, event) {
-    if (event.button !== 0 || state.connectSourceId) {
+    if (event.button !== 0 || state.connectSourceId || !isEditableVersion()) {
         return;
     }
 
@@ -581,6 +656,9 @@ function handleNodePointerDown(node, event) {
 }
 
 async function persistLayout() {
+    if (!ensureEditableVersion("레이아웃 저장")) {
+        return;
+    }
     const payload = await apiFetch(getVersionApiBase(), {
         method: "PUT",
         body: {
@@ -590,6 +668,47 @@ async function persistLayout() {
         },
     });
     updateRevision(payload.revision);
+}
+
+async function publishCurrentVersion() {
+    if (!ensureEditableVersion("발행")) {
+        return;
+    }
+    clearBanner();
+    try {
+        const payload = await apiFetch(`${getVersionApiBase()}/publish`, {
+            method: "POST",
+            body: { revision: state.revision },
+        });
+        state.viewVersionCode = payload.version.version_code;
+        state.viewVersionStatus = payload.version.status;
+        updateRevision(payload.version.revision);
+        updateEditorMode();
+        setStatus(`${payload.version.version_code} 버전이 발행되었습니다.`);
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
+}
+
+async function activateCurrentVersion() {
+    if (state.viewVersionStatus !== "published") {
+        showBanner("운영 반영은 published 버전에서만 가능합니다.", "error");
+        return;
+    }
+    clearBanner();
+    try {
+        const payload = await apiFetch(`${getVersionApiBase()}/activate`, {
+            method: "POST",
+            body: { revision: state.revision },
+        });
+        state.viewVersionCode = payload.version.version_code;
+        state.viewVersionStatus = payload.version.status;
+        updateRevision(payload.version.revision);
+        updateEditorMode();
+        setStatus(`${payload.version.version_code} 버전이 운영 반영되었습니다.`);
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
 }
 
 svg.addEventListener("pointermove", (event) => {
@@ -647,5 +766,7 @@ startConnectButton?.addEventListener("click", startConnectMode);
 document.getElementById("delete-selected-button")?.addEventListener("click", deleteSelected);
 document.getElementById("reload-view-button")?.addEventListener("click", loadView);
 nodeForm?.addEventListener("submit", saveSelectedNode);
+publishVersionButton?.addEventListener("click", publishCurrentVersion);
+activateVersionButton?.addEventListener("click", activateCurrentVersion);
 
 loadView();

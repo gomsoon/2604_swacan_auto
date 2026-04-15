@@ -301,6 +301,59 @@ def test_latest_state_prefers_draft_targets_when_active_version_is_missing(seede
     assert [item["target_id"] for item in payload["items"]] == ["draft_process_target"]
 
 
+def test_latest_state_uses_newly_activated_version_targets(seeded_app, seeded_client) -> None:
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T10:20:05.000+09:00")
+    login(seeded_client)
+
+    created = seeded_client.post(
+        "/api/views/1/drafts",
+        json={"description": "activate monitoring target"},
+    ).get_json()
+    draft_id = created["version"]["id"]
+    process_node = next(node for node in created["nodes"] if node["node_type"] == "SoftwareProcess")
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            "UPDATE view_version_nodes SET target_id = ? WHERE id = ?",
+            ("activated_process_target", process_node["id"]),
+        )
+        db_conn.execute(
+            """
+            INSERT INTO latest_states (
+                id, view_node_id, target_id, state_type, status, severity, state_json, occurred_at, received_at, updated_at
+            ) VALUES (?, NULL, ?, 'process', 'up', 'normal', ?, ?, ?, ?)
+            """,
+            (
+                9992,
+                "activated_process_target",
+                json.dumps({"pid": 7777, "cpu_usage": 5.5}),
+                "2026-04-10T10:20:00.100+09:00",
+                "2026-04-10T10:20:00.220+09:00",
+                "2026-04-10T10:20:00.220+09:00",
+            ),
+        )
+        db_conn.commit()
+
+    published = seeded_client.post(
+        f"/api/view-versions/{draft_id}/publish",
+        json={"revision": created["version"]["revision"]},
+    ).get_json()
+    activated = seeded_client.post(
+        f"/api/view-versions/{draft_id}/activate",
+        json={"revision": published["version"]["revision"]},
+    )
+
+    assert activated.status_code == 200
+
+    response = seeded_client.get("/api/views/1/latest-state")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert any(item["target_id"] == "activated_process_target" for item in payload["items"])
+    assert not any(item["target_id"] == "app_main" for item in payload["items"])
+
+
 def test_latest_state_marks_agent_warning_when_heartbeat_is_delayed(seeded_app, seeded_client) -> None:
     seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T10:20:20.000+09:00")
     seeded_app.config["AGENT_HEARTBEAT_WARNING_SECONDS"] = 10

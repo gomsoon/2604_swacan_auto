@@ -254,3 +254,99 @@ def test_get_current_draft_returns_404_when_missing(seeded_client) -> None:
 
     assert response.status_code == 404
     assert response.get_json()["error"]["code"] == "not_found"
+
+
+def test_publish_version_changes_draft_to_published(seeded_client) -> None:
+    login(seeded_client)
+    created = seeded_client.post(
+        "/api/views/1/drafts",
+        json={"description": "publish me"},
+    ).get_json()
+
+    response = seeded_client.post(
+        f"/api/view-versions/{created['version']['id']}/publish",
+        json={"revision": created["version"]["revision"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["version"]["status"] == "published"
+    assert payload["version"]["version_code"] == "v2-published"
+    assert payload["version"]["published_at"] is not None
+    assert payload["version"]["revision"] == created["version"]["revision"] + 1
+
+
+def test_publish_version_rejects_non_integer_revision(seeded_client) -> None:
+    login(seeded_client)
+    created = seeded_client.post(
+        "/api/views/1/drafts",
+        json={"description": "publish bad revision"},
+    ).get_json()
+
+    response = seeded_client.post(
+        f"/api/view-versions/{created['version']['id']}/publish",
+        json={"revision": "2"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_publish_version_rejects_non_draft_version(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/view-versions/1001/publish",
+        json={"revision": 1},
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["error"]["code"] == "version_state_conflict"
+
+
+def test_activate_version_changes_published_to_active_and_deprecates_previous_active(seeded_app, seeded_client) -> None:
+    login(seeded_client)
+    created = seeded_client.post(
+        "/api/views/1/drafts",
+        json={"description": "activate me"},
+    ).get_json()
+    published = seeded_client.post(
+        f"/api/view-versions/{created['version']['id']}/publish",
+        json={"revision": created["version"]["revision"]},
+    ).get_json()
+
+    response = seeded_client.post(
+        f"/api/view-versions/{published['version']['id']}/activate",
+        json={"revision": published["version"]["revision"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["version"]["status"] == "active"
+    assert payload["version"]["version_code"] == "v2-active"
+    assert payload["version"]["activated_at"] is not None
+    assert payload["version"]["revision"] == published["version"]["revision"] + 1
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        previous_active = db_conn.execute(
+            "SELECT status, version_code FROM view_versions WHERE id = 1001"
+        ).fetchone()
+        assert previous_active["status"] == "deprecated"
+        assert previous_active["version_code"] == "v1-deprecated"
+
+
+def test_activate_version_rejects_draft_version(seeded_client) -> None:
+    login(seeded_client)
+    created = seeded_client.post(
+        "/api/views/1/drafts",
+        json={"description": "cannot activate draft"},
+    ).get_json()
+
+    response = seeded_client.post(
+        f"/api/view-versions/{created['version']['id']}/activate",
+        json={"revision": created["version"]["revision"]},
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["error"]["code"] == "version_state_conflict"

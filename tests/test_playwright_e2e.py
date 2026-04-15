@@ -81,6 +81,15 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     page.get_by_role("button", name="통신선 시작").click()
     agent_shape.click(force=True)
     expect(page.locator("path.diagram-edge")).to_have_count(1)
+    expect(page.locator("#editor-version-status-label")).to_contain_text("draft")
+
+    page.get_by_role("button", name="Draft 발행").click()
+    expect(page.locator("#editor-version-status-label")).to_contain_text("published")
+    expect(page.locator("#editor-version-code-label")).to_contain_text("published")
+
+    page.get_by_role("button", name="운영 반영").click()
+    expect(page.locator("#editor-version-status-label")).to_contain_text("active")
+    expect(page.locator("#editor-version-code-label")).to_contain_text("active")
 
     with seeded_app.app_context():
         db_conn = get_db()
@@ -88,8 +97,8 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
             """
             SELECT id
             FROM view_versions
-            WHERE view_id = ? AND status = 'draft'
-            ORDER BY version_no DESC, id DESC
+            WHERE view_id = ? AND status = 'active'
+            ORDER BY activated_at DESC, version_no DESC, id DESC
             LIMIT 1
             """,
             (view_id,),
