@@ -28,6 +28,7 @@ def parse_timestamp(value: str | None) -> datetime | None:
 
 def derive_latest_state(state_row) -> dict[str, Any]:
     payload = {
+        "monitored_object_id": state_row["monitored_object_id"],
         "target_id": state_row["target_id"],
         "state_type": state_row["state_type"],
         "status": state_row["status"],

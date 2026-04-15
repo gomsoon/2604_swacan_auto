@@ -120,8 +120,23 @@ def test_create_draft_clones_active_version(seeded_app, seeded_client) -> None:
             """,
             (draft_row["id"],),
         ).fetchall()
+        cloned_bindings = db_conn.execute(
+            """
+            SELECT n.element_key, b.monitored_object_id, b.binding_role
+            FROM node_bindings AS b
+            JOIN view_version_nodes AS n ON n.id = b.view_version_node_id
+            WHERE n.view_version_id = ?
+            ORDER BY n.id
+            """,
+            (draft_row["id"],),
+        ).fetchall()
         assert len(cloned_nodes) == 3
         assert cloned_nodes[1]["parent_node_id"] is not None
+        assert [(row["element_key"], row["monitored_object_id"], row["binding_role"]) for row in cloned_bindings] == [
+            ("server_host_a", 1301, "primary"),
+            ("process_app_main", 1302, "primary"),
+            ("agent_local_main", 1303, "primary"),
+        ]
 
 
 def test_create_draft_rejects_second_open_draft(seeded_client) -> None:

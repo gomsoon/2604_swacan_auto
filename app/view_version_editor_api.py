@@ -20,6 +20,7 @@ from .editor_api import (
 from .view_versioning import (
     get_owned_view_version,
     now_iso,
+    sync_primary_node_binding,
     serialize_view_version_edge,
     serialize_view_version_node,
 )
@@ -65,7 +66,12 @@ def get_current_nodes(version_id: int) -> list[dict[str, Any]]:
         """
         SELECT id, element_key, parent_node_id, node_type, semantic_type_code, notation_code,
                display_name, target_id, instance_mode, cardinality_scope, expected_min, expected_max,
-               layer_order, x, y, width, height, collapsed_state, style_json, properties_json
+               layer_order, x, y, width, height, collapsed_state, style_json, properties_json,
+               (SELECT monitored_object_id
+                FROM node_bindings
+                WHERE view_version_node_id = view_version_nodes.id AND binding_role = 'primary'
+                ORDER BY id
+                LIMIT 1) AS monitored_object_id
         FROM view_version_nodes
         WHERE view_version_id = ? AND is_deleted = 0
         ORDER BY layer_order ASC, id ASC
@@ -95,7 +101,12 @@ def get_node_row(version_id: int, node_id: int):
         """
         SELECT id, element_key, parent_node_id, node_type, semantic_type_code, notation_code,
                display_name, target_id, instance_mode, cardinality_scope, expected_min, expected_max,
-               layer_order, x, y, width, height, collapsed_state, style_json, properties_json
+               layer_order, x, y, width, height, collapsed_state, style_json, properties_json,
+               (SELECT monitored_object_id
+                FROM node_bindings
+                WHERE view_version_node_id = view_version_nodes.id AND binding_role = 'primary'
+                ORDER BY id
+                LIMIT 1) AS monitored_object_id
         FROM view_version_nodes
         WHERE view_version_id = ? AND id = ? AND is_deleted = 0
         """,
@@ -145,7 +156,7 @@ def replace_version_layout(version_id: int, nodes: list[dict[str, Any]], edges: 
         ),
     )
     for node in sorted_nodes:
-        db_conn.execute(
+        cursor = db_conn.execute(
             """
             INSERT INTO view_version_nodes (
                 id, view_version_id, element_key, parent_node_id, node_type, semantic_type_code, notation_code,
@@ -179,6 +190,11 @@ def replace_version_layout(version_id: int, nodes: list[dict[str, Any]], edges: 
                 updated_at,
                 updated_at,
             ),
+        )
+        sync_primary_node_binding(
+            view_version_node_id=cursor.lastrowid if cursor.lastrowid is not None else node["id"],
+            target_id=node.get("target_id"),
+            timestamp=updated_at,
         )
 
     for edge in edges:
@@ -296,6 +312,11 @@ def create_node(version_id: int):
             timestamp,
         ),
     )
+    sync_primary_node_binding(
+        view_version_node_id=cursor.lastrowid,
+        target_id=payload.get("target_id"),
+        timestamp=timestamp,
+    )
     next_revision, updated_at = bump_version_revision(version_id)
     db_conn.commit()
 
@@ -359,6 +380,11 @@ def update_node(version_id: int, node_id: int):
             node_id,
             version_id,
         ),
+    )
+    sync_primary_node_binding(
+        view_version_node_id=node_id,
+        target_id=merged.get("target_id"),
+        timestamp=timestamp,
     )
     next_revision, updated_at = bump_version_revision(version_id)
     db_conn.commit()

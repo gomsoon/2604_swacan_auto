@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.db import get_db
+
 
 def login(client, username: str = "admin", password: str = "admin123!"):
     return client.post(
@@ -143,6 +145,61 @@ def test_update_version_node_updates_layout_and_revision(seeded_client) -> None:
     assert payload["revision"] == draft_payload["version"]["revision"] + 1
 
 
+def test_update_version_node_creates_or_removes_primary_binding(seeded_app, seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+    server_node = next(node for node in draft_payload["nodes"] if node["node_type"] == "PhysicalServer")
+
+    bind_response = seeded_client.patch(
+        f"/api/view-versions/{version_id}/nodes/{server_node['id']}",
+        json={
+            "revision": draft_payload["version"]["revision"],
+            "target_id": "agent_local:host",
+        },
+    )
+
+    assert bind_response.status_code == 200
+    payload = bind_response.get_json()
+    assert payload["node"]["monitored_object_id"] == 1304
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        binding_row = db_conn.execute(
+            """
+            SELECT monitored_object_id
+            FROM node_bindings
+            WHERE view_version_node_id = ?
+            """,
+            (server_node["id"],),
+        ).fetchone()
+    assert binding_row["monitored_object_id"] == 1304
+
+    unbind_response = seeded_client.patch(
+        f"/api/view-versions/{version_id}/nodes/{server_node['id']}",
+        json={
+            "revision": payload["revision"],
+            "target_id": "unmapped_target",
+        },
+    )
+
+    assert unbind_response.status_code == 200
+    payload = unbind_response.get_json()
+    assert payload["node"]["monitored_object_id"] is None
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        binding_count = db_conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM node_bindings
+            WHERE view_version_node_id = ?
+            """,
+            (server_node["id"],),
+        ).fetchone()["count"]
+    assert binding_count == 0
+
+
 def test_create_version_edge_returns_backend_generated_id(seeded_client) -> None:
     login(seeded_client)
     draft_payload = create_draft(seeded_client)
@@ -247,3 +304,51 @@ def test_replace_version_assigns_ids_for_missing_items_and_increments_revision(s
     assert isinstance(generated_node["id"], int)
     assert generated_node["id"] > 0
     assert generated_node["element_key"].startswith("softwareprocess_")
+
+
+def test_replace_version_layout_syncs_primary_bindings(seeded_app, seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+    server_node = next(node for node in draft_payload["nodes"] if node["node_type"] == "PhysicalServer")
+
+    response = seeded_client.put(
+        f"/api/view-versions/{version_id}",
+        json={
+            "revision": draft_payload["version"]["revision"],
+            "nodes": [
+                {
+                    "id": server_node["id"],
+                    "element_key": server_node["element_key"],
+                    "node_type": "PhysicalServer",
+                    "semantic_type_code": "PhysicalServer",
+                    "notation_code": "server.physical.rect",
+                    "display_name": "Updated Host",
+                    "target_id": "agent_local:host",
+                    "layer_order": 10,
+                    "x": 40,
+                    "y": 40,
+                    "width": 500,
+                    "height": 280,
+                }
+            ],
+            "edges": [],
+        },
+    )
+
+    assert response.status_code == 200
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        binding_rows = db_conn.execute(
+            """
+            SELECT b.monitored_object_id
+            FROM node_bindings AS b
+            JOIN view_version_nodes AS n ON n.id = b.view_version_node_id
+            WHERE n.view_version_id = ?
+            ORDER BY b.id
+            """,
+            (version_id,),
+        ).fetchall()
+
+    assert [row["monitored_object_id"] for row in binding_rows] == [1304]

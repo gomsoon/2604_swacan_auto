@@ -60,6 +60,8 @@ def serialize_view_version_node(row) -> dict[str, Any]:
         "height": row["height"],
         "collapsed_state": bool(row["collapsed_state"]),
     }
+    if "monitored_object_id" in row.keys():
+        payload["monitored_object_id"] = row["monitored_object_id"]
     if row["style_json"]:
         payload["style"] = json.loads(row["style_json"])
     if row["properties_json"]:
@@ -89,6 +91,45 @@ def serialize_view_version_edge(row) -> dict[str, Any]:
     if row["style_json"]:
         payload["style"] = json.loads(row["style_json"])
     return payload
+
+
+def resolve_monitored_object_id(target_id: str | None) -> int | None:
+    if not target_id:
+        return None
+    row = get_db().execute(
+        """
+        SELECT id
+        FROM monitored_objects
+        WHERE runtime_binding_key = ?
+        ORDER BY id
+        LIMIT 1
+        """,
+        (target_id,),
+    ).fetchone()
+    return row["id"] if row else None
+
+
+def sync_primary_node_binding(*, view_version_node_id: int, target_id: str | None, timestamp: str) -> int | None:
+    db_conn = get_db()
+    monitored_object_id = resolve_monitored_object_id(target_id)
+    db_conn.execute(
+        """
+        DELETE FROM node_bindings
+        WHERE view_version_node_id = ? AND binding_role = 'primary'
+        """,
+        (view_version_node_id,),
+    )
+    if monitored_object_id is None:
+        return None
+    db_conn.execute(
+        """
+        INSERT INTO node_bindings (
+            view_version_node_id, monitored_object_id, binding_role, created_at, updated_at
+        ) VALUES (?, ?, 'primary', ?, ?)
+        """,
+        (view_version_node_id, monitored_object_id, timestamp, timestamp),
+    )
+    return monitored_object_id
 
 
 def get_owned_view(view_id: int, user_id: int):
@@ -162,10 +203,12 @@ def get_active_view_target_rows(view_id: int):
         return None
     rows = get_db().execute(
         """
-        SELECT id, target_id
-        FROM view_version_nodes
-        WHERE view_version_id = ? AND is_deleted = 0 AND target_id IS NOT NULL
-        ORDER BY layer_order ASC, id ASC
+        SELECT n.id, n.target_id, b.monitored_object_id
+        FROM view_version_nodes AS n
+        LEFT JOIN node_bindings AS b ON b.view_version_node_id = n.id AND b.binding_role = 'primary'
+        WHERE n.view_version_id = ? AND n.is_deleted = 0
+          AND (n.target_id IS NOT NULL OR b.monitored_object_id IS NOT NULL)
+        ORDER BY n.layer_order ASC, n.id ASC
         """,
         (active_row["id"],),
     ).fetchall()
@@ -178,10 +221,12 @@ def get_current_draft_view_target_rows(view_id: int):
         return None
     rows = get_db().execute(
         """
-        SELECT id, target_id
-        FROM view_version_nodes
-        WHERE view_version_id = ? AND is_deleted = 0 AND target_id IS NOT NULL
-        ORDER BY layer_order ASC, id ASC
+        SELECT n.id, n.target_id, b.monitored_object_id
+        FROM view_version_nodes AS n
+        LEFT JOIN node_bindings AS b ON b.view_version_node_id = n.id AND b.binding_role = 'primary'
+        WHERE n.view_version_id = ? AND n.is_deleted = 0
+          AND (n.target_id IS NOT NULL OR b.monitored_object_id IS NOT NULL)
+        ORDER BY n.layer_order ASC, n.id ASC
         """,
         (draft_row["id"],),
     ).fetchall()
@@ -222,7 +267,12 @@ def fetch_version_detail(version_id: int) -> tuple[dict[str, Any], list[dict[str
         """
         SELECT id, element_key, parent_node_id, node_type, semantic_type_code, notation_code,
                display_name, target_id, instance_mode, cardinality_scope, expected_min, expected_max,
-               layer_order, x, y, width, height, collapsed_state, style_json, properties_json
+               layer_order, x, y, width, height, collapsed_state, style_json, properties_json,
+               (SELECT monitored_object_id
+                FROM node_bindings
+                WHERE view_version_node_id = view_version_nodes.id AND binding_role = 'primary'
+                ORDER BY id
+                LIMIT 1) AS monitored_object_id
         FROM view_version_nodes
         WHERE view_version_id = ? AND is_deleted = 0
         ORDER BY layer_order ASC, id ASC
@@ -393,6 +443,11 @@ def create_draft_view_version(*, view_row, user_id: int, based_on_version_id: in
             ),
         )
         node_id_map[row["id"]] = inserted.lastrowid
+        sync_primary_node_binding(
+            view_version_node_id=inserted.lastrowid,
+            target_id=row["target_id"],
+            timestamp=timestamp,
+        )
 
     for row in source_nodes:
         if row["parent_node_id"] is None:
@@ -404,6 +459,36 @@ def create_draft_view_version(*, view_row, user_id: int, based_on_version_id: in
             WHERE id = ?
             """,
             (node_id_map[row["parent_node_id"]], node_id_map[row["id"]]),
+        )
+
+    source_bindings = db_conn.execute(
+        """
+        SELECT view_version_node_id, monitored_object_id, binding_role
+        FROM node_bindings
+        WHERE view_version_node_id IN (
+            SELECT id FROM view_version_nodes WHERE view_version_id = ?
+        )
+        ORDER BY id ASC
+        """,
+        (source_row["id"],),
+    ).fetchall()
+    for row in source_bindings:
+        mapped_node_id = node_id_map.get(row["view_version_node_id"])
+        if mapped_node_id is None:
+            continue
+        db_conn.execute(
+            """
+            INSERT OR IGNORE INTO node_bindings (
+                view_version_node_id, monitored_object_id, binding_role, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                mapped_node_id,
+                row["monitored_object_id"],
+                row["binding_role"],
+                timestamp,
+                timestamp,
+            ),
         )
 
     source_edges = db_conn.execute(

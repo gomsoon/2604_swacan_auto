@@ -40,13 +40,14 @@ def seed_admin_dashboard_rows(app) -> None:
         db_conn.execute(
             """
             INSERT INTO latest_states (
-                id, view_node_id, target_id, state_type, status, severity,
+                id, view_node_id, monitored_object_id, target_id, state_type, status, severity,
                 state_json, occurred_at, received_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 10,
                 102,
+                1302,
                 "app_main",
                 "process",
                 "up",
@@ -60,13 +61,14 @@ def seed_admin_dashboard_rows(app) -> None:
         db_conn.execute(
             """
             INSERT INTO latest_states (
-                id, view_node_id, target_id, state_type, status, severity,
+                id, view_node_id, monitored_object_id, target_id, state_type, status, severity,
                 state_json, occurred_at, received_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 11,
                 103,
+                1303,
                 "agent_local",
                 "agent",
                 "up",
@@ -87,13 +89,14 @@ def seed_admin_dashboard_rows(app) -> None:
         db_conn.execute(
             """
             INSERT INTO latest_states (
-                id, view_node_id, target_id, state_type, status, severity,
+                id, view_node_id, monitored_object_id, target_id, state_type, status, severity,
                 state_json, occurred_at, received_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 12,
                 101,
+                1304,
                 "agent_local:host",
                 "host",
                 "up",
@@ -170,11 +173,12 @@ def seed_admin_dashboard_rows(app) -> None:
         db_conn.execute(
             """
             INSERT INTO raw_events (
-                agent_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                agent_id, monitored_object_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "agent_local",
+                1302,
                 "app_main",
                 "process_stopped",
                 "warning",
@@ -187,11 +191,12 @@ def seed_admin_dashboard_rows(app) -> None:
         db_conn.execute(
             """
             INSERT INTO raw_events (
-                agent_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                agent_id, monitored_object_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "agent_local",
+                1303,
                 "agent_local",
                 "agent_heartbeat_lost",
                 "warning",
@@ -392,6 +397,7 @@ def test_admin_latest_states_support_filters_and_derived_status(seeded_app, seed
     assert response.status_code == 200
     payload = response.get_json()
     assert len(payload["items"]) == 1
+    assert payload["items"][0]["monitored_object_id"] == 1303
     assert payload["items"][0]["target_id"] == "agent_local"
     assert payload["items"][0]["state"]["heartbeat_timeout_level"] == "down"
 

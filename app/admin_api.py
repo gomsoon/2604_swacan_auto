@@ -83,6 +83,7 @@ def serialize_raw_event(row) -> dict[str, Any]:
     payload = {
         "id": row["id"],
         "agent_id": row["agent_id"],
+        "monitored_object_id": row["monitored_object_id"],
         "target_id": row["target_id"],
         "event_type": row["event_type"],
         "severity": row["severity"],
@@ -116,6 +117,7 @@ def serialize_debug_payload(row) -> dict[str, Any]:
 
 def serialize_latest_state_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {
+        "monitored_object_id": payload["monitored_object_id"],
         "target_id": payload["target_id"],
         "state_type": payload["state_type"],
         "status": payload["status"],
@@ -139,7 +141,7 @@ def serialize_cleanup_run(row) -> dict[str, Any]:
 
 def load_derived_latest_states(state_type: str | None = None) -> list[dict[str, Any]]:
     sql = """
-        SELECT target_id, state_type, status, severity, state_json, occurred_at, received_at
+        SELECT monitored_object_id, target_id, state_type, status, severity, state_json, occurred_at, received_at
         FROM latest_states
     """
     params: list[Any] = []
@@ -271,7 +273,7 @@ def list_raw_events():
 
     rows = get_db().execute(
         """
-        SELECT id, agent_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
+        SELECT id, agent_id, monitored_object_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
         FROM raw_events
         ORDER BY occurred_at DESC, id DESC
         LIMIT ?

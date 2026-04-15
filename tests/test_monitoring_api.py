@@ -19,13 +19,14 @@ def seed_monitoring_rows(app) -> None:
         db_conn.execute(
             """
             INSERT INTO latest_states (
-                id, view_node_id, target_id, state_type, status, severity,
+                id, view_node_id, monitored_object_id, target_id, state_type, status, severity,
                 state_json, occurred_at, received_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 1,
                 102,
+                1302,
                 "app_main",
                 "process",
                 "up",
@@ -39,13 +40,14 @@ def seed_monitoring_rows(app) -> None:
         db_conn.execute(
             """
             INSERT INTO latest_states (
-                id, view_node_id, target_id, state_type, status, severity,
+                id, view_node_id, monitored_object_id, target_id, state_type, status, severity,
                 state_json, occurred_at, received_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 2,
                 103,
+                1303,
                 "agent_local",
                 "agent",
                 "up",
@@ -59,12 +61,13 @@ def seed_monitoring_rows(app) -> None:
         db_conn.execute(
             """
             INSERT INTO latest_states (
-                id, view_node_id, target_id, state_type, status, severity,
+                id, view_node_id, monitored_object_id, target_id, state_type, status, severity,
                 state_json, occurred_at, received_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 3,
+                None,
                 None,
                 "unrelated_target",
                 "process",
@@ -79,12 +82,13 @@ def seed_monitoring_rows(app) -> None:
         db_conn.execute(
             """
             INSERT INTO raw_events (
-                id, agent_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, agent_id, monitored_object_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 101,
                 "agent_local",
+                1302,
                 "app_main",
                 "process_stopped",
                 "warning",
@@ -97,12 +101,13 @@ def seed_monitoring_rows(app) -> None:
         db_conn.execute(
             """
             INSERT INTO raw_events (
-                id, agent_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, agent_id, monitored_object_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 102,
                 "agent_local",
+                1303,
                 "agent_local",
                 "agent_heartbeat_lost",
                 "warning",
@@ -115,12 +120,13 @@ def seed_monitoring_rows(app) -> None:
         db_conn.execute(
             """
             INSERT INTO raw_events (
-                id, agent_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, agent_id, monitored_object_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 103,
                 "agent_local",
+                None,
                 "outside_view",
                 "process_stopped",
                 "warning",
@@ -150,6 +156,7 @@ def test_latest_state_returns_only_view_targets_in_view_order(seeded_app, seeded
     assert response.status_code == 200
     payload = response.get_json()
     assert [item["target_id"] for item in payload["items"]] == ["app_main", "agent_local"]
+    assert [item["monitored_object_id"] for item in payload["items"]] == [1302, 1303]
     assert payload["items"][0]["state"]["pid"] == 1234
     assert payload["items"][1]["state"]["outbox_queue_depth"] == 0
     assert payload["items"][1]["status"] == "up"
@@ -182,6 +189,29 @@ def test_latest_state_prefers_active_version_targets_over_legacy_view_nodes(seed
     assert [item["target_id"] for item in payload["items"]] == ["app_main", "agent_local"]
 
 
+def test_latest_state_prefers_monitored_object_binding_over_changed_active_target_id(seeded_app, seeded_client) -> None:
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T10:20:05.000+09:00")
+    seed_monitoring_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE view_version_nodes
+            SET target_id = 'stale_process_target'
+            WHERE id = 1102
+            """
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/1/latest-state")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert [item["target_id"] for item in payload["items"]] == ["app_main", "agent_local"]
+    assert payload["items"][0]["monitored_object_id"] == 1302
+
+
 def test_events_prefers_active_version_targets_over_legacy_view_nodes(seeded_app, seeded_client) -> None:
     seed_monitoring_rows(seeded_app)
     with seeded_app.app_context():
@@ -200,12 +230,13 @@ def test_events_prefers_active_version_targets_over_legacy_view_nodes(seeded_app
         db_conn.execute(
             """
             INSERT INTO raw_events (
-                id, agent_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, agent_id, monitored_object_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 104,
                 "agent_local",
+                None,
                 "legacy_process_target",
                 "process_stopped",
                 "warning",
@@ -224,6 +255,29 @@ def test_events_prefers_active_version_targets_over_legacy_view_nodes(seeded_app
     payload = response.get_json()
     assert all(item["target_id"] in {"app_main", "agent_local"} for item in payload["items"])
     assert not any(item["target_id"] == "legacy_process_target" for item in payload["items"])
+
+
+def test_events_prefers_monitored_object_binding_over_changed_active_target_id(seeded_app, seeded_client) -> None:
+    seed_monitoring_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE view_version_nodes
+            SET target_id = 'stale_process_target'
+            WHERE id = 1102
+            """
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/1/events?limit=10")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert any(item["target_id"] == "app_main" for item in payload["items"])
+    assert not any(item["target_id"] == "stale_process_target" for item in payload["items"])
+    assert payload["items"][0]["monitored_object_id"] == 1302
 
 
 def test_latest_state_prefers_draft_targets_when_active_version_is_missing(seeded_app, seeded_client) -> None:
@@ -280,8 +334,8 @@ def test_latest_state_prefers_draft_targets_when_active_version_is_missing(seede
         db_conn.execute(
             """
             INSERT INTO latest_states (
-                id, view_node_id, target_id, state_type, status, severity, state_json, occurred_at, received_at, updated_at
-            ) VALUES (?, NULL, ?, 'process', 'up', 'normal', ?, ?, ?, ?)
+                id, view_node_id, monitored_object_id, target_id, state_type, status, severity, state_json, occurred_at, received_at, updated_at
+            ) VALUES (?, NULL, NULL, ?, 'process', 'up', 'normal', ?, ?, ?, ?)
             """,
             (
                 9991,
@@ -321,8 +375,8 @@ def test_latest_state_uses_newly_activated_version_targets(seeded_app, seeded_cl
         db_conn.execute(
             """
             INSERT INTO latest_states (
-                id, view_node_id, target_id, state_type, status, severity, state_json, occurred_at, received_at, updated_at
-            ) VALUES (?, NULL, ?, 'process', 'up', 'normal', ?, ?, ?, ?)
+                id, view_node_id, monitored_object_id, target_id, state_type, status, severity, state_json, occurred_at, received_at, updated_at
+            ) VALUES (?, NULL, NULL, ?, 'process', 'up', 'normal', ?, ?, ?, ?)
             """,
             (
                 9992,

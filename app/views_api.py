@@ -96,6 +96,7 @@ def serialize_edge(edge_row) -> dict[str, Any]:
 def serialize_raw_event(event_row) -> dict[str, Any]:
     payload = {
         "id": event_row["id"],
+        "monitored_object_id": event_row["monitored_object_id"],
         "target_id": event_row["target_id"],
         "event_type": event_row["event_type"],
         "severity": event_row["severity"],
@@ -111,10 +112,11 @@ def serialize_raw_event(event_row) -> dict[str, Any]:
 def get_view_target_rows(view_id: int):
     return get_db().execute(
         """
-        SELECT id, target_id
-        FROM view_nodes
-        WHERE view_id = ? AND is_deleted = 0 AND target_id IS NOT NULL
-        ORDER BY layer_order ASC, id ASC
+        SELECT n.id, n.target_id, mo.id AS monitored_object_id
+        FROM view_nodes AS n
+        LEFT JOIN monitored_objects AS mo ON mo.runtime_binding_key = n.target_id
+        WHERE n.view_id = ? AND n.is_deleted = 0 AND n.target_id IS NOT NULL
+        ORDER BY n.layer_order ASC, n.id ASC
         """,
         (view_id,),
     ).fetchall()
@@ -130,11 +132,46 @@ def get_monitor_target_rows(view_id: int):
     return get_view_target_rows(view_id)
 
 
-def query_by_targets(sql_prefix: str, target_ids: list[str], extra_params: tuple[Any, ...] = ()):  # noqa: ANN401
-    placeholders = ", ".join("?" for _ in target_ids)
-    sql = sql_prefix.format(placeholders=placeholders)
-    params = tuple(target_ids) + extra_params
-    return get_db().execute(sql, params).fetchall()
+def query_by_runtime_targets(
+    sql_prefix: str,
+    *,
+    target_ids: list[str],
+    monitored_object_ids: list[int],
+    extra_params: tuple[Any, ...] = (),
+):  # noqa: ANN401
+    clauses: list[str] = []
+    params: list[Any] = []
+
+    if monitored_object_ids:
+        clauses.append(
+            "monitored_object_id IN (" + ", ".join("?" for _ in monitored_object_ids) + ")"
+        )
+        params.extend(monitored_object_ids)
+    if target_ids:
+        clauses.append("target_id IN (" + ", ".join("?" for _ in target_ids) + ")")
+        params.extend(target_ids)
+
+    if not clauses:
+        return []
+
+    sql = sql_prefix.format(
+        runtime_filter=" OR ".join(clauses),
+    )
+    params.extend(extra_params)
+    return get_db().execute(sql, tuple(params)).fetchall()
+
+
+def build_runtime_order_maps(target_rows):
+    object_order: dict[int, int] = {}
+    target_order: dict[str, int] = {}
+    for index, row in enumerate(target_rows):
+        monitored_object_id = row["monitored_object_id"]
+        target_id = row["target_id"]
+        if monitored_object_id is not None and monitored_object_id not in object_order:
+            object_order[monitored_object_id] = index
+        if target_id is not None and target_id not in target_order:
+            target_order[target_id] = index
+    return object_order, target_order
 
 
 def validate_nodes(nodes: list[dict[str, Any]]) -> str | None:
@@ -389,21 +426,29 @@ def get_latest_state(view_id: int):
         return error
 
     target_rows = get_monitor_target_rows(view_row["id"])
-    target_ids = [row["target_id"] for row in target_rows]
-    if not target_ids:
+    target_ids = [row["target_id"] for row in target_rows if row["target_id"] is not None]
+    monitored_object_ids = [row["monitored_object_id"] for row in target_rows if row["monitored_object_id"] is not None]
+    if not target_ids and not monitored_object_ids:
         return {"items": []}
 
-    rows = query_by_targets(
+    rows = query_by_runtime_targets(
         """
-        SELECT target_id, state_type, status, severity, state_json, occurred_at, received_at
+        SELECT monitored_object_id, target_id, state_type, status, severity, state_json, occurred_at, received_at
         FROM latest_states
-        WHERE target_id IN ({placeholders})
+        WHERE {runtime_filter}
         """,
-        target_ids,
+        target_ids=target_ids,
+        monitored_object_ids=monitored_object_ids,
     )
 
-    order = {target_id: index for index, target_id in enumerate(target_ids)}
-    sorted_rows = sorted(rows, key=lambda row: (order.get(row["target_id"], 10**9), row["state_type"]))
+    object_order, target_order = build_runtime_order_maps(target_rows)
+    sorted_rows = sorted(
+        rows,
+        key=lambda row: (
+            object_order.get(row["monitored_object_id"], target_order.get(row["target_id"], 10**9)),
+            row["state_type"],
+        ),
+    )
 
     return {"items": [derive_latest_state(row) for row in sorted_rows]}
 
@@ -425,20 +470,22 @@ def get_view_events(view_id: int):
         return error_response("validation_error", f"limit must be between 1 and {MAX_EVENTS_LIMIT}", 400)
 
     target_rows = get_monitor_target_rows(view_row["id"])
-    target_ids = [row["target_id"] for row in target_rows]
-    if not target_ids:
+    target_ids = [row["target_id"] for row in target_rows if row["target_id"] is not None]
+    monitored_object_ids = [row["monitored_object_id"] for row in target_rows if row["monitored_object_id"] is not None]
+    if not target_ids and not monitored_object_ids:
         return {"items": []}
 
-    rows = query_by_targets(
+    rows = query_by_runtime_targets(
         """
-        SELECT id, target_id, event_type, severity, message, event_json, occurred_at, received_at
+        SELECT id, monitored_object_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
         FROM raw_events
-        WHERE target_id IN ({placeholders})
+        WHERE {runtime_filter}
         ORDER BY occurred_at DESC, id DESC
         LIMIT ?
         """,
-        target_ids,
-        (limit,),
+        target_ids=target_ids,
+        monitored_object_ids=monitored_object_ids,
+        extra_params=(limit,),
     )
 
     return {"items": [serialize_raw_event(row) for row in rows]}
