@@ -237,6 +237,179 @@ def sync_latest_state_alert(
     )
 
 
+def numeric_metric_value(state: dict, metric_key: str) -> float | None:
+    if metric_key == "memory_used_ratio":
+        total = state.get("memory_total")
+        used = state.get("memory_used")
+        try:
+            total_value = float(total)
+            used_value = float(used)
+        except (TypeError, ValueError):
+            return None
+        if total_value <= 0:
+            return None
+        return (used_value / total_value) * 100.0
+
+    value = state.get(metric_key)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def threshold_level(metric_value: float | None, rule) -> str | None:
+    if metric_value is None:
+        return None
+
+    comparison = rule["comparison"]
+    warning_threshold = rule["warning_threshold"]
+    critical_threshold = rule["critical_threshold"]
+
+    def matches(value: float, threshold: float | None) -> bool:
+        if threshold is None:
+            return False
+        return value >= threshold if comparison == "gte" else value <= threshold
+
+    if matches(metric_value, critical_threshold):
+        return "critical"
+    if matches(metric_value, warning_threshold):
+        return "warning"
+    return None
+
+
+def threshold_message(rule, metric_value: float, level: str) -> str:
+    threshold = rule["critical_threshold"] if level == "critical" else rule["warning_threshold"]
+    operator = ">=" if rule["comparison"] == "gte" else "<="
+    return f"{rule['metric_key']}={metric_value:.3f} {operator} {threshold:.3f}"
+
+
+def sync_threshold_alerts(
+    *,
+    monitored_object_id: int | None,
+    state_type: str,
+    state: dict,
+    occurred_at: str,
+    received_at: str,
+) -> None:
+    if monitored_object_id is None:
+        return
+
+    db_conn = get_db()
+    object_row = db_conn.execute(
+        "SELECT object_type FROM monitored_objects WHERE id = ?",
+        (monitored_object_id,),
+    ).fetchone()
+    if object_row is None:
+        return
+
+    rules = db_conn.execute(
+        """
+        SELECT id, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
+               warning_threshold, critical_threshold, is_enabled, description
+        FROM alert_rules
+        WHERE is_enabled = 1
+          AND state_type = ?
+          AND (
+                (scope_type = 'monitored_object' AND monitored_object_id = ?)
+             OR (scope_type = 'object_type' AND object_type = ?)
+          )
+        ORDER BY scope_type DESC, id ASC
+        """,
+        (state_type, monitored_object_id, object_row["object_type"]),
+    ).fetchall()
+
+    for rule in rules:
+        metric_value = numeric_metric_value(state, rule["metric_key"])
+        level = threshold_level(metric_value, rule)
+        alert_code = f"rule.{rule['id']}"
+
+        if level is None:
+            db_conn.execute(
+                """
+                UPDATE alert_instances
+                SET status = 'resolved',
+                    updated_at = ?,
+                    last_occurred_at = ?
+                WHERE monitored_object_id = ?
+                  AND alert_code = ?
+                  AND status = 'open'
+                """,
+                (received_at, occurred_at, monitored_object_id, alert_code),
+            )
+            continue
+
+        latest_message = threshold_message(rule, metric_value, level)
+        metadata_json = json.dumps(
+            {
+                "rule_id": rule["id"],
+                "metric_key": rule["metric_key"],
+                "metric_value": metric_value,
+                "comparison": rule["comparison"],
+                "warning_threshold": rule["warning_threshold"],
+                "critical_threshold": rule["critical_threshold"],
+                "scope_type": rule["scope_type"],
+            },
+            ensure_ascii=False,
+        )
+
+        existing = db_conn.execute(
+            """
+            SELECT id
+            FROM alert_instances
+            WHERE monitored_object_id = ?
+              AND alert_code = ?
+              AND status = 'open'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (monitored_object_id, alert_code),
+        ).fetchone()
+
+        if existing is None:
+            db_conn.execute(
+                """
+                INSERT INTO alert_instances (
+                    monitored_object_id, alert_code, severity, status,
+                    first_occurred_at, last_occurred_at, repeat_count,
+                    latest_message, metadata_json, created_at, updated_at
+                ) VALUES (?, ?, ?, 'open', ?, ?, 1, ?, ?, ?, ?)
+                """,
+                (
+                    monitored_object_id,
+                    alert_code,
+                    level,
+                    occurred_at,
+                    occurred_at,
+                    latest_message,
+                    metadata_json,
+                    received_at,
+                    received_at,
+                ),
+            )
+            continue
+
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET severity = ?,
+                last_occurred_at = ?,
+                repeat_count = repeat_count + 1,
+                latest_message = ?,
+                metadata_json = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                level,
+                occurred_at,
+                latest_message,
+                metadata_json,
+                received_at,
+                existing["id"],
+            ),
+        )
+
+
 def upsert_latest_state(*, target_id: str, state_type: str, status: str, severity: str | None, state: dict, occurred_at: str, received_at: str) -> None:
     db_conn = get_db()
     existing = db_conn.execute(
@@ -279,6 +452,13 @@ def upsert_latest_state(*, target_id: str, state_type: str, status: str, severit
             occurred_at=occurred_at,
             received_at=received_at,
         )
+        sync_threshold_alerts(
+            monitored_object_id=monitored_object_id,
+            state_type=state_type,
+            state=state,
+            occurred_at=occurred_at,
+            received_at=received_at,
+        )
         return
 
     db_conn.execute(
@@ -304,6 +484,13 @@ def upsert_latest_state(*, target_id: str, state_type: str, status: str, severit
         state_type=state_type,
         status=status,
         severity=severity,
+        state=state,
+        occurred_at=occurred_at,
+        received_at=received_at,
+    )
+    sync_threshold_alerts(
+        monitored_object_id=monitored_object_id,
+        state_type=state_type,
         state=state,
         occurred_at=occurred_at,
         received_at=received_at,

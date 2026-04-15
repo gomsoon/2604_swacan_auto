@@ -321,6 +321,7 @@ def test_admin_summary_returns_counts_and_recent_failures(seeded_app, seeded_cli
         "latest_states": 3,
         "raw_events": 2,
         "open_alerts": 1,
+        "alert_rules": 3,
         "debug_payload_logs": 2,
         "cleanup_runs": 1,
     }
@@ -458,3 +459,154 @@ def test_admin_alerts_reject_invalid_status_filter(seeded_client) -> None:
 
     assert response.status_code == 400
     assert response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_alert_rules_lists_seeded_rules(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/alert-rules")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert len(payload["items"]) == 3
+    assert {item["metric_key"] for item in payload["items"]} == {
+        "cpu_usage",
+        "outbox_queue_depth",
+        "memory_used_ratio",
+    }
+
+
+def test_admin_create_alert_rule_accepts_valid_object_type_rule(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "memory_rss",
+            "comparison": "gte",
+            "warning_threshold": 1024,
+            "critical_threshold": 2048,
+            "is_enabled": True,
+            "description": "RSS 임계치",
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.get_json()["rule"]
+    assert payload["scope_type"] == "object_type"
+    assert payload["warning_threshold"] == 1024
+    assert payload["critical_threshold"] == 2048
+
+
+def test_admin_update_alert_rule_accepts_existing_integer_enabled_value(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.patch(
+        "/api/admin/alert-rules/1501",
+        json={
+            "description": "프로세스 CPU 경계값 수정",
+            "critical_threshold": 96,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()["rule"]
+    assert payload["id"] == 1501
+    assert payload["critical_threshold"] == 96
+    assert payload["is_enabled"] is True
+
+
+def test_admin_alert_rule_rejects_missing_thresholds(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "cpu_usage",
+            "comparison": "gte",
+            "warning_threshold": None,
+            "critical_threshold": None,
+            "is_enabled": True,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_alert_rule_rejects_invalid_monitored_object_scope_boundary(seeded_client) -> None:
+    login(seeded_client)
+
+    wrong_type = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "monitored_object",
+            "monitored_object_id": "1302",
+            "state_type": "process",
+            "metric_key": "cpu_usage",
+            "comparison": "gte",
+            "warning_threshold": 80,
+            "critical_threshold": 95,
+            "is_enabled": True,
+        },
+    )
+    missing_row = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "monitored_object",
+            "monitored_object_id": 999999,
+            "state_type": "process",
+            "metric_key": "cpu_usage",
+            "comparison": "gte",
+            "warning_threshold": 80,
+            "critical_threshold": 95,
+            "is_enabled": True,
+        },
+    )
+
+    assert wrong_type.status_code == 400
+    assert missing_row.status_code == 400
+    assert wrong_type.get_json()["error"]["code"] == "validation_error"
+    assert missing_row.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_alert_rule_rejects_invalid_threshold_order_for_gte_and_lte(seeded_client) -> None:
+    login(seeded_client)
+
+    gte_response = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "cpu_usage",
+            "comparison": "gte",
+            "warning_threshold": 90,
+            "critical_threshold": 80,
+            "is_enabled": True,
+        },
+    )
+    lte_response = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "object_type",
+            "object_type": "HostSnapshot",
+            "state_type": "host",
+            "metric_key": "memory_available",
+            "comparison": "lte",
+            "warning_threshold": 20,
+            "critical_threshold": 30,
+            "is_enabled": True,
+        },
+    )
+
+    assert gte_response.status_code == 400
+    assert lte_response.status_code == 400
+    assert gte_response.get_json()["error"]["code"] == "validation_error"
+    assert lte_response.get_json()["error"]["code"] == "validation_error"

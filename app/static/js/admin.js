@@ -10,6 +10,8 @@ const staleAgents = document.getElementById("admin-stale-agents");
 const cleanupSummary = document.getElementById("admin-cleanup-summary");
 const metamodelVersionsList = document.getElementById("admin-metamodel-versions-list");
 const metamodelVersionCount = document.getElementById("metamodel-version-count");
+const alertRulesList = document.getElementById("admin-alert-rules-list");
+const alertRuleCount = document.getElementById("alert-rule-count");
 const ingestList = document.getElementById("admin-ingest-list");
 const latestStateList = document.getElementById("admin-latest-state-list");
 const eventsList = document.getElementById("admin-events-list");
@@ -25,6 +27,7 @@ const refreshAlertsButton = document.getElementById("refresh-alerts-button");
 const refreshDebugButton = document.getElementById("refresh-debug-button");
 const refreshCleanupButton = document.getElementById("refresh-cleanup-button");
 const refreshMetamodelVersionsButton = document.getElementById("refresh-metamodel-versions-button");
+const refreshAlertRulesButton = document.getElementById("refresh-alert-rules-button");
 
 const ingestStatusFilter = document.getElementById("ingest-status-filter");
 const latestStateTypeFilter = document.getElementById("latest-state-type-filter");
@@ -35,8 +38,24 @@ const metamodelNamespaceSelect = document.getElementById("metamodel-namespace-se
 const metamodelBaseVersionSelect = document.getElementById("metamodel-base-version-select");
 const metamodelVersionCodeInput = document.getElementById("metamodel-version-code");
 const metamodelVersionDescriptionInput = document.getElementById("metamodel-version-description");
+const alertRuleForm = document.getElementById("alert-rule-form");
+const alertRuleFormTitle = document.getElementById("alert-rule-form-title");
+const alertRuleFormMode = document.getElementById("alert-rule-form-mode");
+const alertRuleFormResetButton = document.getElementById("alert-rule-form-reset");
+const alertRuleIdInput = document.getElementById("alert-rule-id");
+const alertRuleScopeTypeSelect = document.getElementById("alert-rule-scope-type");
+const alertRuleStateTypeSelect = document.getElementById("alert-rule-state-type");
+const alertRuleObjectTypeInput = document.getElementById("alert-rule-object-type");
+const alertRuleMonitoredObjectIdInput = document.getElementById("alert-rule-monitored-object-id");
+const alertRuleMetricKeyInput = document.getElementById("alert-rule-metric-key");
+const alertRuleComparisonSelect = document.getElementById("alert-rule-comparison");
+const alertRuleWarningThresholdInput = document.getElementById("alert-rule-warning-threshold");
+const alertRuleCriticalThresholdInput = document.getElementById("alert-rule-critical-threshold");
+const alertRuleDescriptionInput = document.getElementById("alert-rule-description");
+const alertRuleEnabledInput = document.getElementById("alert-rule-enabled");
 
 let metamodelVersions = [];
+let alertRules = [];
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -74,6 +93,13 @@ function formatBytes(value) {
         return `${(numeric / 1024).toFixed(1)} KiB`;
     }
     return `${numeric} B`;
+}
+
+function toOptionalNumberValue(value) {
+    if (value === "" || value === null || value === undefined) {
+        return null;
+    }
+    return Number(value);
 }
 
 function renderMetaPills(entries) {
@@ -128,6 +154,7 @@ function renderSummary(payload) {
         ["latest state", payload.counts.latest_states],
         ["raw event", payload.counts.raw_events],
         ["open alert", payload.counts.open_alerts],
+        ["alert rule", payload.counts.alert_rules],
         ["debug payload", payload.counts.debug_payload_logs],
         ["cleanup run", payload.counts.cleanup_runs],
     ];
@@ -403,6 +430,73 @@ function renderMetamodelVersions(items) {
         .join("");
 }
 
+function toggleAlertRuleScopeFields() {
+    const isObjectType = alertRuleScopeTypeSelect.value === "object_type";
+    alertRuleObjectTypeInput.disabled = !isObjectType;
+    alertRuleMonitoredObjectIdInput.disabled = isObjectType;
+}
+
+function resetAlertRuleForm() {
+    alertRuleForm.reset();
+    alertRuleIdInput.value = "";
+    alertRuleScopeTypeSelect.value = "object_type";
+    alertRuleStateTypeSelect.value = "process";
+    alertRuleComparisonSelect.value = "gte";
+    alertRuleEnabledInput.checked = true;
+    alertRuleFormTitle.textContent = "Alert Rule 생성";
+    alertRuleFormMode.textContent = "create";
+    toggleAlertRuleScopeFields();
+}
+
+function fillAlertRuleForm(rule) {
+    alertRuleIdInput.value = String(rule.id);
+    alertRuleScopeTypeSelect.value = rule.scope_type;
+    alertRuleStateTypeSelect.value = rule.state_type;
+    alertRuleObjectTypeInput.value = rule.object_type || "";
+    alertRuleMonitoredObjectIdInput.value = rule.monitored_object_id ?? "";
+    alertRuleMetricKeyInput.value = rule.metric_key || "";
+    alertRuleComparisonSelect.value = rule.comparison;
+    alertRuleWarningThresholdInput.value = rule.warning_threshold ?? "";
+    alertRuleCriticalThresholdInput.value = rule.critical_threshold ?? "";
+    alertRuleDescriptionInput.value = rule.description || "";
+    alertRuleEnabledInput.checked = Boolean(rule.is_enabled);
+    alertRuleFormTitle.textContent = `Alert Rule 수정 #${rule.id}`;
+    alertRuleFormMode.textContent = "edit";
+    toggleAlertRuleScopeFields();
+}
+
+function renderAlertRules(items) {
+    alertRules = items;
+    alertRuleCount.textContent = `${items.length}개`;
+
+    if (items.length === 0) {
+        alertRulesList.innerHTML = '<p class="section-copy">등록된 alert rule이 없습니다.</p>';
+        return;
+    }
+
+    alertRulesList.innerHTML = items
+        .map(
+            (rule) => `
+                <article class="admin-item ${rule.is_enabled ? "" : "is-disabled"}">
+                    <div class="section-header">
+                        <div>
+                            <h3>${escapeHtml(rule.metric_key)}</h3>
+                            <p class="admin-meta">${escapeHtml(rule.scope_type)} | ${escapeHtml(rule.state_type)} | ${escapeHtml(rule.comparison)}</p>
+                        </div>
+                        <div class="toolbar-inline">
+                            <span class="meta-pill">${rule.is_enabled ? "enabled" : "disabled"}</span>
+                            <button class="button ghost small edit-alert-rule-button" type="button" data-rule-id="${escapeHtml(rule.id)}">수정</button>
+                        </div>
+                    </div>
+                    <p class="admin-meta">warning=${escapeHtml(rule.warning_threshold ?? "-")} | critical=${escapeHtml(rule.critical_threshold ?? "-")}</p>
+                    <p class="admin-meta">object_type=${escapeHtml(rule.object_type || "-")} | monitored_object_id=${escapeHtml(rule.monitored_object_id ?? "-")}</p>
+                    <p class="admin-meta">${escapeHtml(rule.description || "설명 없음")}</p>
+                </article>
+            `
+        )
+        .join("");
+}
+
 async function loadSummary() {
     const payload = await apiFetch("/api/admin/summary");
     renderSummary(payload);
@@ -458,6 +552,11 @@ async function loadMetamodelVersions() {
     renderMetamodelVersions(payload.items);
 }
 
+async function loadAlertRules() {
+    const payload = await apiFetch("/api/admin/alert-rules");
+    renderAlertRules(payload.items);
+}
+
 async function createMetamodelVersion(event) {
     event.preventDefault();
     clearBanner();
@@ -497,11 +596,52 @@ async function publishMetamodelVersion(versionId) {
     }
 }
 
+async function saveAlertRule(event) {
+    event.preventDefault();
+    clearBanner();
+
+    const ruleId = alertRuleIdInput.value ? Number(alertRuleIdInput.value) : null;
+    const payload = {
+        scope_type: alertRuleScopeTypeSelect.value,
+        state_type: alertRuleStateTypeSelect.value,
+        object_type: alertRuleObjectTypeInput.value.trim() || null,
+        monitored_object_id: toOptionalNumberValue(alertRuleMonitoredObjectIdInput.value),
+        metric_key: alertRuleMetricKeyInput.value.trim(),
+        comparison: alertRuleComparisonSelect.value,
+        warning_threshold: toOptionalNumberValue(alertRuleWarningThresholdInput.value),
+        critical_threshold: toOptionalNumberValue(alertRuleCriticalThresholdInput.value),
+        description: alertRuleDescriptionInput.value.trim() || null,
+        is_enabled: alertRuleEnabledInput.checked,
+    };
+
+    try {
+        if (ruleId) {
+            await apiFetch(`/api/admin/alert-rules/${ruleId}`, {
+                method: "PATCH",
+                body: payload,
+            });
+            showBanner("alert rule을 수정했습니다.", "success");
+        } else {
+            await apiFetch("/api/admin/alert-rules", {
+                method: "POST",
+                body: payload,
+            });
+            showBanner("alert rule을 생성했습니다.", "success");
+        }
+
+        await Promise.all([loadAlertRules(), loadSummary()]);
+        resetAlertRuleForm();
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
+}
+
 async function refreshAll() {
     clearBanner();
     try {
         await Promise.all([
             loadMetamodelVersions(),
+            loadAlertRules(),
             loadSummary(),
             loadIngest(),
             loadLatestStates(),
@@ -523,8 +663,12 @@ refreshAlertsButton?.addEventListener("click", loadAlerts);
 refreshDebugButton?.addEventListener("click", loadDebug);
 refreshCleanupButton?.addEventListener("click", loadCleanupRuns);
 refreshMetamodelVersionsButton?.addEventListener("click", loadMetamodelVersions);
+refreshAlertRulesButton?.addEventListener("click", loadAlertRules);
 metamodelVersionForm?.addEventListener("submit", createMetamodelVersion);
 metamodelNamespaceSelect?.addEventListener("change", renderMetamodelSelectOptions);
+alertRuleForm?.addEventListener("submit", saveAlertRule);
+alertRuleFormResetButton?.addEventListener("click", resetAlertRuleForm);
+alertRuleScopeTypeSelect?.addEventListener("change", toggleAlertRuleScopeFields);
 metamodelVersionsList?.addEventListener("click", async (event) => {
     const button = event.target instanceof HTMLElement ? event.target.closest(".publish-metamodel-button") : null;
     if (!button) {
@@ -538,10 +682,25 @@ metamodelVersionsList?.addEventListener("click", async (event) => {
 
     await publishMetamodelVersion(versionId);
 });
+alertRulesList?.addEventListener("click", (event) => {
+    const button = event.target instanceof HTMLElement ? event.target.closest(".edit-alert-rule-button") : null;
+    if (!button) {
+        return;
+    }
+
+    const ruleId = Number(button.dataset.ruleId);
+    const rule = alertRules.find((item) => item.id === ruleId);
+    if (!rule) {
+        return;
+    }
+
+    fillAlertRuleForm(rule);
+});
 
 ingestStatusFilter?.addEventListener("change", loadIngest);
 latestStateTypeFilter?.addEventListener("change", loadLatestStates);
 latestStateStatusFilter?.addEventListener("change", loadLatestStates);
 debugDirectionFilter?.addEventListener("change", loadDebug);
 
+resetAlertRuleForm();
 refreshAll();

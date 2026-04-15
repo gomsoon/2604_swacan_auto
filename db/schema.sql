@@ -329,6 +329,23 @@ CREATE TABLE IF NOT EXISTS alert_instances (
     FOREIGN KEY (monitored_object_id) REFERENCES monitored_objects(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS alert_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope_type TEXT NOT NULL CHECK (scope_type IN ('object_type', 'monitored_object')),
+    object_type TEXT,
+    monitored_object_id INTEGER,
+    state_type TEXT NOT NULL CHECK (state_type IN ('process', 'agent', 'host')),
+    metric_key TEXT NOT NULL,
+    comparison TEXT NOT NULL CHECK (comparison IN ('gte', 'lte')),
+    warning_threshold REAL,
+    critical_threshold REAL,
+    is_enabled INTEGER NOT NULL DEFAULT 1 CHECK (is_enabled IN (0, 1)),
+    description TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (monitored_object_id) REFERENCES monitored_objects(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS ingest_inbox (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_id TEXT NOT NULL,
@@ -494,6 +511,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_monitored_objects_runtime_binding_key
 
 CREATE INDEX IF NOT EXISTS idx_node_bindings_view_version_node
     ON node_bindings(view_version_node_id);
+
+CREATE INDEX IF NOT EXISTS idx_alert_rules_scope_state
+    ON alert_rules(scope_type, state_type, is_enabled);
 
 CREATE INDEX IF NOT EXISTS idx_node_bindings_monitored_object
     ON node_bindings(monitored_object_id);

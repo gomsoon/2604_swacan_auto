@@ -18,6 +18,8 @@ ALLOWED_INGEST_STATUSES = {"pending", "processing", "processed", "failed"}
 ALLOWED_DEBUG_DIRECTIONS = {"request", "response"}
 ALLOWED_STATE_TYPES = {"agent", "host", "process"}
 ALLOWED_STATE_STATUSES = {"up", "warning", "down"}
+ALLOWED_ALERT_SCOPE_TYPES = {"object_type", "monitored_object"}
+ALLOWED_ALERT_COMPARISONS = {"gte", "lte"}
 
 
 def now_iso() -> str:
@@ -159,6 +161,116 @@ def serialize_alert_instance(row) -> dict[str, Any]:
     return payload
 
 
+def serialize_alert_rule(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "scope_type": row["scope_type"],
+        "object_type": row["object_type"],
+        "monitored_object_id": row["monitored_object_id"],
+        "state_type": row["state_type"],
+        "metric_key": row["metric_key"],
+        "comparison": row["comparison"],
+        "warning_threshold": row["warning_threshold"],
+        "critical_threshold": row["critical_threshold"],
+        "is_enabled": bool(row["is_enabled"]),
+        "description": row["description"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def parse_optional_float(value) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise ValueError("threshold must be a number") from None
+
+
+def parse_optional_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value in {0, 1}:
+        return bool(value)
+    raise ValueError("is_enabled must be a boolean")
+
+
+def validate_alert_rule_payload(data: dict[str, Any], *, partial: bool = False) -> tuple[dict[str, Any] | None, Any | None]:
+    payload = dict(data)
+
+    if not partial or "scope_type" in payload:
+        scope_type = payload.get("scope_type")
+        if scope_type not in ALLOWED_ALERT_SCOPE_TYPES:
+            return None, error_response("validation_error", "scope_type is invalid", 400)
+
+    if not partial or "state_type" in payload:
+        state_type = payload.get("state_type")
+        if state_type not in ALLOWED_STATE_TYPES:
+            return None, error_response("validation_error", "state_type is invalid", 400)
+
+    if not partial or "comparison" in payload:
+        comparison = payload.get("comparison")
+        if comparison not in ALLOWED_ALERT_COMPARISONS:
+            return None, error_response("validation_error", "comparison is invalid", 400)
+
+    if not partial or "metric_key" in payload:
+        metric_key = payload.get("metric_key")
+        if not isinstance(metric_key, str) or not metric_key.strip():
+            return None, error_response("validation_error", "metric_key is required", 400)
+        payload["metric_key"] = metric_key.strip()
+
+    try:
+        if "warning_threshold" in payload:
+            payload["warning_threshold"] = parse_optional_float(payload.get("warning_threshold"))
+        if "critical_threshold" in payload:
+            payload["critical_threshold"] = parse_optional_float(payload.get("critical_threshold"))
+    except ValueError as exc:
+        return None, error_response("validation_error", str(exc), 400)
+
+    try:
+        if not partial or "is_enabled" in payload:
+            payload["is_enabled"] = parse_optional_bool(payload.get("is_enabled"))
+    except ValueError as exc:
+        return None, error_response("validation_error", str(exc), 400)
+
+    scope_type = payload.get("scope_type")
+    if scope_type == "object_type":
+        object_type = payload.get("object_type")
+        if not isinstance(object_type, str) or not object_type.strip():
+            return None, error_response("validation_error", "object_type is required for object_type scope", 400)
+        payload["object_type"] = object_type.strip()
+        payload["monitored_object_id"] = None
+    elif scope_type == "monitored_object":
+        monitored_object_id = payload.get("monitored_object_id")
+        if not isinstance(monitored_object_id, int):
+            return None, error_response("validation_error", "monitored_object_id is required for monitored_object scope", 400)
+        row = get_db().execute("SELECT id FROM monitored_objects WHERE id = ?", (monitored_object_id,)).fetchone()
+        if row is None:
+            return None, error_response("validation_error", "monitored_object_id not found", 400)
+        payload["object_type"] = None
+
+    warning_threshold = payload.get("warning_threshold")
+    critical_threshold = payload.get("critical_threshold")
+    if warning_threshold is None and critical_threshold is None:
+        return None, error_response("validation_error", "at least one threshold is required", 400)
+
+    description = payload.get("description")
+    if description is not None:
+        if not isinstance(description, str):
+            return None, error_response("validation_error", "description must be a string", 400)
+        payload["description"] = description.strip() or None
+
+    comparison = payload.get("comparison")
+    if warning_threshold is not None and critical_threshold is not None:
+        if comparison == "gte" and critical_threshold < warning_threshold:
+            return None, error_response("validation_error", "critical_threshold must be greater than or equal to warning_threshold", 400)
+        if comparison == "lte" and critical_threshold > warning_threshold:
+            return None, error_response("validation_error", "critical_threshold must be less than or equal to warning_threshold", 400)
+
+    return payload, None
+
+
 def load_derived_latest_states(state_type: str | None = None) -> list[dict[str, Any]]:
     sql = """
         SELECT monitored_object_id, target_id, state_type, status, severity, state_json, occurred_at, received_at
@@ -186,6 +298,7 @@ def get_summary():
         "latest_states": fetch_count("SELECT COUNT(*) FROM latest_states"),
         "raw_events": fetch_count("SELECT COUNT(*) FROM raw_events"),
         "open_alerts": fetch_count("SELECT COUNT(*) FROM alert_instances WHERE status = 'open'"),
+        "alert_rules": fetch_count("SELECT COUNT(*) FROM alert_rules"),
         "debug_payload_logs": fetch_count("SELECT COUNT(*) FROM debug_payload_logs"),
         "cleanup_runs": fetch_count("SELECT COUNT(*) FROM cleanup_runs"),
     }
@@ -454,3 +567,122 @@ def list_alert_instances():
 
     rows = get_db().execute(sql, tuple(params)).fetchall()
     return {"items": [serialize_alert_instance(row) for row in rows]}
+
+
+@bp.get("/alert-rules")
+@admin_required
+def list_alert_rules():
+    rows = get_db().execute(
+        """
+        SELECT id, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
+               warning_threshold, critical_threshold, is_enabled, description, created_at, updated_at
+        FROM alert_rules
+        ORDER BY is_enabled DESC, state_type ASC, id ASC
+        """
+    ).fetchall()
+    return {"items": [serialize_alert_rule(row) for row in rows]}
+
+
+@bp.post("/alert-rules")
+@admin_required
+def create_alert_rule():
+    data = request.get_json(silent=True) or {}
+    payload, error = validate_alert_rule_payload(data, partial=False)
+    if error:
+        return error
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    cursor = db_conn.execute(
+        """
+        INSERT INTO alert_rules (
+            scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
+            warning_threshold, critical_threshold, is_enabled, description, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            payload["scope_type"],
+            payload.get("object_type"),
+            payload.get("monitored_object_id"),
+            payload["state_type"],
+            payload["metric_key"],
+            payload["comparison"],
+            payload.get("warning_threshold"),
+            payload.get("critical_threshold"),
+            int(payload["is_enabled"]),
+            payload.get("description"),
+            timestamp,
+            timestamp,
+        ),
+    )
+    db_conn.commit()
+    row = db_conn.execute(
+        """
+        SELECT id, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
+               warning_threshold, critical_threshold, is_enabled, description, created_at, updated_at
+        FROM alert_rules
+        WHERE id = ?
+        """,
+        (cursor.lastrowid,),
+    ).fetchone()
+    return {"rule": serialize_alert_rule(row)}, 201
+
+
+@bp.patch("/alert-rules/<int:rule_id>")
+@admin_required
+def update_alert_rule(rule_id: int):
+    db_conn = get_db()
+    existing = db_conn.execute(
+        """
+        SELECT id, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
+               warning_threshold, critical_threshold, is_enabled, description, created_at, updated_at
+        FROM alert_rules
+        WHERE id = ?
+        """,
+        (rule_id,),
+    ).fetchone()
+    if existing is None:
+        return error_response("not_found", "alert rule not found", 404)
+
+    data = request.get_json(silent=True) or {}
+    merged = dict(existing)
+    merged.update(data)
+    payload, error = validate_alert_rule_payload(merged, partial=False)
+    if error:
+        return error
+
+    timestamp = now_iso()
+    db_conn.execute(
+        """
+        UPDATE alert_rules
+        SET scope_type = ?, object_type = ?, monitored_object_id = ?, state_type = ?, metric_key = ?,
+            comparison = ?, warning_threshold = ?, critical_threshold = ?, is_enabled = ?,
+            description = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            payload["scope_type"],
+            payload.get("object_type"),
+            payload.get("monitored_object_id"),
+            payload["state_type"],
+            payload["metric_key"],
+            payload["comparison"],
+            payload.get("warning_threshold"),
+            payload.get("critical_threshold"),
+            int(payload["is_enabled"]),
+            payload.get("description"),
+            timestamp,
+            rule_id,
+        ),
+    )
+    db_conn.commit()
+    row = db_conn.execute(
+        """
+        SELECT id, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
+               warning_threshold, critical_threshold, is_enabled, description, created_at, updated_at
+        FROM alert_rules
+        WHERE id = ?
+        """,
+        (rule_id,),
+    ).fetchone()
+    return {"rule": serialize_alert_rule(row)}

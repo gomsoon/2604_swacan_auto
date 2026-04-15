@@ -982,3 +982,64 @@ INSERT INTO node_bindings (
     '2026-04-12T10:00:00.000+09:00',
     '2026-04-12T10:00:00.000+09:00'
 );
+
+INSERT INTO alert_rules (
+    id,
+    scope_type,
+    object_type,
+    monitored_object_id,
+    state_type,
+    metric_key,
+    comparison,
+    warning_threshold,
+    critical_threshold,
+    is_enabled,
+    description,
+    created_at,
+    updated_at
+) VALUES
+(
+    1501,
+    'object_type',
+    'SoftwareProcess',
+    NULL,
+    'process',
+    'cpu_usage',
+    'gte',
+    80,
+    95,
+    1,
+    '프로세스 CPU 사용률 임계치',
+    '2026-04-12T10:00:00.000+09:00',
+    '2026-04-12T10:00:00.000+09:00'
+),
+(
+    1502,
+    'object_type',
+    'MonitoringAgent',
+    NULL,
+    'agent',
+    'outbox_queue_depth',
+    'gte',
+    100,
+    500,
+    1,
+    'agent outbox queue depth 임계치',
+    '2026-04-12T10:00:00.000+09:00',
+    '2026-04-12T10:00:00.000+09:00'
+),
+(
+    1503,
+    'object_type',
+    'HostSnapshot',
+    NULL,
+    'host',
+    'memory_used_ratio',
+    'gte',
+    85,
+    95,
+    1,
+    'host 메모리 사용률 임계치',
+    '2026-04-12T10:00:00.000+09:00',
+    '2026-04-12T10:00:00.000+09:00'
+);

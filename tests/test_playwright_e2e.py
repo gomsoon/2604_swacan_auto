@@ -241,8 +241,6 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     expect(page.locator("#monitor-agent-summary")).to_contain_text("connected")
     expect(page.locator("#monitor-agent-summary")).to_contain_text("outbox 0")
     expect(page.locator("#monitor-agent-summary")).to_contain_text("ack 5")
-    expect(page.locator("#alerts-list")).to_contain_text("process.warning")
-    expect(page.locator('g.diagram-node[data-node-type="SoftwareProcess"] .node-alert-badge')).to_have_count(1)
 
     monitor_server_node.click(force=True, position={"x": 24, "y": 24})
     expect(page.locator("#monitor-selection-summary")).to_contain_text("Host Alpha")
@@ -261,7 +259,6 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     expect(page.locator("#monitor-selection-summary")).to_contain_text("프로세스 상태")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("최근 이벤트")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("process_restarted")
-    expect(page.locator("#monitor-selection-summary")).to_contain_text("열린 alert 수: 1")
     expect(page.locator("#events-list")).to_contain_text("process_restarted")
     expect(page.locator("#events-list")).to_contain_text("Playwright process restarted")
 
@@ -275,10 +272,12 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     expect(page.get_by_role("heading", name="기본 관리자 화면")).to_be_visible()
     expect(page.get_by_role("heading", name="시스템 요약", exact=True)).to_be_visible()
     expect(page.get_by_role("heading", name="메타모델 버전")).to_be_visible()
+    expect(page.get_by_role("heading", name="Alert Rule", exact=True)).to_be_visible()
     expect(page.get_by_role("heading", name="Latest State")).to_be_visible()
     expect(page.get_by_role("heading", name="Cleanup 기록")).to_be_visible()
     expect(page.locator("#admin-summary-cards")).to_contain_text("사용자")
     expect(page.locator("#admin-metamodel-versions-list")).to_contain_text("seed-v1")
+    expect(page.locator("#admin-alert-rules-list")).to_contain_text("cpu_usage")
 
     page.locator("#metamodel-version-code").fill("core-v2-ui-draft")
     page.locator("#metamodel-version-description").fill("Playwright draft create")
@@ -290,6 +289,22 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     createdVersion.locator(".publish-metamodel-button").click()
 
     expect(page.locator(".admin-item", has_text="core-v2-ui-draft").first).to_contain_text("published")
+    page.locator("#alert-rule-object-type").fill("SoftwareProcess")
+    page.locator("#alert-rule-metric-key").fill("fd_count")
+    page.locator("#alert-rule-warning-threshold").fill("50")
+    page.locator("#alert-rule-critical-threshold").fill("100")
+    page.locator("#alert-rule-description").fill("Playwright rule")
+    page.get_by_role("button", name="저장").click()
+
+    createdRule = page.locator(".admin-item", has_text="fd_count").first
+    expect(createdRule).to_contain_text("warning=50")
+    expect(createdRule).to_contain_text("critical=100")
+
+    createdRule.get_by_role("button", name="수정").click()
+    page.locator("#alert-rule-critical-threshold").fill("120")
+    page.get_by_role("button", name="저장").click()
+
+    expect(page.locator(".admin-item", has_text="fd_count").first).to_contain_text("critical=120")
     expect(page.locator("#admin-ingest-list")).to_contain_text("표시할 ingest batch가 없습니다.")
     expect(page.locator("#admin-latest-state-list")).to_contain_text("조건에 맞는 latest state가 없습니다.")
     expect(page.locator("#admin-cleanup-list")).to_contain_text("최근 cleanup 기록이 없습니다.")

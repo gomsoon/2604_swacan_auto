@@ -817,6 +817,21 @@ a {
     font: inherit;
 }
 
+.checkbox-field span {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ink);
+}
+
+.checkbox-field input {
+    width: auto;
+}
+
+.admin-item.is-disabled {
+    opacity: 0.72;
+}
+
 @media (max-width: 960px) {
     .admin-metamodel-layout,
     .admin-grid {

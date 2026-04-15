@@ -594,6 +594,208 @@ def test_alert_instance_resolves_when_process_recovers(seeded_app, seeded_client
     assert resolved_count == 1
 
 
+def test_process_threshold_alert_opens_on_exact_warning_and_critical_boundaries(seeded_app, seeded_client) -> None:
+    warning_batch = {
+        "agent_id": "agent_local",
+        "boot_id": "boot_threshold_process",
+        "seq_start": 61,
+        "seq_end": 61,
+        "sent_at": "2026-04-10T11:00:00.150+09:00",
+        "items": [
+            {
+                "seq": 61,
+                "payload_type": "process_snapshot",
+                "occurred_at": "2026-04-10T11:00:00.100+09:00",
+                "target_id": "app_main",
+                "payload": {
+                    "pid": 1234,
+                    "state": "running",
+                    "cpu_usage": 80.0,
+                    "memory_rss": 4096,
+                },
+            }
+        ],
+    }
+    critical_batch = {
+        **warning_batch,
+        "seq_start": 62,
+        "seq_end": 62,
+        "items": [
+            {
+                **warning_batch["items"][0],
+                "seq": 62,
+                "occurred_at": "2026-04-10T11:00:05.100+09:00",
+                "payload": {
+                    "pid": 1234,
+                    "state": "running",
+                    "cpu_usage": 95.0,
+                    "memory_rss": 4096,
+                },
+            }
+        ],
+    }
+
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=warning_batch).status_code == 202
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=critical_batch).status_code == 202
+
+    with seeded_app.app_context():
+        first_result = process_pending_ingest(limit=1)
+        second_result = process_pending_ingest(limit=1)
+        db_conn = get_db()
+        rule_alert = db_conn.execute(
+            """
+            SELECT alert_code, severity, status, repeat_count, latest_message
+            FROM alert_instances
+            WHERE monitored_object_id = 1302 AND alert_code = 'rule.1501'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert first_result["processed_items"] == 1
+    assert second_result["processed_items"] == 1
+    assert rule_alert["alert_code"] == "rule.1501"
+    assert rule_alert["severity"] == "critical"
+    assert rule_alert["status"] == "open"
+    assert rule_alert["repeat_count"] == 2
+    assert "95.000" in rule_alert["latest_message"]
+
+
+def test_host_threshold_alert_handles_exact_boundary_and_resolution(seeded_app, seeded_client) -> None:
+    warning_batch = {
+        "agent_id": "agent_local",
+        "boot_id": "boot_threshold_host",
+        "seq_start": 71,
+        "seq_end": 71,
+        "sent_at": "2026-04-10T11:05:00.150+09:00",
+        "items": [
+            {
+                "seq": 71,
+                "payload_type": "host_snapshot",
+                "occurred_at": "2026-04-10T11:05:00.100+09:00",
+                "target_id": "agent_local:host",
+                "payload": {
+                    "hostname": "host-alpha",
+                    "cpu_usage": 10.0,
+                    "loadavg_1": 0.1,
+                    "loadavg_5": 0.1,
+                    "loadavg_15": 0.1,
+                    "memory_total": 100.0,
+                    "memory_available": 15.0,
+                    "memory_used": 85.0,
+                },
+            }
+        ],
+    }
+    recover_batch = {
+        **warning_batch,
+        "seq_start": 72,
+        "seq_end": 72,
+        "items": [
+            {
+                **warning_batch["items"][0],
+                "seq": 72,
+                "occurred_at": "2026-04-10T11:05:05.100+09:00",
+                "payload": {
+                    "hostname": "host-alpha",
+                    "cpu_usage": 10.0,
+                    "loadavg_1": 0.1,
+                    "loadavg_5": 0.1,
+                    "loadavg_15": 0.1,
+                    "memory_total": 100.0,
+                    "memory_available": 16.0,
+                    "memory_used": 84.0,
+                },
+            }
+        ],
+    }
+
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=warning_batch).status_code == 202
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=recover_batch).status_code == 202
+
+    with seeded_app.app_context():
+        first_result = process_pending_ingest(limit=1)
+        second_result = process_pending_ingest(limit=1)
+        db_conn = get_db()
+        open_count = db_conn.execute(
+            "SELECT COUNT(*) AS count FROM alert_instances WHERE monitored_object_id = 1304 AND alert_code = 'rule.1503' AND status = 'open'"
+        ).fetchone()["count"]
+        resolved_count = db_conn.execute(
+            "SELECT COUNT(*) AS count FROM alert_instances WHERE monitored_object_id = 1304 AND alert_code = 'rule.1503' AND status = 'resolved'"
+        ).fetchone()["count"]
+
+    assert first_result["processed_items"] == 1
+    assert second_result["processed_items"] == 1
+    assert open_count == 0
+    assert resolved_count == 1
+
+
+def test_agent_threshold_alert_opens_on_exact_queue_depth_boundaries(seeded_app, seeded_client) -> None:
+    warning_batch = {
+        "agent_id": "agent_local",
+        "boot_id": "boot_threshold_agent",
+        "seq_start": 81,
+        "seq_end": 81,
+        "sent_at": "2026-04-10T11:10:00.150+09:00",
+        "items": [
+            {
+                "seq": 81,
+                "payload_type": "agent_state",
+                "occurred_at": "2026-04-10T11:10:00.100+09:00",
+                "target_id": "agent_local",
+                "payload": {
+                    "heartbeat_time": "2026-04-10T11:10:00.100+09:00",
+                    "backend_connection_status": "connected",
+                    "outbox_queue_depth": 100,
+                    "last_ack_seq": 80,
+                },
+            }
+        ],
+    }
+    critical_batch = {
+        **warning_batch,
+        "seq_start": 82,
+        "seq_end": 82,
+        "items": [
+            {
+                **warning_batch["items"][0],
+                "seq": 82,
+                "occurred_at": "2026-04-10T11:10:05.100+09:00",
+                "payload": {
+                    "heartbeat_time": "2026-04-10T11:10:05.100+09:00",
+                    "backend_connection_status": "connected",
+                    "outbox_queue_depth": 500,
+                    "last_ack_seq": 81,
+                },
+            }
+        ],
+    }
+
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=warning_batch).status_code == 202
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=critical_batch).status_code == 202
+
+    with seeded_app.app_context():
+        first_result = process_pending_ingest(limit=1)
+        second_result = process_pending_ingest(limit=1)
+        db_conn = get_db()
+        rule_alert = db_conn.execute(
+            """
+            SELECT severity, status, repeat_count, latest_message
+            FROM alert_instances
+            WHERE monitored_object_id = 1303 AND alert_code = 'rule.1502'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert first_result["processed_items"] == 1
+    assert second_result["processed_items"] == 1
+    assert rule_alert["severity"] == "critical"
+    assert rule_alert["status"] == "open"
+    assert rule_alert["repeat_count"] == 2
+    assert "500.000" in rule_alert["latest_message"]
+
+
 def test_process_ingest_cli_command(seeded_client, seeded_runner) -> None:
     ingest_response = seeded_client.post(
         "/api/agents/ingest",
