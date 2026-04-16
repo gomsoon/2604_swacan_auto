@@ -249,6 +249,17 @@ def parse_optional_bool(value) -> bool:
     raise ValueError("is_enabled must be a boolean")
 
 
+def parse_boolean_query_param(value: str | None, *, field_name: str) -> tuple[bool | None, Any | None]:
+    if value in (None, ""):
+        return None, None
+    normalized = value.strip().lower()
+    if normalized in {"true", "1"}:
+        return True, None
+    if normalized in {"false", "0"}:
+        return False, None
+    return None, error_response("validation_error", f"{field_name} must be true/false", 400)
+
+
 def validate_alert_rule_payload(data: dict[str, Any], *, partial: bool = False) -> tuple[dict[str, Any] | None, Any | None]:
     payload = dict(data)
 
@@ -673,15 +684,106 @@ def list_alert_instances():
 @bp.get("/alert-rules")
 @admin_required
 def list_alert_rules():
-    rows = get_db().execute(
+    scope_type = request.args.get("scope_type")
+    if scope_type and scope_type not in ALLOWED_ALERT_SCOPE_TYPES:
+        return error_response("validation_error", "scope_type is invalid", 400)
+
+    state_type = request.args.get("state_type")
+    if state_type and state_type not in ALLOWED_STATE_TYPES:
+        return error_response("validation_error", "state_type is invalid", 400)
+
+    is_enabled, enabled_error = parse_boolean_query_param(request.args.get("is_enabled"), field_name="is_enabled")
+    if enabled_error:
+        return enabled_error
+
+    clauses: list[str] = []
+    params: list[Any] = []
+    if scope_type:
+        clauses.append("scope_type = ?")
+        params.append(scope_type)
+    if state_type:
+        clauses.append("state_type = ?")
+        params.append(state_type)
+    if is_enabled is not None:
+        clauses.append("is_enabled = ?")
+        params.append(int(is_enabled))
+
+    sql = """
+        SELECT id, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
+               warning_threshold, critical_threshold, is_enabled, description, created_at, updated_at
+        FROM alert_rules
+    """
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY is_enabled DESC, state_type ASC, id ASC"
+
+    rows = get_db().execute(sql, tuple(params)).fetchall()
+    return {"items": [serialize_alert_rule(row) for row in rows]}
+
+
+@bp.get("/alert-rules/<int:rule_id>/targets-preview")
+@admin_required
+def get_alert_rule_targets_preview(rule_id: int):
+    limit, error = parse_limit()
+    if error:
+        return error
+
+    row = get_db().execute(
         """
         SELECT id, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
                warning_threshold, critical_threshold, is_enabled, description, created_at, updated_at
         FROM alert_rules
-        ORDER BY is_enabled DESC, state_type ASC, id ASC
-        """
+        WHERE id = ?
+        """,
+        (rule_id,),
+    ).fetchone()
+    if row is None:
+        return error_response("not_found", "alert rule not found", 404)
+
+    clauses: list[str] = []
+    params: list[Any] = []
+    if row["scope_type"] == "monitored_object":
+        clauses.append("mo.id = ?")
+        params.append(row["monitored_object_id"])
+    else:
+        clauses.append("mo.object_type = ?")
+        params.append(row["object_type"])
+
+    params.append(limit)
+    preview_rows = get_db().execute(
+        f"""
+        SELECT
+            mo.id AS monitored_object_id,
+            mo.display_name,
+            mo.runtime_binding_key,
+            mo.object_type,
+            (
+                SELECT COUNT(*)
+                FROM alert_instances AS alerts
+                WHERE alerts.monitored_object_id = mo.id
+                  AND alerts.status = 'open'
+            ) AS open_alert_count
+        FROM monitored_objects AS mo
+        WHERE {' AND '.join(clauses)}
+        ORDER BY mo.display_name ASC, mo.id ASC
+        LIMIT ?
+        """,
+        tuple(params),
     ).fetchall()
-    return {"items": [serialize_alert_rule(row) for row in rows]}
+
+    return {
+        "rule": serialize_alert_rule(row),
+        "items": [
+            {
+                "monitored_object_id": preview_row["monitored_object_id"],
+                "display_name": preview_row["display_name"],
+                "runtime_binding_key": preview_row["runtime_binding_key"],
+                "object_type": preview_row["object_type"],
+                "open_alert_count": preview_row["open_alert_count"],
+            }
+            for preview_row in preview_rows
+        ],
+    }
 
 
 @bp.post("/alert-rules")

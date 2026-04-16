@@ -628,6 +628,69 @@ def test_admin_alert_rules_lists_seeded_rules(seeded_client) -> None:
     }
 
 
+def test_admin_alert_rules_support_filters(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/alert-rules?scope_type=object_type&state_type=process&is_enabled=true")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["metric_key"] == "cpu_usage"
+
+
+def test_admin_alert_rules_reject_invalid_filter_boundary(seeded_client) -> None:
+    login(seeded_client)
+
+    scope_response = seeded_client.get("/api/admin/alert-rules?scope_type=bad")
+    state_response = seeded_client.get("/api/admin/alert-rules?state_type=bad")
+    enabled_response = seeded_client.get("/api/admin/alert-rules?is_enabled=maybe")
+
+    assert scope_response.status_code == 400
+    assert state_response.status_code == 400
+    assert enabled_response.status_code == 400
+    assert enabled_response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_alert_rule_targets_preview_returns_matching_objects(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/alert-rules/1501/targets-preview?limit=10")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["rule"]["id"] == 1501
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["display_name"] == "App Process"
+    assert payload["items"][0]["object_type"] == "SoftwareProcess"
+
+
+def test_admin_alert_rule_targets_preview_accepts_boundary_limits(seeded_client) -> None:
+    login(seeded_client)
+
+    low_response = seeded_client.get("/api/admin/alert-rules/1501/targets-preview?limit=1")
+    high_response = seeded_client.get("/api/admin/alert-rules/1501/targets-preview?limit=100")
+
+    assert low_response.status_code == 200
+    assert high_response.status_code == 200
+    assert len(low_response.get_json()["items"]) == 1
+    assert len(high_response.get_json()["items"]) == 1
+
+
+def test_admin_alert_rule_targets_preview_rejects_invalid_limits_and_missing_rule(seeded_client) -> None:
+    login(seeded_client)
+
+    zero_response = seeded_client.get("/api/admin/alert-rules/1501/targets-preview?limit=0")
+    over_response = seeded_client.get("/api/admin/alert-rules/1501/targets-preview?limit=101")
+    invalid_response = seeded_client.get("/api/admin/alert-rules/1501/targets-preview?limit=abc")
+    missing_response = seeded_client.get("/api/admin/alert-rules/9999/targets-preview?limit=10")
+
+    assert zero_response.status_code == 400
+    assert over_response.status_code == 400
+    assert invalid_response.status_code == 400
+    assert missing_response.status_code == 404
+
+
 def test_admin_create_alert_rule_accepts_valid_object_type_rule(seeded_client) -> None:
     login(seeded_client)
 

@@ -308,6 +308,21 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     page.get_by_role("button", name="저장").click()
 
     expect(page.locator(".admin-item", has_text="fd_count").first).to_contain_text("critical=120")
+    createdRule = page.locator(".admin-item", has_text="fd_count").first
+    createdRule.get_by_role("button", name="미리보기").click()
+    expect(page.locator("#alert-rule-preview-panel")).to_contain_text("App Process")
+    expect(page.locator("#alert-rule-preview-panel")).to_contain_text("open alert 0")
+
+    createdRule.get_by_role("button", name="비활성화").click()
+    expect(page.locator(".admin-item", has_text="fd_count").first).to_contain_text("disabled")
+
+    page.locator("#alert-rule-enabled-filter").select_option("false")
+    expect(page.locator("#admin-alert-rules-list")).to_contain_text("fd_count")
+
+    page.locator("#alert-rule-enabled-filter").select_option("true")
+    expect(page.locator("#admin-alert-rules-list")).not_to_contain_text("fd_count")
+    page.locator("#alert-rule-enabled-filter").select_option("")
+
     expect(page.locator("#admin-ingest-list")).to_contain_text("표시할 ingest batch가 없습니다.")
     expect(page.locator("#admin-latest-state-list")).to_contain_text("조건에 맞는 latest state가 없습니다.")
     expect(page.locator("#admin-cleanup-list")).to_contain_text("최근 cleanup 기록이 없습니다.")

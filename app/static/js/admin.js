@@ -12,6 +12,7 @@ const metamodelVersionsList = document.getElementById("admin-metamodel-versions-
 const metamodelVersionCount = document.getElementById("metamodel-version-count");
 const alertRulesList = document.getElementById("admin-alert-rules-list");
 const alertRuleCount = document.getElementById("alert-rule-count");
+const alertRulePreviewPanel = document.getElementById("alert-rule-preview-panel");
 const ingestList = document.getElementById("admin-ingest-list");
 const latestStateList = document.getElementById("admin-latest-state-list");
 const eventsList = document.getElementById("admin-events-list");
@@ -54,9 +55,14 @@ const alertRuleWarningThresholdInput = document.getElementById("alert-rule-warni
 const alertRuleCriticalThresholdInput = document.getElementById("alert-rule-critical-threshold");
 const alertRuleDescriptionInput = document.getElementById("alert-rule-description");
 const alertRuleEnabledInput = document.getElementById("alert-rule-enabled");
+const alertRuleScopeFilter = document.getElementById("alert-rule-scope-filter");
+const alertRuleStateFilter = document.getElementById("alert-rule-state-filter");
+const alertRuleEnabledFilter = document.getElementById("alert-rule-enabled-filter");
 
 let metamodelVersions = [];
 let alertRules = [];
+let selectedAlertRuleId = null;
+let selectedAlertRulePreview = null;
 let groupedEvents = [];
 let selectedGroupedEventId = null;
 let selectedGroupedEvent = null;
@@ -534,6 +540,8 @@ function renderAlertRules(items) {
                         </div>
                         <div class="toolbar-inline">
                             <span class="meta-pill">${rule.is_enabled ? "enabled" : "disabled"}</span>
+                            <button class="button ghost small preview-alert-rule-button" type="button" data-rule-id="${escapeHtml(rule.id)}">미리보기</button>
+                            <button class="button ghost small toggle-alert-rule-button" type="button" data-rule-id="${escapeHtml(rule.id)}" data-enabled="${rule.is_enabled ? "true" : "false"}">${rule.is_enabled ? "비활성화" : "활성화"}</button>
                             <button class="button ghost small edit-alert-rule-button" type="button" data-rule-id="${escapeHtml(rule.id)}">수정</button>
                         </div>
                     </div>
@@ -544,6 +552,54 @@ function renderAlertRules(items) {
             `
         )
         .join("");
+}
+
+function renderAlertRulePreviewPanel() {
+    if (!selectedAlertRulePreview) {
+        alertRulePreviewPanel.innerHTML = '<p class="section-copy">rule의 적용 대상을 확인하려면 미리보기를 선택하세요.</p>';
+        return;
+    }
+
+    const { rule, items } = selectedAlertRulePreview;
+    const header = `
+        <div class="section-header">
+            <h3>${escapeHtml(rule.metric_key)}</h3>
+            <div class="toolbar-inline">
+                <span class="meta-pill">${escapeHtml(rule.scope_type)}</span>
+                <span class="meta-pill">${escapeHtml(rule.state_type)}</span>
+                <span class="meta-pill">${rule.is_enabled ? "enabled" : "disabled"}</span>
+            </div>
+        </div>
+        <p class="admin-meta">warning=${escapeHtml(rule.warning_threshold ?? "-")} | critical=${escapeHtml(rule.critical_threshold ?? "-")} | comparison=${escapeHtml(rule.comparison)}</p>
+    `;
+
+    if (items.length === 0) {
+        alertRulePreviewPanel.innerHTML = `
+            ${header}
+            <p class="section-copy">현재 이 rule에 매칭되는 monitored object가 없습니다.</p>
+        `;
+        return;
+    }
+
+    alertRulePreviewPanel.innerHTML = `
+        ${header}
+        <div class="admin-list compact-admin-list">
+            ${items
+                .map(
+                    (item) => `
+                        <article class="admin-item compact-admin-item">
+                            <div class="section-header">
+                                <h4>${escapeHtml(item.display_name)}</h4>
+                                <span class="meta-pill">open alert ${escapeHtml(item.open_alert_count)}</span>
+                            </div>
+                            <p class="admin-meta">object=${escapeHtml(item.monitored_object_id)} | type=${escapeHtml(item.object_type)}</p>
+                            <p class="admin-meta">binding=${escapeHtml(item.runtime_binding_key || "-")}</p>
+                        </article>
+                    `
+                )
+                .join("")}
+        </div>
+    `;
 }
 
 async function loadSummary() {
@@ -610,8 +666,40 @@ async function loadMetamodelVersions() {
 }
 
 async function loadAlertRules() {
-    const payload = await apiFetch("/api/admin/alert-rules");
+    const params = new URLSearchParams();
+    if (alertRuleScopeFilter.value) {
+        params.set("scope_type", alertRuleScopeFilter.value);
+    }
+    if (alertRuleStateFilter.value) {
+        params.set("state_type", alertRuleStateFilter.value);
+    }
+    if (alertRuleEnabledFilter.value) {
+        params.set("is_enabled", alertRuleEnabledFilter.value);
+    }
+    const query = params.toString();
+    const payload = await apiFetch(`/api/admin/alert-rules${query ? `?${query}` : ""}`);
     renderAlertRules(payload.items);
+    if (selectedAlertRuleId && payload.items.some((item) => item.id === selectedAlertRuleId)) {
+        await loadAlertRulePreview(selectedAlertRuleId);
+        return;
+    }
+    selectedAlertRuleId = null;
+    selectedAlertRulePreview = null;
+    renderAlertRulePreviewPanel();
+}
+
+async function loadAlertRulePreview(ruleId) {
+    const payload = await apiFetch(`/api/admin/alert-rules/${ruleId}/targets-preview?limit=20`);
+    selectedAlertRuleId = ruleId;
+    selectedAlertRulePreview = payload;
+    renderAlertRulePreviewPanel();
+}
+
+async function toggleAlertRule(ruleId, isEnabled) {
+    await apiFetch(`/api/admin/alert-rules/${ruleId}`, {
+        method: "PATCH",
+        body: { is_enabled: !isEnabled },
+    });
 }
 
 async function loadGroupedEventDetails(groupedEventId) {
@@ -730,6 +818,9 @@ refreshDebugButton?.addEventListener("click", loadDebug);
 refreshCleanupButton?.addEventListener("click", loadCleanupRuns);
 refreshMetamodelVersionsButton?.addEventListener("click", loadMetamodelVersions);
 refreshAlertRulesButton?.addEventListener("click", loadAlertRules);
+alertRuleScopeFilter?.addEventListener("change", loadAlertRules);
+alertRuleStateFilter?.addEventListener("change", loadAlertRules);
+alertRuleEnabledFilter?.addEventListener("change", loadAlertRules);
 eventsList?.addEventListener("click", async (event) => {
     const card = event.target instanceof Element ? event.target.closest("[data-grouped-event-id]") : null;
     if (!card) {
@@ -763,17 +854,37 @@ metamodelVersionsList?.addEventListener("click", async (event) => {
 });
 alertRulesList?.addEventListener("click", (event) => {
     const button = event.target instanceof HTMLElement ? event.target.closest(".edit-alert-rule-button") : null;
-    if (!button) {
+    if (button) {
+        const ruleId = Number(button.dataset.ruleId);
+        const rule = alertRules.find((item) => item.id === ruleId);
+        if (!rule) {
+            return;
+        }
+
+        fillAlertRuleForm(rule);
         return;
     }
 
-    const ruleId = Number(button.dataset.ruleId);
-    const rule = alertRules.find((item) => item.id === ruleId);
-    if (!rule) {
+    const previewButton = event.target instanceof HTMLElement ? event.target.closest(".preview-alert-rule-button") : null;
+    if (previewButton) {
+        const ruleId = Number(previewButton.dataset.ruleId);
+        loadAlertRulePreview(ruleId).catch((error) => showBanner(error.message, "error"));
         return;
     }
 
-    fillAlertRuleForm(rule);
+    const toggleButton = event.target instanceof HTMLElement ? event.target.closest(".toggle-alert-rule-button") : null;
+    if (!toggleButton) {
+        return;
+    }
+
+    const ruleId = Number(toggleButton.dataset.ruleId);
+    const isEnabled = toggleButton.dataset.enabled === "true";
+    toggleAlertRule(ruleId, isEnabled)
+        .then(async () => {
+            await Promise.all([loadAlertRules(), loadSummary()]);
+            showBanner(`alert rule을 ${isEnabled ? "비활성화" : "활성화"}했습니다.`, "success");
+        })
+        .catch((error) => showBanner(error.message, "error"));
 });
 
 ingestStatusFilter?.addEventListener("change", loadIngest);

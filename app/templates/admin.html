@@ -182,7 +182,37 @@
                     <h3>Rule 목록</h3>
                     <span id="alert-rule-count" class="meta-pill">0개</span>
                 </div>
+                <div class="toolbar-inline filter-row">
+                    <label class="field compact-field">
+                        <span>Scope</span>
+                        <select id="alert-rule-scope-filter">
+                            <option value="">전체</option>
+                            <option value="object_type">object_type</option>
+                            <option value="monitored_object">monitored_object</option>
+                        </select>
+                    </label>
+                    <label class="field compact-field">
+                        <span>State Type</span>
+                        <select id="alert-rule-state-filter">
+                            <option value="">전체</option>
+                            <option value="process">process</option>
+                            <option value="agent">agent</option>
+                            <option value="host">host</option>
+                        </select>
+                    </label>
+                    <label class="field compact-field">
+                        <span>Enabled</span>
+                        <select id="alert-rule-enabled-filter">
+                            <option value="">전체</option>
+                            <option value="true">enabled</option>
+                            <option value="false">disabled</option>
+                        </select>
+                    </label>
+                </div>
                 <div id="admin-alert-rules-list" class="admin-list"></div>
+                <div id="alert-rule-preview-panel" class="event-detail-panel">
+                    <p class="section-copy">rule의 적용 대상을 확인하려면 미리보기를 선택하세요.</p>
+                </div>
             </section>
         </div>
     </section>
