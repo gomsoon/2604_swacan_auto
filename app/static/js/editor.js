@@ -44,6 +44,7 @@ const state = {
     selectedNodeId: null,
     selectedEdgeId: null,
     connectSourceId: null,
+    previewCreateNodeType: null,
     drag: null,
     lastDragAt: 0,
 };
@@ -417,6 +418,85 @@ function canCreateNodeType(nodeType) {
     return Boolean(findCandidateParentId(nodeType));
 }
 
+function getContainmentPreviewGuide() {
+    const nodeType = state.previewCreateNodeType;
+    if (!nodeType || !isNodeSemanticType(nodeType)) {
+        return {
+            previewNodeType: null,
+            candidateIds: new Set(),
+            recommendedParentId: null,
+        };
+    }
+
+    const allowedParentTypeCodes = getAllowedParentTypeCodes(nodeType);
+    if (allowedParentTypeCodes.length === 0) {
+        return {
+            previewNodeType: nodeType,
+            candidateIds: new Set(),
+            recommendedParentId: null,
+        };
+    }
+
+    const candidateIds = new Set(
+        state.nodes
+            .filter((node) => allowedParentTypeCodes.includes(node.semantic_type_code || node.node_type))
+            .map((node) => node.id)
+    );
+
+    return {
+        previewNodeType: nodeType,
+        candidateIds,
+        recommendedParentId: findCandidateParentId(nodeType),
+    };
+}
+
+function getConnectGuide() {
+    if (!state.connectSourceId) {
+        return {
+            sourceNode: null,
+            candidateIds: new Set(),
+            blockedIds: new Set(),
+        };
+    }
+
+    const sourceNode = getNode(state.connectSourceId);
+    if (!sourceNode) {
+        return {
+            sourceNode: null,
+            candidateIds: new Set(),
+            blockedIds: new Set(),
+        };
+    }
+
+    const candidateIds = new Set();
+    const blockedIds = new Set();
+
+    for (const node of state.nodes) {
+        if (node.id === sourceNode.id) {
+            continue;
+        }
+        const edgePlan = resolveEdgeCreationPlan(sourceNode, node);
+        if (edgePlan?.association) {
+            candidateIds.add(node.id);
+        } else {
+            blockedIds.add(node.id);
+        }
+    }
+
+    return { sourceNode, candidateIds, blockedIds };
+}
+
+function clearPalettePreview(nodeType = null) {
+    if (nodeType && state.previewCreateNodeType !== nodeType) {
+        return;
+    }
+    if (!state.previewCreateNodeType) {
+        return;
+    }
+    state.previewCreateNodeType = null;
+    render();
+}
+
 function renderPalette() {
     if (!paletteGroupsRoot) {
         return;
@@ -458,6 +538,16 @@ function renderPalette() {
             button.dataset.primitive = item.render_primitive;
             button.textContent = getNodeButtonLabel(item.semantic_type_code, item);
             button.disabled = !canCreateNodeType(item.semantic_type_code) || !isEditableVersion();
+            button.addEventListener("mouseenter", () => {
+                state.previewCreateNodeType = item.semantic_type_code;
+                render();
+            });
+            button.addEventListener("focus", () => {
+                state.previewCreateNodeType = item.semantic_type_code;
+                render();
+            });
+            button.addEventListener("mouseleave", () => clearPalettePreview(item.semantic_type_code));
+            button.addEventListener("blur", () => clearPalettePreview(item.semantic_type_code));
             button.addEventListener("click", () => addNode(item.semantic_type_code));
             itemsEl.appendChild(button);
         }
@@ -483,6 +573,13 @@ function renderPalette() {
     );
 }
 
+function refreshPalettePreviewState() {
+    const paletteButtons = paletteGroupsRoot?.querySelectorAll(".palette-button") || [];
+    paletteButtons.forEach((button) => {
+        button.classList.toggle("is-previewing", button.dataset.semanticType === state.previewCreateNodeType);
+    });
+}
+
 function sortNodesForOutline(nodes) {
     return [...nodes].sort((left, right) => {
         const leftLayer = Number(left.layer_order || 0);
@@ -498,7 +595,7 @@ function countIncidentEdges(nodeId) {
     return state.edges.filter((edge) => edge.source_node_id === nodeId || edge.target_node_id === nodeId).length;
 }
 
-function renderOutlineNode(node, depth = 0) {
+function renderOutlineNode(node, depth = 0, guides = {}) {
     const semanticType = getSemanticType(node.semantic_type_code || node.node_type);
     const item = document.createElement("button");
     item.type = "button";
@@ -507,6 +604,21 @@ function renderOutlineNode(node, depth = 0) {
     item.dataset.depth = String(depth);
     if (node.id === state.selectedNodeId) {
         item.classList.add("is-selected");
+    }
+    if (node.id === state.connectSourceId) {
+        item.classList.add("is-connect-source");
+    }
+    if (guides.connectCandidateIds?.has(node.id)) {
+        item.classList.add("is-connect-candidate");
+    }
+    if (guides.connectBlockedIds?.has(node.id)) {
+        item.classList.add("is-connect-blocked");
+    }
+    if (guides.containmentCandidateIds?.has(node.id)) {
+        item.classList.add("is-containment-candidate");
+    }
+    if (guides.recommendedParentId === node.id) {
+        item.classList.add("is-containment-target");
     }
     item.style.setProperty("--outline-depth", String(depth));
 
@@ -549,6 +661,30 @@ function renderOutlineNode(node, depth = 0) {
         meta.appendChild(bindingBadge);
     }
 
+    if (guides.recommendedParentId === node.id) {
+        const targetBadge = document.createElement("span");
+        targetBadge.className = "outline-badge ok";
+        targetBadge.textContent = "추가 위치";
+        meta.appendChild(targetBadge);
+    } else if (guides.containmentCandidateIds?.has(node.id)) {
+        const candidateBadge = document.createElement("span");
+        candidateBadge.className = "outline-badge ok";
+        candidateBadge.textContent = "허용 parent";
+        meta.appendChild(candidateBadge);
+    }
+
+    if (guides.connectCandidateIds?.has(node.id)) {
+        const connectBadge = document.createElement("span");
+        connectBadge.className = "outline-badge ok";
+        connectBadge.textContent = "연결 가능";
+        meta.appendChild(connectBadge);
+    } else if (guides.connectBlockedIds?.has(node.id)) {
+        const blockedBadge = document.createElement("span");
+        blockedBadge.className = "outline-badge warning";
+        blockedBadge.textContent = "연결 불가";
+        meta.appendChild(blockedBadge);
+    }
+
     item.appendChild(main);
     item.appendChild(meta);
     item.addEventListener("click", () => {
@@ -561,19 +697,19 @@ function renderOutlineNode(node, depth = 0) {
     return item;
 }
 
-function renderOutlineBranch(nodes, depth = 0) {
+function renderOutlineBranch(nodes, depth = 0, guides = {}) {
     const fragment = document.createDocumentFragment();
     for (const node of sortNodesForOutline(nodes)) {
-        fragment.appendChild(renderOutlineNode(node, depth));
+        fragment.appendChild(renderOutlineNode(node, depth, guides));
         const children = getChildren(node.id);
         if (children.length > 0) {
-            fragment.appendChild(renderOutlineBranch(children, depth + 1));
+            fragment.appendChild(renderOutlineBranch(children, depth + 1, guides));
         }
     }
     return fragment;
 }
 
-function renderOutline() {
+function renderOutline(guides = {}) {
     if (!outlineTreeRoot) {
         return;
     }
@@ -598,7 +734,7 @@ function renderOutline() {
     root.appendChild(rootMeta);
 
     outlineTreeRoot.appendChild(root);
-    outlineTreeRoot.appendChild(renderOutlineBranch(getRootNodes(), 0));
+    outlineTreeRoot.appendChild(renderOutlineBranch(getRootNodes(), 0, guides));
 }
 
 async function loadPalette(metamodelVersionCode) {
@@ -769,6 +905,8 @@ function syncSelectionPanel() {
 }
 
 function render() {
+    const containmentGuide = getContainmentPreviewGuide();
+    const connectGuide = getConnectGuide();
     renderDiagram(svg, {
         nodes: state.nodes,
         edges: state.edges,
@@ -776,13 +914,23 @@ function render() {
         selectedNodeId: state.selectedNodeId,
         selectedEdgeId: state.selectedEdgeId,
         connectSourceId: state.connectSourceId,
+        connectCandidateIds: connectGuide.candidateIds,
+        connectBlockedIds: connectGuide.blockedIds,
+        containmentCandidateIds: containmentGuide.candidateIds,
+        containmentRecommendedParentId: containmentGuide.recommendedParentId,
         onNodeClick: handleNodeClick,
         onNodePointerDown: handleNodePointerDown,
         onEdgeClick: handleEdgeClick,
     });
     syncSelectionPanel();
-    renderOutline();
+    renderOutline({
+        connectCandidateIds: connectGuide.candidateIds,
+        connectBlockedIds: connectGuide.blockedIds,
+        containmentCandidateIds: containmentGuide.candidateIds,
+        recommendedParentId: containmentGuide.recommendedParentId,
+    });
     refreshPaletteInteractivity();
+    refreshPalettePreviewState();
 }
 
 async function loadView() {
@@ -836,6 +984,7 @@ async function loadView() {
         state.selectedNodeId = null;
         state.selectedEdgeId = null;
         state.connectSourceId = null;
+        state.previewCreateNodeType = null;
         updateRevision(payload.version.revision);
         updateEditorMode();
         render();
@@ -868,6 +1017,7 @@ async function addNode(nodeType) {
         state.nodes.push(payload.node);
         state.selectedNodeId = payload.node.id;
         state.selectedEdgeId = null;
+        state.previewCreateNodeType = null;
         updateRevision(payload.revision);
         render();
         setStatus(`${nodeType}가 추가되었습니다.`);
@@ -885,9 +1035,17 @@ function startConnectMode() {
         return;
     }
     state.connectSourceId = state.selectedNodeId;
+    state.previewCreateNodeType = null;
     state.selectedEdgeId = null;
+    const connectGuide = getConnectGuide();
+    if (connectGuide.candidateIds.size === 0) {
+        state.connectSourceId = null;
+        render();
+        showBanner("현재 메타모델 기준으로 연결 가능한 대상이 없습니다.", "error");
+        return;
+    }
     render();
-    setStatus(`노드 ${state.connectSourceId} 에서 시작하는 통신선을 기다리는 중입니다.`);
+    setStatus(`연결 가능한 대상 ${connectGuide.candidateIds.size}개를 표시했습니다.`);
 }
 
 async function createEdge(targetNodeId) {
@@ -908,6 +1066,9 @@ async function createEdge(targetNodeId) {
         const targetNode = getNode(targetNodeId);
         const edgePlan = resolveEdgeCreationPlan(sourceNode, targetNode);
         const matchedAssociation = edgePlan?.association || null;
+        if (!matchedAssociation) {
+            throw new Error("현재 메타모델 기준으로 연결할 수 없는 조합입니다.");
+        }
         const matchedEdgeType = matchedAssociation?.semantics?.default_edge_type;
         const edgeItem = getPaletteItemByType(matchedEdgeType) || getFirstEdgePaletteItem();
         if (!edgeItem) {
@@ -943,7 +1104,6 @@ async function createEdge(targetNodeId) {
         );
     } catch (error) {
         showBanner(error.message, "error");
-        state.connectSourceId = null;
         render();
     }
 }
@@ -1034,6 +1194,13 @@ function handleNodeClick(node, event) {
     }
 
     if (state.connectSourceId && state.connectSourceId !== node.id) {
+        const connectGuide = getConnectGuide();
+        if (!connectGuide.candidateIds.has(node.id)) {
+            showBanner("현재 메타모델 기준으로 연결할 수 없는 대상입니다.", "error");
+            setStatus("연결 가능한 대상만 강조 표시됩니다.");
+            render();
+            return;
+        }
         createEdge(node.id);
         return;
     }
@@ -1174,6 +1341,7 @@ svg.addEventListener("click", () => {
     state.selectedNodeId = null;
     state.selectedEdgeId = null;
     state.connectSourceId = null;
+    state.previewCreateNodeType = null;
     render();
 });
 

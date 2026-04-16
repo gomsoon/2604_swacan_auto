@@ -54,11 +54,15 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     expect(page.get_by_role("button", name="가상 머신 추가")).to_be_disabled()
 
     page.get_by_role("button", name="물리 서버 추가").click()
+    server_node = page.locator('g.diagram-node[data-node-type="PhysicalServer"]').first
     server_shape = page.locator('g.diagram-node[data-node-type="PhysicalServer"] .node-shape').first
     expect(server_shape).to_be_visible()
     expect(page.locator('g.diagram-node[data-node-type="PhysicalServer"]')).to_have_count(1)
     expect(page.get_by_role("button", name="가상 머신 추가")).to_be_visible()
     expect(page.get_by_role("button", name="가상 머신 추가")).to_be_enabled()
+    page.get_by_role("button", name="가상 머신 추가").hover()
+    expect(server_node).to_have_class(re.compile(r".*is-containment-target.*"))
+    page.locator("#editor-canvas").hover()
 
     server_shape.click(force=True)
     page.get_by_role("button", name="가상 머신 추가").click()
@@ -102,6 +106,12 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
 
     expect(page.get_by_role("button", name="통신선 시작")).to_be_visible()
     page.get_by_role("button", name="통신선 시작").click()
+    expect(page.locator('g.diagram-node[data-node-type="MonitoringAgent"]').first).to_have_class(re.compile(r".*is-connect-candidate.*"))
+    expect(server_node).to_have_class(re.compile(r".*is-connect-blocked.*"))
+    page.locator("#editor-canvas").hover()
+    server_shape.click(force=True)
+    expect(page.locator("path.diagram-edge")).to_have_count(0)
+    expect(page.locator('g.diagram-node[data-node-type="SoftwareProcess"]').nth(1)).to_have_class(re.compile(r".*is-connect-source.*"))
     agent_shape.click(force=True)
     expect(page.locator("path.diagram-edge")).to_have_count(1)
     expect(page.locator("#edge-link-text")).to_contain_text("Worker Alpha")

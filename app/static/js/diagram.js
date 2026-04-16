@@ -170,6 +170,10 @@ export function renderDiagram(svg, options) {
         selectedNodeId = null,
         selectedEdgeId = null,
         connectSourceId = null,
+        connectCandidateIds = new Set(),
+        connectBlockedIds = new Set(),
+        containmentCandidateIds = new Set(),
+        containmentRecommendedParentId = null,
         latestStatesByTargetId = new Map(),
         latestStatesByMonitoredObjectId = new Map(),
         alertsByMonitoredObjectId = new Map(),
@@ -266,6 +270,18 @@ export function renderDiagram(svg, options) {
         }
         if (node.id === connectSourceId) {
             classes.push("is-connect-source");
+        }
+        if (connectCandidateIds instanceof Set && connectCandidateIds.has(node.id)) {
+            classes.push("is-connect-candidate");
+        }
+        if (connectBlockedIds instanceof Set && connectBlockedIds.has(node.id)) {
+            classes.push("is-connect-blocked");
+        }
+        if (containmentCandidateIds instanceof Set && containmentCandidateIds.has(node.id)) {
+            classes.push("is-containment-candidate");
+        }
+        if (containmentRecommendedParentId === node.id) {
+            classes.push("is-containment-target");
         }
         if (statusClass) {
             classes.push(statusClass);

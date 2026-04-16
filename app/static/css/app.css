@@ -355,6 +355,12 @@ a {
     justify-content: flex-start;
 }
 
+.palette-button.is-previewing {
+    border-color: rgba(22, 93, 91, 0.28);
+    background: rgba(217, 239, 236, 0.78);
+    box-shadow: inset 0 0 0 1px rgba(22, 93, 91, 0.12);
+}
+
 .toolbar-status {
     display: flex;
     align-items: center;
@@ -443,6 +449,26 @@ a {
     background: var(--accent-soft);
 }
 
+.outline-item.is-connect-source {
+    border-color: rgba(141, 100, 0, 0.4);
+    box-shadow: inset 0 0 0 1px rgba(141, 100, 0, 0.16);
+}
+
+.outline-item.is-containment-candidate,
+.outline-item.is-connect-candidate {
+    background: rgba(219, 243, 229, 0.9);
+    border-color: rgba(31, 122, 70, 0.22);
+}
+
+.outline-item.is-containment-target {
+    border-color: rgba(22, 93, 91, 0.35);
+    box-shadow: inset 0 0 0 1px rgba(22, 93, 91, 0.15);
+}
+
+.outline-item.is-connect-blocked {
+    opacity: 0.72;
+}
+
 .outline-item-main {
     display: grid;
     gap: 2px;
@@ -478,6 +504,18 @@ a {
 .outline-badge.binding {
     color: var(--accent);
     border-color: rgba(22, 93, 91, 0.22);
+}
+
+.outline-badge.ok {
+    color: var(--ok);
+    border-color: rgba(31, 122, 70, 0.22);
+    background: rgba(219, 243, 229, 0.9);
+}
+
+.outline-badge.warning {
+    color: var(--warning);
+    border-color: rgba(141, 100, 0, 0.22);
+    background: rgba(255, 241, 204, 0.96);
 }
 
 .dynamic-properties-panel {
@@ -800,6 +838,22 @@ a {
 .diagram-node.is-connect-source .node-shape {
     stroke: #8d6400;
     stroke-dasharray: 7 5;
+}
+
+.diagram-node.is-connect-candidate .node-shape,
+.diagram-node.is-containment-candidate .node-shape {
+    stroke: var(--ok);
+    stroke-width: 3;
+}
+
+.diagram-node.is-containment-target .node-shape {
+    stroke: var(--accent);
+    stroke-width: 3;
+    stroke-dasharray: 10 4;
+}
+
+.diagram-node.is-connect-blocked {
+    opacity: 0.46;
 }
 
 .diagram-node.status-up .node-shape {
