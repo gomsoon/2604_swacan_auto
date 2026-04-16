@@ -132,28 +132,41 @@
 
 ## 5. 현재 시점의 우선순위
 
-가장 먼저 추천하는 순서는 다음과 같다.
+Phase 기준의 큰 방향은 여전히 유효하지만, 현재 구현 상태를 반영하면 실제 우선순위는 아래처럼 다시 읽는 것이 더 적절하다.
 
-1. Phase 1 메타모델 기반 표현 강화 마무리
-2. Phase 2 관리자용 metamodel 관리 기능
-3. Phase 3 runtime identity 분리
-4. Phase 4 event storm 대응
-5. Phase 5 agent 효율화
-6. Phase 6 제품성 보강
+1. 메타모델 lifecycle hardening
+2. Architecture Editor / Monitoring View 연동 안정화
+3. 권한 / 감사 로그
+4. alert backlog와 운영 고도화는 후속 축으로 유지
+5. agent 효율화와 product polish는 그 다음 단계로 확장
 
 이 순서를 추천하는 이유:
-- 메타모델과 notation 구조를 먼저 고정해야 이후 확장이 흔들리지 않는다.
-- 같은 runtime 대상을 여러 view가 공유할 수 있도록 runtime identity를 view snapshot에서 분리해야 event/alert 설계가 안정된다.
-- agent 고도화도 중요하지만, backend와 frontend가 같은 metamodel 축과 runtime identity 축을 공유한 뒤에 확장하는 편이 더 안정적이다.
+- 메타모델 편집 기능 자체는 이미 상당 부분 구현되었으므로, 이제는 `무엇을 더 편집할 수 있는가`보다 `안전하게 publish하고 운영할 수 있는가`가 더 중요하다.
+- 같은 metamodel 정의가 `Architecture Editor`와 `Monitoring View`에서 일관되게 소비되어야 제품 중심축이 흔들리지 않는다.
+- 메타모델은 시스템 전체에 영향을 주는 정의이므로, edit / publish / activate에 대한 감사 흔적이 점점 중요해진다.
+- alert는 이미 1차 운영 가능 수준까지 올라와 있으므로, 지금은 메타모델 주력축을 먼저 다지는 편이 더 효율적이다.
 
 ## 6. 현재 바로 이어갈 추천 작업
 
 지금 시점에서 가장 자연스러운 다음 작업은 아래와 같다.
 
-1. 관리자용 metamodel draft 내부 편집 API와 UI 구현
-2. semantic type / property / containment / notation draft 편집 흐름 연결
-3. metamodel draft 검증과 publish 전환 조건 정리
-4. alert backlog는 `archive/action log 정리`, `suppression`, `rule dry-run preview`를 후속 과제로 유지
+1. 메타모델 lifecycle hardening
+- delete / disable / clone / replace 흐름
+- publish validation 확장
+- draft / published / active / deprecated 버전 운영 UX 보강
+
+2. Architecture Editor / Monitoring View 연동 안정화
+- metamodel 변경이 editor와 monitor에 실제로 어떻게 반영되는지 경계를 더 명확히 고정
+- compatibility fallback 정리
+- publish 전 영향도와 실제 사용 경로를 더 강하게 연결
+
+3. 권한 / 감사 로그
+- draft edit
+- publish
+- activate
+에 대한 사용자, 시각, 변경 흔적 기록
+
+4. alert backlog는 `archive/action log 역할 분리`, `suppression 고도화`, `rule dry-run preview`를 후속 과제로 유지
 
 ## 7. 주요 리스크
 
