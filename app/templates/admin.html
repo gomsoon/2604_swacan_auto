@@ -262,6 +262,74 @@
     <section class="card">
         <div class="section-header section-header-stack">
             <div>
+                <h2>Metamodel Editor: Containment Rule</h2>
+                <p class="section-copy">선택한 draft version 기준으로 parent/child containment rule을 생성하고 수정합니다.</p>
+            </div>
+            <button id="refresh-metamodel-containment-rules-button" class="button ghost small" type="button">갱신</button>
+        </div>
+
+        <div class="admin-metamodel-layout">
+            <form id="metamodel-containment-rule-form" class="stack-form card admin-subcard">
+                <div class="section-header">
+                    <h3 id="metamodel-containment-rule-form-title">Containment Rule 생성</h3>
+                    <button id="metamodel-containment-rule-form-reset" class="button ghost small" type="button">초기화</button>
+                </div>
+                <input id="metamodel-containment-rule-id" type="hidden" value="">
+                <label class="field">
+                    <span>Draft Version</span>
+                    <select id="metamodel-containment-rule-version-id"></select>
+                </label>
+                <div class="field-grid">
+                    <label class="field compact-field">
+                        <span>Parent Type</span>
+                        <select id="metamodel-containment-parent-type-id"></select>
+                    </label>
+                    <label class="field compact-field">
+                        <span>Child Type</span>
+                        <select id="metamodel-containment-child-type-id"></select>
+                    </label>
+                </div>
+                <div class="field-grid">
+                    <label class="field compact-field">
+                        <span>Min Count</span>
+                        <input id="metamodel-containment-min-count" type="number" min="0" max="9999" placeholder="비우면 제한 없음">
+                    </label>
+                    <label class="field compact-field">
+                        <span>Max Count</span>
+                        <input id="metamodel-containment-max-count" type="number" min="0" max="9999" placeholder="비우면 제한 없음">
+                    </label>
+                </div>
+                <div class="field-grid">
+                    <label class="field compact-field">
+                        <span>Cardinality Scope</span>
+                        <select id="metamodel-containment-cardinality-scope">
+                            <option value="group_total">group_total</option>
+                            <option value="per_member">per_member</option>
+                        </select>
+                    </label>
+                    <label class="field checkbox-field">
+                        <span><input id="metamodel-containment-is-required" type="checkbox"> required</span>
+                    </label>
+                </div>
+                <div class="toolbar-inline">
+                    <button id="save-metamodel-containment-rule-button" class="button primary" type="submit">저장</button>
+                    <span id="metamodel-containment-rule-form-mode" class="meta-pill">create</span>
+                </div>
+            </form>
+
+            <section class="admin-subcard">
+                <div class="section-header">
+                    <h3>Draft Containment Rule 목록</h3>
+                    <span id="metamodel-containment-rule-count" class="meta-pill">0개</span>
+                </div>
+                <div id="admin-metamodel-containment-rules-list" class="admin-list"></div>
+            </section>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="section-header section-header-stack">
+            <div>
                 <h2>Alert Rule</h2>
                 <p class="section-copy">warning/critical 임계치를 object type 또는 특정 monitored object 단위로 조정합니다.</p>
             </div>

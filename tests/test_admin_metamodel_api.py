@@ -548,3 +548,188 @@ def test_admin_rejects_invalid_property_definition_payload_boundaries(seeded_cli
     assert invalid_default_json.get_json()["error"]["code"] == "validation_error"
     assert invalid_sort_order.status_code == 400
     assert invalid_sort_order.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_can_list_containment_rules_for_version(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/metamodel/versions/1/containment-rules")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["version"]["version_code"] == "seed-v1"
+    assert any(item["parent_type_code"] == "PhysicalServer" and item["child_type_code"] == "SoftwareProcess" for item in payload["items"])
+
+
+def test_admin_can_create_containment_rule_in_draft_version(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v9-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for containment rule create",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    semantic_types = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/semantic-types").get_json()["items"]
+    parent_type = next(item for item in semantic_types if item["code"] == "PhysicalServer")
+    child_type = next(item for item in semantic_types if item["code"] == "CommunicationLink")
+
+    response = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/containment-rules",
+        json={
+            "parent_type_id": parent_type["id"],
+            "child_type_id": child_type["id"],
+            "min_count": 0,
+            "max_count": 1,
+            "cardinality_scope": "group_total",
+            "is_required": False,
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert payload["containment_rule"]["parent_type_code"] == "PhysicalServer"
+    assert payload["containment_rule"]["child_type_code"] == "CommunicationLink"
+    assert payload["containment_rule"]["max_count"] == 1
+
+
+def test_admin_rejects_containment_rule_create_for_published_version(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/metamodel/versions/1/containment-rules",
+        json={
+            "parent_type_id": 101,
+            "child_type_id": 105,
+            "min_count": 0,
+            "max_count": 1,
+            "cardinality_scope": "group_total",
+            "is_required": False,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["error"]["code"] == "invalid_state"
+
+
+def test_admin_can_update_containment_rule_with_boundary_values(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v10-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for containment rule update",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    semantic_types = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/semantic-types").get_json()["items"]
+    server_type = next(item for item in semantic_types if item["code"] == "PhysicalServer")
+    process_type = next(item for item in semantic_types if item["code"] == "SoftwareProcess")
+    rules = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/containment-rules").get_json()["items"]
+    existing_rule = next(
+        item
+        for item in rules
+        if item["parent_type_code"] == "PhysicalServer" and item["child_type_code"] == "SoftwareProcess"
+    )
+    rule_id = existing_rule["id"]
+
+    ok_response = seeded_client.patch(
+        f"/api/admin/metamodel/containment-rules/{rule_id}",
+        json={
+            "parent_type_id": server_type["id"],
+            "child_type_id": process_type["id"],
+            "min_count": 1,
+            "max_count": 9999,
+            "cardinality_scope": "per_member",
+            "is_required": True,
+        },
+    )
+    invalid_range = seeded_client.patch(
+        f"/api/admin/metamodel/containment-rules/{rule_id}",
+        json={
+            "parent_type_id": server_type["id"],
+            "child_type_id": process_type["id"],
+            "min_count": 2,
+            "max_count": 1,
+            "cardinality_scope": "group_total",
+            "is_required": False,
+        },
+    )
+
+    assert ok_response.status_code == 200
+    ok_payload = ok_response.get_json()["containment_rule"]
+    assert ok_payload["min_count"] == 1
+    assert ok_payload["max_count"] == 9999
+    assert ok_payload["cardinality_scope"] == "per_member"
+    assert ok_payload["is_required"] is True
+    assert invalid_range.status_code == 400
+    assert invalid_range.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_rejects_invalid_containment_rule_payload_boundaries(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v11-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for containment rule validation",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    semantic_types = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/semantic-types").get_json()["items"]
+    server_type = next(item for item in semantic_types if item["code"] == "PhysicalServer")
+    process_type = next(item for item in semantic_types if item["code"] == "SoftwareProcess")
+
+    same_type = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/containment-rules",
+        json={
+            "parent_type_id": server_type["id"],
+            "child_type_id": server_type["id"],
+            "min_count": 0,
+            "max_count": None,
+            "cardinality_scope": "group_total",
+            "is_required": False,
+        },
+    )
+    invalid_scope = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/containment-rules",
+        json={
+            "parent_type_id": server_type["id"],
+            "child_type_id": process_type["id"],
+            "min_count": 0,
+            "max_count": None,
+            "cardinality_scope": "weird_scope",
+            "is_required": False,
+        },
+    )
+    invalid_type_membership = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/containment-rules",
+        json={
+            "parent_type_id": 101,
+            "child_type_id": process_type["id"],
+            "min_count": 0,
+            "max_count": None,
+            "cardinality_scope": "group_total",
+            "is_required": False,
+        },
+    )
+
+    assert same_type.status_code == 400
+    assert same_type.get_json()["error"]["code"] == "validation_error"
+    assert invalid_scope.status_code == 400
+    assert invalid_scope.get_json()["error"]["code"] == "validation_error"
+    assert invalid_type_membership.status_code == 400
+    assert invalid_type_membership.get_json()["error"]["code"] == "validation_error"

@@ -14,6 +14,7 @@ bp = Blueprint("admin_metamodel_api", __name__, url_prefix="/api/admin/metamodel
 ALLOWED_VERSION_STATUSES = {"draft", "published", "deprecated"}
 ALLOWED_SEMANTIC_TYPE_KINDS = {"node", "edge", "container", "runtime-only"}
 ALLOWED_PROPERTY_VALUE_TYPES = {"string", "integer", "number", "boolean", "enum", "json"}
+ALLOWED_CARDINALITY_SCOPES = {"group_total", "per_member"}
 
 
 def now_iso() -> str:
@@ -201,6 +202,50 @@ def serialize_property_definition(row) -> dict[str, Any]:
     }
 
 
+def fetch_containment_rule_row(rule_id: int):
+    return get_db().execute(
+        """
+        SELECT cr.id, cr.metamodel_version_id, cr.parent_type_id, cr.child_type_id, cr.min_count, cr.max_count,
+               cr.cardinality_scope, cr.is_required, cr.created_at, cr.updated_at,
+               parent_st.code AS parent_type_code,
+               parent_st.display_name AS parent_type_display_name,
+               child_st.code AS child_type_code,
+               child_st.display_name AS child_type_display_name,
+               mv.status AS metamodel_version_status,
+               mv.version_code AS metamodel_version_code,
+               ns.code AS namespace_code
+        FROM containment_rules AS cr
+        JOIN semantic_types AS parent_st ON parent_st.id = cr.parent_type_id
+        JOIN semantic_types AS child_st ON child_st.id = cr.child_type_id
+        JOIN metamodel_versions AS mv ON mv.id = cr.metamodel_version_id
+        JOIN metamodel_namespaces AS ns ON ns.id = mv.namespace_id
+        WHERE cr.id = ?
+        """,
+        (rule_id,),
+    ).fetchone()
+
+
+def serialize_containment_rule(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "metamodel_version_id": row["metamodel_version_id"],
+        "metamodel_version_code": row["metamodel_version_code"],
+        "namespace_code": row["namespace_code"],
+        "parent_type_id": row["parent_type_id"],
+        "parent_type_code": row["parent_type_code"],
+        "parent_type_display_name": row["parent_type_display_name"],
+        "child_type_id": row["child_type_id"],
+        "child_type_code": row["child_type_code"],
+        "child_type_display_name": row["child_type_display_name"],
+        "min_count": row["min_count"],
+        "max_count": row["max_count"],
+        "cardinality_scope": row["cardinality_scope"],
+        "is_required": bool(row["is_required"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
 def validate_semantic_type_payload(data: dict[str, Any], *, partial: bool = False) -> tuple[dict[str, Any] | None, Any | None]:
     payload = dict(data)
     try:
@@ -283,6 +328,50 @@ def validate_property_payload(data: dict[str, Any], *, partial: bool = False) ->
             return None, error_response("validation_error", "sort_order must be between 0 and 9999", 400)
         payload["sort_order"] = sort_order
 
+    return payload, None
+
+
+def validate_containment_rule_payload(data: dict[str, Any]) -> tuple[dict[str, Any] | None, Any | None]:
+    payload = dict(data)
+
+    for field_name in ("parent_type_id", "child_type_id"):
+        value = payload.get(field_name)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            return None, error_response("validation_error", f"{field_name} must be a positive integer", 400)
+
+    if payload["parent_type_id"] == payload["child_type_id"]:
+        return None, error_response("validation_error", "parent_type_id and child_type_id must be different", 400)
+
+    cardinality_scope = payload.get("cardinality_scope")
+    if cardinality_scope not in ALLOWED_CARDINALITY_SCOPES:
+        return None, error_response("validation_error", "cardinality_scope is invalid", 400)
+
+    is_required = payload.get("is_required")
+    if not isinstance(is_required, bool):
+        return None, error_response("validation_error", "is_required must be a boolean", 400)
+
+    def normalize_count(field_name: str) -> tuple[int | None, Any | None]:
+        value = payload.get(field_name)
+        if value in (None, ""):
+            return None, None
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None, error_response("validation_error", f"{field_name} must be an integer or null", 400)
+        if value < 0 or value > 9999:
+            return None, error_response("validation_error", f"{field_name} must be between 0 and 9999", 400)
+        return value, None
+
+    min_count, error = normalize_count("min_count")
+    if error:
+        return None, error
+    max_count, error = normalize_count("max_count")
+    if error:
+        return None, error
+
+    if min_count is not None and max_count is not None and max_count < min_count:
+        return None, error_response("validation_error", "max_count must be greater than or equal to min_count", 400)
+
+    payload["min_count"] = min_count
+    payload["max_count"] = max_count
     return payload, None
 
 
@@ -959,3 +1048,197 @@ def update_property_definition(property_id: int):
 
     updated = fetch_property_row(property_id)
     return {"property_definition": serialize_property_definition(updated)}
+
+
+@bp.get("/versions/<int:version_id>/containment-rules")
+@admin_required
+def list_containment_rules(version_id: int):
+    version = fetch_version(version_id)
+    if version is None:
+        return error_response("metamodel_not_found", "metamodel version not found", 404)
+
+    rows = get_db().execute(
+        """
+        SELECT cr.id, cr.metamodel_version_id, cr.parent_type_id, cr.child_type_id, cr.min_count, cr.max_count,
+               cr.cardinality_scope, cr.is_required, cr.created_at, cr.updated_at,
+               parent_st.code AS parent_type_code,
+               parent_st.display_name AS parent_type_display_name,
+               child_st.code AS child_type_code,
+               child_st.display_name AS child_type_display_name,
+               mv.status AS metamodel_version_status,
+               mv.version_code AS metamodel_version_code,
+               ns.code AS namespace_code
+        FROM containment_rules AS cr
+        JOIN semantic_types AS parent_st ON parent_st.id = cr.parent_type_id
+        JOIN semantic_types AS child_st ON child_st.id = cr.child_type_id
+        JOIN metamodel_versions AS mv ON mv.id = cr.metamodel_version_id
+        JOIN metamodel_namespaces AS ns ON ns.id = mv.namespace_id
+        WHERE cr.metamodel_version_id = ?
+        ORDER BY parent_st.code ASC, child_st.code ASC, cr.id ASC
+        """,
+        (version_id,),
+    ).fetchall()
+
+    return {
+        "version": serialize_version(version),
+        "items": [serialize_containment_rule(row) for row in rows],
+    }
+
+
+@bp.post("/versions/<int:version_id>/containment-rules")
+@admin_required
+def create_containment_rule(version_id: int):
+    version, error = require_draft_version(version_id)
+    if error:
+        return error
+
+    payload, error = validate_containment_rule_payload(request.get_json(silent=True) or {})
+    if error:
+        return error
+
+    type_rows = get_db().execute(
+        """
+        SELECT id
+        FROM semantic_types
+        WHERE metamodel_version_id = ? AND id IN (?, ?)
+        """,
+        (version_id, payload["parent_type_id"], payload["child_type_id"]),
+    ).fetchall()
+    if len(type_rows) != 2:
+        return error_response("validation_error", "parent_type_id and child_type_id must belong to the selected version", 400)
+
+    conflict = get_db().execute(
+        """
+        SELECT 1
+        FROM containment_rules
+        WHERE metamodel_version_id = ? AND parent_type_id = ? AND child_type_id = ?
+        """,
+        (version_id, payload["parent_type_id"], payload["child_type_id"]),
+    ).fetchone()
+    if conflict is not None:
+        return error_response("containment_rule_conflict", "containment rule already exists in version", 409)
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    cursor = db_conn.execute(
+        """
+        INSERT INTO containment_rules (
+            metamodel_version_id, parent_type_id, child_type_id, min_count, max_count,
+            cardinality_scope, is_required, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            version_id,
+            payload["parent_type_id"],
+            payload["child_type_id"],
+            payload["min_count"],
+            payload["max_count"],
+            payload["cardinality_scope"],
+            int(payload["is_required"]),
+            timestamp,
+            timestamp,
+        ),
+    )
+    db_conn.execute(
+        """
+        UPDATE metamodel_versions
+        SET updated_at = ?
+        WHERE id = ?
+        """,
+        (timestamp, version_id),
+    )
+    db_conn.commit()
+
+    created = fetch_containment_rule_row(int(cursor.lastrowid))
+    return {
+        "version": serialize_version(version),
+        "containment_rule": serialize_containment_rule(created),
+    }, 201
+
+
+@bp.patch("/containment-rules/<int:rule_id>")
+@admin_required
+def update_containment_rule(rule_id: int):
+    existing = fetch_containment_rule_row(rule_id)
+    if existing is None:
+        return error_response("containment_rule_not_found", "containment rule not found", 404)
+    if existing["metamodel_version_status"] != "draft":
+        return error_response("invalid_state", "only draft containment rules can be edited", 409)
+
+    current_payload = {
+        "parent_type_id": existing["parent_type_id"],
+        "child_type_id": existing["child_type_id"],
+        "min_count": existing["min_count"],
+        "max_count": existing["max_count"],
+        "cardinality_scope": existing["cardinality_scope"],
+        "is_required": bool(existing["is_required"]),
+    }
+    current_payload.update(request.get_json(silent=True) or {})
+    payload, error = validate_containment_rule_payload(current_payload)
+    if error:
+        return error
+
+    type_rows = get_db().execute(
+        """
+        SELECT id
+        FROM semantic_types
+        WHERE metamodel_version_id = ? AND id IN (?, ?)
+        """,
+        (existing["metamodel_version_id"], payload["parent_type_id"], payload["child_type_id"]),
+    ).fetchall()
+    if len(type_rows) != 2:
+        return error_response("validation_error", "parent_type_id and child_type_id must belong to the selected version", 400)
+
+    conflict = get_db().execute(
+        """
+        SELECT 1
+        FROM containment_rules
+        WHERE metamodel_version_id = ? AND parent_type_id = ? AND child_type_id = ? AND id != ?
+        """,
+        (
+            existing["metamodel_version_id"],
+            payload["parent_type_id"],
+            payload["child_type_id"],
+            rule_id,
+        ),
+    ).fetchone()
+    if conflict is not None:
+        return error_response("containment_rule_conflict", "containment rule already exists in version", 409)
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    db_conn.execute(
+        """
+        UPDATE containment_rules
+        SET parent_type_id = ?,
+            child_type_id = ?,
+            min_count = ?,
+            max_count = ?,
+            cardinality_scope = ?,
+            is_required = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            payload["parent_type_id"],
+            payload["child_type_id"],
+            payload["min_count"],
+            payload["max_count"],
+            payload["cardinality_scope"],
+            int(payload["is_required"]),
+            timestamp,
+            rule_id,
+        ),
+    )
+    db_conn.execute(
+        """
+        UPDATE metamodel_versions
+        SET updated_at = ?
+        WHERE id = ?
+        """,
+        (timestamp, existing["metamodel_version_id"]),
+    )
+    db_conn.commit()
+
+    updated = fetch_containment_rule_row(rule_id)
+    return {"containment_rule": serialize_containment_rule(updated)}

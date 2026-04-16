@@ -360,6 +360,26 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
 
     expect(page.locator("#admin-metamodel-properties-list .admin-item", has_text="Worker Count Updated").first).to_contain_text("user_editable=false")
 
+    page.locator("#metamodel-containment-rule-version-id").select_option(label="core / core-v2-ui-draft")
+    page.locator("#metamodel-containment-parent-type-id").select_option(label="Physical Server (PhysicalServer)")
+    page.locator("#metamodel-containment-child-type-id").select_option(label="Worker Pool Updated (WorkerPool)")
+    page.locator("#metamodel-containment-min-count").fill("0")
+    page.locator("#metamodel-containment-max-count").fill("4")
+    page.locator("#metamodel-containment-cardinality-scope").select_option("per_member")
+    page.locator("#metamodel-containment-is-required").check()
+    page.locator("#save-metamodel-containment-rule-button").click()
+
+    createdContainment = page.locator("#admin-metamodel-containment-rules-list .admin-item", has_text="Worker Pool Updated").first
+    expect(createdContainment).to_contain_text("PhysicalServer -> WorkerPool")
+    expect(createdContainment).to_contain_text("per_member")
+
+    createdContainment.get_by_role("button", name="수정").click()
+    expect(page.locator("#metamodel-containment-rule-form-mode")).to_contain_text("edit")
+    page.locator("#metamodel-containment-max-count").fill("8")
+    page.locator("#save-metamodel-containment-rule-button").click()
+
+    expect(page.locator("#admin-metamodel-containment-rules-list .admin-item", has_text="Worker Pool Updated").first).to_contain_text("max=8")
+
     createdVersion.locator(".publish-metamodel-button").click()
 
     expect(page.locator(".admin-item", has_text="core-v2-ui-draft").first).to_contain_text("published")
