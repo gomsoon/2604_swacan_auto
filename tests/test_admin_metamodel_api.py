@@ -526,6 +526,231 @@ def test_admin_rejects_invalid_semantic_type_payload_boundaries(seeded_client) -
     assert invalid_bool.get_json()["error"]["code"] == "validation_error"
 
 
+def test_admin_can_clone_semantic_type_with_properties_and_notations(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v5-clone-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for semantic type clone",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    create_type = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPool",
+            "display_name": "Worker Pool",
+            "kind": "container",
+            "runtime_kind": "process-group",
+            "description": "Clone source",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+    assert create_type.status_code == 201
+    source_type_id = create_type.get_json()["semantic_type"]["id"]
+
+    property_response = seeded_client.post(
+        f"/api/admin/metamodel/semantic-types/{source_type_id}/properties",
+        json={
+            "code": "worker_count",
+            "display_name": "Worker Count",
+            "value_type": "integer",
+            "unit": "count",
+            "default_value_json": "4",
+            "sort_order": 10,
+            "is_required": False,
+            "is_runtime": True,
+            "is_user_editable": True,
+        },
+    )
+    assert property_response.status_code == 201
+
+    palette_groups = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/palette-groups").get_json()["items"]
+    process_palette = next(item for item in palette_groups if item["code"] == "processes")
+    notation_response = seeded_client.post(
+        f"/api/admin/metamodel/semantic-types/{source_type_id}/notations",
+        json={
+            "semantic_type_id": source_type_id,
+            "palette_group_id": process_palette["id"],
+            "code": "workerpool.rounded_rect",
+            "display_name": "Worker Pool Notation",
+            "kind": "node",
+            "render_primitive": "rounded_rect",
+            "sort_order": 10,
+            "render_schema_json": "{\"primitive\":\"rounded_rect\"}",
+            "style_tokens_json": "{\"fill\":\"process-fill\"}",
+            "is_default": True,
+            "is_visible_in_palette": True,
+        },
+    )
+    assert notation_response.status_code == 201
+
+    clone_response = seeded_client.post(f"/api/admin/metamodel/semantic-types/{source_type_id}/clone")
+
+    assert clone_response.status_code == 201
+    payload = clone_response.get_json()
+    assert payload["semantic_type"]["id"] != source_type_id
+    assert payload["semantic_type"]["code"].startswith("WorkerPool")
+    assert payload["clone_summary"]["property_count"] == 1
+    assert payload["clone_summary"]["notation_count"] == 1
+    assert payload["clone_summary"]["default_notation_cloned"] is True
+
+    properties_payload = seeded_client.get(
+        f"/api/admin/metamodel/semantic-types/{payload['semantic_type']['id']}/properties"
+    ).get_json()
+    notations_payload = seeded_client.get(
+        f"/api/admin/metamodel/semantic-types/{payload['semantic_type']['id']}/notations"
+    ).get_json()
+    assert len(properties_payload["items"]) == 1
+    assert properties_payload["items"][0]["code"] == "worker_count"
+    assert len(notations_payload["items"]) == 1
+    assert notations_payload["items"][0]["is_default"] is True
+    assert notations_payload["items"][0]["code"] != "workerpool.rounded_rect"
+
+
+def test_admin_rejects_clone_for_published_semantic_type(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post("/api/admin/metamodel/semantic-types/103/clone")
+
+    assert response.status_code == 409
+    assert response.get_json()["error"]["code"] == "invalid_state"
+
+
+def test_admin_can_delete_unreferenced_semantic_type_and_owned_children(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v5-delete-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for semantic type delete",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    create_type = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPool",
+            "display_name": "Worker Pool",
+            "kind": "container",
+            "runtime_kind": "process-group",
+            "description": "Delete target",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+    assert create_type.status_code == 201
+    type_id = create_type.get_json()["semantic_type"]["id"]
+
+    property_response = seeded_client.post(
+        f"/api/admin/metamodel/semantic-types/{type_id}/properties",
+        json={
+            "code": "worker_count",
+            "display_name": "Worker Count",
+            "value_type": "integer",
+            "unit": "count",
+            "default_value_json": "4",
+            "sort_order": 10,
+            "is_required": False,
+            "is_runtime": True,
+            "is_user_editable": True,
+        },
+    )
+    assert property_response.status_code == 201
+
+    palette_groups = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/palette-groups").get_json()["items"]
+    process_palette = next(item for item in palette_groups if item["code"] == "processes")
+    notation_response = seeded_client.post(
+        f"/api/admin/metamodel/semantic-types/{type_id}/notations",
+        json={
+            "semantic_type_id": type_id,
+            "palette_group_id": process_palette["id"],
+            "code": "workerpool.rounded_rect",
+            "display_name": "Worker Pool Notation",
+            "kind": "node",
+            "render_primitive": "rounded_rect",
+            "sort_order": 10,
+            "render_schema_json": "{\"primitive\":\"rounded_rect\"}",
+            "style_tokens_json": "{\"fill\":\"process-fill\"}",
+            "is_default": True,
+            "is_visible_in_palette": True,
+        },
+    )
+    assert notation_response.status_code == 201
+
+    delete_response = seeded_client.delete(f"/api/admin/metamodel/semantic-types/{type_id}")
+
+    assert delete_response.status_code == 200
+    assert delete_response.get_json()["deleted"] is True
+    list_response = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/semantic-types")
+    assert all(item["id"] != type_id for item in list_response.get_json()["items"])
+
+
+def test_admin_rejects_delete_when_semantic_type_has_cross_references(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v5-protected-delete-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for semantic type delete protection",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    create_type = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPool",
+            "display_name": "Worker Pool",
+            "kind": "container",
+            "runtime_kind": "process-group",
+            "description": "Protected delete target",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+    assert create_type.status_code == 201
+    type_id = create_type.get_json()["semantic_type"]["id"]
+
+    semantic_types = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/semantic-types").get_json()["items"]
+    server_type = next(item for item in semantic_types if item["code"] == "PhysicalServer")
+    containment_response = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/containment-rules",
+        json={
+            "parent_type_id": server_type["id"],
+            "child_type_id": type_id,
+            "min_count": 0,
+            "max_count": 4,
+            "cardinality_scope": "group_total",
+            "is_required": False,
+        },
+    )
+    assert containment_response.status_code == 201
+
+    delete_response = seeded_client.delete(f"/api/admin/metamodel/semantic-types/{type_id}")
+
+    assert delete_response.status_code == 409
+    payload = delete_response.get_json()
+    assert payload["error"]["code"] == "semantic_type_in_use"
+    assert payload["dependency_counts"]["containment_in_count"] == 1
+
+
 def test_admin_can_list_property_definitions_for_semantic_type(seeded_client) -> None:
     login(seeded_client)
 

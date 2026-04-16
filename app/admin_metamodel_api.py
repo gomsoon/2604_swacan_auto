@@ -142,6 +142,66 @@ def serialize_semantic_type(row) -> dict[str, Any]:
     }
 
 
+def build_unique_clone_text(
+    base: str,
+    *,
+    max_length: int,
+    exists_fn,
+    suffix_builder,
+) -> str:
+    index = 1
+    while index < 1000:
+        suffix = suffix_builder(index)
+        candidate = f"{base[: max_length - len(suffix)]}{suffix}"
+        if not exists_fn(candidate):
+            return candidate
+        index += 1
+    raise ValueError("failed to generate unique clone value")
+
+
+def semantic_type_code_exists(version_id: int, code: str) -> bool:
+    row = get_db().execute(
+        """
+        SELECT 1
+        FROM semantic_types
+        WHERE metamodel_version_id = ? AND code = ?
+        """,
+        (version_id, code),
+    ).fetchone()
+    return row is not None
+
+
+def notation_code_exists(version_id: int, code: str) -> bool:
+    row = get_db().execute(
+        """
+        SELECT 1
+        FROM notation_definitions
+        WHERE metamodel_version_id = ? AND code = ?
+        """,
+        (version_id, code),
+    ).fetchone()
+    return row is not None
+
+
+def fetch_semantic_type_delete_blockers(type_id: int) -> dict[str, int]:
+    row = get_db().execute(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM containment_rules WHERE parent_type_id = ?) AS containment_out_count,
+            (SELECT COUNT(*) FROM containment_rules WHERE child_type_id = ?) AS containment_in_count,
+            (SELECT COUNT(*) FROM association_definitions WHERE source_type_id = ?) AS association_out_count,
+            (SELECT COUNT(*) FROM association_definitions WHERE target_type_id = ?) AS association_in_count
+        """,
+        (type_id, type_id, type_id, type_id),
+    ).fetchone()
+    return {
+        "containment_out_count": row["containment_out_count"],
+        "containment_in_count": row["containment_in_count"],
+        "association_out_count": row["association_out_count"],
+        "association_in_count": row["association_in_count"],
+    }
+
+
 def fetch_property_row(property_id: int):
     return get_db().execute(
         """
@@ -1662,6 +1722,226 @@ def update_semantic_type(type_id: int):
 
     updated = fetch_semantic_type_row(type_id)
     return {"semantic_type": serialize_semantic_type(updated)}
+
+
+@bp.post("/semantic-types/<int:type_id>/clone")
+@admin_required
+def clone_semantic_type(type_id: int):
+    existing = fetch_semantic_type_row(type_id)
+    if existing is None:
+        return error_response("semantic_type_not_found", "semantic type not found", 404)
+    if existing["metamodel_version_status"] != "draft":
+        return error_response("invalid_state", "only draft semantic types can be cloned", 409)
+
+    raw_payload = request.get_json(silent=True) or {}
+    try:
+        requested_code = parse_optional_string(raw_payload.get("code"), field_name="code", max_length=100)
+        requested_display_name = parse_optional_string(
+            raw_payload.get("display_name"),
+            field_name="display_name",
+            max_length=120,
+        )
+    except ValueError as exc:
+        return error_response("validation_error", str(exc), 400)
+
+    version_id = existing["metamodel_version_id"]
+    clone_code = requested_code or build_unique_clone_text(
+        existing["code"],
+        max_length=100,
+        exists_fn=lambda candidate: semantic_type_code_exists(version_id, candidate),
+        suffix_builder=lambda index: "_copy" if index == 1 else f"_copy{index}",
+    )
+    if semantic_type_code_exists(version_id, clone_code):
+        return error_response("semantic_type_conflict", "semantic type code already exists in version", 409)
+
+    clone_display_name = requested_display_name or build_unique_clone_text(
+        existing["display_name"],
+        max_length=120,
+        exists_fn=lambda _candidate: False,
+        suffix_builder=lambda index: " Copy" if index == 1 else f" Copy {index}",
+    )
+
+    property_rows = get_db().execute(
+        """
+        SELECT code, display_name, description, value_type, unit, default_value_json,
+               is_required, is_runtime, is_user_editable, sort_order
+        FROM property_definitions
+        WHERE semantic_type_id = ?
+        ORDER BY sort_order ASC, code ASC, id ASC
+        """,
+        (type_id,),
+    ).fetchall()
+    notation_rows = get_db().execute(
+        """
+        SELECT palette_group_id, code, display_name, kind, render_primitive, render_schema_json,
+               style_tokens_json, is_default, is_visible_in_palette, sort_order
+        FROM notation_definitions
+        WHERE semantic_type_id = ?
+        ORDER BY sort_order ASC, code ASC, id ASC
+        """,
+        (type_id,),
+    ).fetchall()
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    cursor = db_conn.execute(
+        """
+        INSERT INTO semantic_types (
+            metamodel_version_id, code, display_name, description, kind, runtime_kind,
+            is_groupable, allows_runtime_binding, default_notation_id, is_active, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+        """,
+        (
+            version_id,
+            clone_code,
+            clone_display_name,
+            existing["description"],
+            existing["kind"],
+            existing["runtime_kind"],
+            int(bool(existing["is_groupable"])),
+            int(bool(existing["allows_runtime_binding"])),
+            int(bool(existing["is_active"])),
+            timestamp,
+            timestamp,
+        ),
+    )
+    cloned_type_id = int(cursor.lastrowid)
+
+    for row in property_rows:
+        db_conn.execute(
+            """
+            INSERT INTO property_definitions (
+                semantic_type_id, code, display_name, description, value_type, unit, default_value_json,
+                is_required, is_runtime, is_user_editable, sort_order, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                cloned_type_id,
+                row["code"],
+                row["display_name"],
+                row["description"],
+                row["value_type"],
+                row["unit"],
+                row["default_value_json"],
+                row["is_required"],
+                row["is_runtime"],
+                row["is_user_editable"],
+                row["sort_order"],
+                timestamp,
+                timestamp,
+            ),
+        )
+
+    cloned_default_notation_id = None
+    for row in notation_rows:
+        notation_code = build_unique_clone_text(
+            row["code"],
+            max_length=100,
+            exists_fn=lambda candidate: notation_code_exists(version_id, candidate),
+            suffix_builder=lambda index: "_copy" if index == 1 else f"_copy{index}",
+        )
+        notation_display_name = build_unique_clone_text(
+            row["display_name"],
+            max_length=120,
+            exists_fn=lambda _candidate: False,
+            suffix_builder=lambda index: " Copy" if index == 1 else f" Copy {index}",
+        )
+        notation_cursor = db_conn.execute(
+            """
+            INSERT INTO notation_definitions (
+                metamodel_version_id, semantic_type_id, palette_group_id, code, display_name, kind,
+                render_primitive, render_schema_json, style_tokens_json,
+                is_default, is_visible_in_palette, sort_order, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                version_id,
+                cloned_type_id,
+                row["palette_group_id"],
+                notation_code,
+                notation_display_name,
+                row["kind"],
+                row["render_primitive"],
+                row["render_schema_json"],
+                row["style_tokens_json"],
+                row["is_default"],
+                row["is_visible_in_palette"],
+                row["sort_order"],
+                timestamp,
+                timestamp,
+            ),
+        )
+        if row["is_default"]:
+            cloned_default_notation_id = int(notation_cursor.lastrowid)
+
+    if cloned_default_notation_id is not None:
+        db_conn.execute(
+            """
+            UPDATE semantic_types
+            SET default_notation_id = ?
+            WHERE id = ?
+            """,
+            (cloned_default_notation_id, cloned_type_id),
+        )
+
+    db_conn.execute(
+        """
+        UPDATE metamodel_versions
+        SET updated_at = ?
+        WHERE id = ?
+        """,
+        (timestamp, version_id),
+    )
+    db_conn.commit()
+
+    cloned = fetch_semantic_type_row(cloned_type_id)
+    return {
+        "semantic_type": serialize_semantic_type(cloned),
+        "clone_summary": {
+            "property_count": len(property_rows),
+            "notation_count": len(notation_rows),
+            "default_notation_cloned": cloned_default_notation_id is not None,
+        },
+    }, 201
+
+
+@bp.delete("/semantic-types/<int:type_id>")
+@admin_required
+def delete_semantic_type(type_id: int):
+    existing = fetch_semantic_type_row(type_id)
+    if existing is None:
+        return error_response("semantic_type_not_found", "semantic type not found", 404)
+    if existing["metamodel_version_status"] != "draft":
+        return error_response("invalid_state", "only draft semantic types can be deleted", 409)
+
+    blockers = fetch_semantic_type_delete_blockers(type_id)
+    has_blockers = any(blockers.values())
+    if has_blockers:
+        return {
+            "error": {
+                "code": "semantic_type_in_use",
+                "message": "semantic type cannot be deleted while containment or association rules still reference it",
+            },
+            "dependency_counts": blockers,
+        }, 409
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    db_conn.execute("DELETE FROM semantic_types WHERE id = ?", (type_id,))
+    db_conn.execute(
+        """
+        UPDATE metamodel_versions
+        SET updated_at = ?
+        WHERE id = ?
+        """,
+        (timestamp, existing["metamodel_version_id"]),
+    )
+    db_conn.commit()
+
+    return {
+        "deleted": True,
+        "semantic_type_id": type_id,
+    }
 
 
 @bp.get("/semantic-types/<int:type_id>/properties")

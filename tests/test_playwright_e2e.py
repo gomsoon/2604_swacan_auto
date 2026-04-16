@@ -371,6 +371,14 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
 
     expect(page.locator("#admin-metamodel-semantic-types-list .admin-item", has_text="Worker Pool Updated").first).to_contain_text("no-binding")
 
+    page.locator("#admin-metamodel-semantic-types-list .admin-item", has_text="Worker Pool Updated").first.get_by_role("button", name="복제").click()
+    clonedSemanticType = page.locator("#admin-metamodel-semantic-types-list .admin-item", has_text="Worker Pool Updated Copy").first
+    expect(clonedSemanticType).to_contain_text("WorkerPool_copy")
+
+    page.once("dialog", lambda dialog: dialog.accept())
+    clonedSemanticType.get_by_role("button", name="삭제").click()
+    expect(page.locator("#admin-metamodel-semantic-types-list")).not_to_contain_text("Worker Pool Updated Copy")
+
     page.locator("#metamodel-property-semantic-type-id").select_option(label="Worker Pool Updated (WorkerPool)")
     page.locator("#metamodel-property-code").fill("worker_count")
     page.locator("#metamodel-property-display-name").fill("Worker Count")

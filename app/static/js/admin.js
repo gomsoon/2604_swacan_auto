@@ -810,7 +810,7 @@ async function saveSemanticTypeFromInspector(semanticTypeId) {
     showBanner("Semantic type을 inspector에서 저장했습니다.", "success");
 }
 
-function openMetamodelEditorFromInspector(action, kind, id) {
+async function openMetamodelEditorFromInspector(action, kind, id) {
     const numericId = Number(id);
     if (!numericId) {
         return;
@@ -841,6 +841,21 @@ function openMetamodelEditorFromInspector(action, kind, id) {
             resetMetamodelNotationForm({ preserveSemanticType: true });
             metamodelNotationSemanticTypeIdInput.value = String(item.id);
             scrollToMetamodelEditorSection(metamodelNotationSection, metamodelNotationCodeInput);
+            return;
+        }
+
+        if (action === "clone-semantic-type") {
+            await cloneMetamodelSemanticType(item.id);
+            return;
+        }
+
+        if (action === "toggle-semantic-type-active") {
+            await toggleMetamodelSemanticTypeActive(item.id, Boolean(item.is_active));
+            return;
+        }
+
+        if (action === "delete-semantic-type") {
+            await deleteMetamodelSemanticType(item.id);
         }
 
         return;
@@ -1757,6 +1772,7 @@ function renderMetamodelWorkspaceInspector() {
         const parentCount = metamodelContainmentRules.filter((entry) => entry.child_type_id === item.id).length;
         const sourceAssocCount = metamodelAssociations.filter((entry) => entry.source_type_id === item.id).length;
         const targetAssocCount = metamodelAssociations.filter((entry) => entry.target_type_id === item.id).length;
+        const deleteBlockerCount = childCount + parentCount + sourceAssocCount + targetAssocCount;
         const defaultNotation = metamodelNotations.find((entry) => entry.semantic_type_id === item.id && entry.is_default);
 
         metamodelWorkspaceInspector.innerHTML = `
@@ -1769,6 +1785,7 @@ function renderMetamodelWorkspaceInspector() {
                 <button class="button ghost small" type="button" data-inspector-action="edit-semantic-type" data-workspace-kind="semantic_type" data-workspace-id="${escapeHtml(item.id)}">Semantic Type 편집</button>
                 <button class="button ghost small" type="button" data-inspector-action="create-property" data-workspace-kind="semantic_type" data-workspace-id="${escapeHtml(item.id)}">새 Property</button>
                 <button class="button ghost small" type="button" data-inspector-action="create-notation" data-workspace-kind="semantic_type" data-workspace-id="${escapeHtml(item.id)}">새 Notation</button>
+                <button class="button ghost small" type="button" data-inspector-action="clone-semantic-type" data-workspace-kind="semantic_type" data-workspace-id="${escapeHtml(item.id)}">복제</button>
             </div>
             <div class="summary-metrics">
                 ${renderMetaPills([
@@ -1819,11 +1836,18 @@ function renderMetamodelWorkspaceInspector() {
             <p class="admin-meta">${escapeHtml(item.description || "설명 없음")}</p>
             <div class="toolbar-inline inspector-actions">
                 <button class="button primary small" type="button" data-inspector-save="semantic_type" data-workspace-id="${escapeHtml(item.id)}">빠른 저장</button>
+                <button class="button ghost small" type="button" data-inspector-action="toggle-semantic-type-active" data-workspace-kind="semantic_type" data-workspace-id="${escapeHtml(item.id)}">${item.is_active ? "비활성화" : "활성화"}</button>
+                <button class="button ghost small" type="button" data-inspector-action="delete-semantic-type" data-workspace-kind="semantic_type" data-workspace-id="${escapeHtml(item.id)}" ${deleteBlockerCount > 0 ? "disabled" : ""}>삭제</button>
                 <button class="button ghost small" type="button" data-inspector-layout-move="-80,0">왼쪽으로</button>
                 <button class="button ghost small" type="button" data-inspector-layout-move="80,0">오른쪽으로</button>
                 <button class="button ghost small" type="button" data-inspector-layout-move="0,-60">위로</button>
                 <button class="button ghost small" type="button" data-inspector-layout-move="0,60">아래로</button>
             </div>
+            ${
+                deleteBlockerCount > 0
+                    ? `<p class="admin-meta">삭제 보호: containment/association 참조 ${deleteBlockerCount}건이 있어 먼저 정리해야 합니다.</p>`
+                    : '<p class="admin-meta">삭제 가능: containment/association 참조가 없습니다.</p>'
+            }
             ${
                 defaultNotation
                     ? `<div class="metamodel-notation-preview">
@@ -2389,6 +2413,9 @@ function renderMetamodelSemanticTypes(items) {
                             <span class="meta-pill">${item.is_active ? "active" : "inactive"}</span>
                             <span class="meta-pill">${item.allows_runtime_binding ? "binding" : "no-binding"}</span>
                             <button class="button ghost small edit-metamodel-semantic-type-button" type="button" data-semantic-type-id="${escapeHtml(item.id)}">수정</button>
+                            <button class="button ghost small clone-metamodel-semantic-type-button" type="button" data-semantic-type-id="${escapeHtml(item.id)}">복제</button>
+                            <button class="button ghost small toggle-metamodel-semantic-type-button" type="button" data-semantic-type-id="${escapeHtml(item.id)}" data-is-active="${item.is_active ? "true" : "false"}">${item.is_active ? "비활성화" : "활성화"}</button>
+                            <button class="button ghost small delete-metamodel-semantic-type-button" type="button" data-semantic-type-id="${escapeHtml(item.id)}">삭제</button>
                         </div>
                     </div>
                     <p class="admin-meta">groupable=${item.is_groupable ? "true" : "false"} | default notation=${escapeHtml(item.default_notation_code || "-")}</p>
@@ -3117,6 +3144,56 @@ async function saveMetamodelSemanticType(event) {
     }
 }
 
+async function cloneMetamodelSemanticType(typeId) {
+    clearBanner();
+    const payload = await apiFetch(`/api/admin/metamodel/semantic-types/${typeId}/clone`, {
+        method: "POST",
+    });
+    await Promise.all([loadMetamodelVersions(), loadMetamodelSemanticTypes()]);
+    await selectMetamodelWorkspaceItem("semantic_type", payload.semantic_type.id);
+    showBanner(
+        `semantic type을 복제했습니다. property ${payload.clone_summary.property_count}개, notation ${payload.clone_summary.notation_count}개가 함께 복제되었습니다.`,
+        "success"
+    );
+}
+
+async function toggleMetamodelSemanticTypeActive(typeId, isCurrentlyActive) {
+    clearBanner();
+    await apiFetch(`/api/admin/metamodel/semantic-types/${typeId}`, {
+        method: "PATCH",
+        body: { is_active: !isCurrentlyActive },
+    });
+    await Promise.all([loadMetamodelVersions(), loadMetamodelSemanticTypes()]);
+    await selectMetamodelWorkspaceItem("semantic_type", typeId);
+    showBanner(`semantic type을 ${isCurrentlyActive ? "비활성화" : "활성화"}했습니다.`, "success");
+}
+
+async function deleteMetamodelSemanticType(typeId) {
+    clearBanner();
+    const item = metamodelSemanticTypes.find((entry) => entry.id === typeId);
+    if (!item) {
+        showBanner("삭제할 semantic type을 찾을 수 없습니다.", "error");
+        return;
+    }
+    const confirmed = window.confirm(`Semantic Type '${item.display_name}'을(를) 삭제할까요? property/notation은 함께 삭제되고, containment/association 참조가 있으면 삭제되지 않습니다.`);
+    if (!confirmed) {
+        return;
+    }
+
+    await apiFetch(`/api/admin/metamodel/semantic-types/${typeId}`, {
+        method: "DELETE",
+    });
+    if (selectedMetamodelSemanticTypeId === typeId) {
+        resetMetamodelSemanticTypeForm();
+        resetMetamodelPropertyForm();
+        resetMetamodelNotationForm({ preserveSemanticType: false });
+    }
+    await Promise.all([loadMetamodelVersions(), loadMetamodelSemanticTypes()]);
+    await loadMetamodelProperties();
+    await loadMetamodelNotations();
+    showBanner("semantic type을 삭제했습니다.", "success");
+}
+
 async function saveMetamodelProperty(event) {
     event.preventDefault();
     clearBanner();
@@ -3585,7 +3662,7 @@ metamodelWorkspaceInspector?.addEventListener("click", (event) => {
         button.dataset.inspectorAction,
         button.dataset.workspaceKind,
         button.dataset.workspaceId
-    );
+    ).catch((error) => showBanner(error.message, "error"));
 });
 metamodelWorkspaceSelectModeButton?.addEventListener("click", () => {
     setMetamodelWorkspaceInteractionMode("select");
@@ -3656,15 +3733,36 @@ metamodelVersionsList?.addEventListener("click", async (event) => {
 });
 metamodelSemanticTypesList?.addEventListener("click", (event) => {
     const button = event.target instanceof HTMLElement ? event.target.closest(".edit-metamodel-semantic-type-button") : null;
-    if (!button) {
+    if (button) {
+        const typeId = Number(button.dataset.semanticTypeId);
+        const item = metamodelSemanticTypes.find((entry) => entry.id === typeId);
+        if (!item) {
+            return;
+        }
+        selectMetamodelWorkspaceItem("semantic_type", item.id).catch((error) => showBanner(error.message, "error"));
         return;
     }
-    const typeId = Number(button.dataset.semanticTypeId);
-    const item = metamodelSemanticTypes.find((entry) => entry.id === typeId);
-    if (!item) {
+
+    const cloneButton = event.target instanceof HTMLElement ? event.target.closest(".clone-metamodel-semantic-type-button") : null;
+    if (cloneButton) {
+        const typeId = Number(cloneButton.dataset.semanticTypeId);
+        cloneMetamodelSemanticType(typeId).catch((error) => showBanner(error.message, "error"));
         return;
     }
-    selectMetamodelWorkspaceItem("semantic_type", item.id).catch((error) => showBanner(error.message, "error"));
+
+    const toggleButton = event.target instanceof HTMLElement ? event.target.closest(".toggle-metamodel-semantic-type-button") : null;
+    if (toggleButton) {
+        const typeId = Number(toggleButton.dataset.semanticTypeId);
+        const isActive = toggleButton.dataset.isActive === "true";
+        toggleMetamodelSemanticTypeActive(typeId, isActive).catch((error) => showBanner(error.message, "error"));
+        return;
+    }
+
+    const deleteButton = event.target instanceof HTMLElement ? event.target.closest(".delete-metamodel-semantic-type-button") : null;
+    if (deleteButton) {
+        const typeId = Number(deleteButton.dataset.semanticTypeId);
+        deleteMetamodelSemanticType(typeId).catch((error) => showBanner(error.message, "error"));
+    }
 });
 metamodelContainmentRulesList?.addEventListener("click", (event) => {
     const button = event.target instanceof HTMLElement ? event.target.closest(".edit-metamodel-containment-rule-button") : null;
