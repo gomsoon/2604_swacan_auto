@@ -18,6 +18,7 @@ const latestStateList = document.getElementById("admin-latest-state-list");
 const eventsList = document.getElementById("admin-events-list");
 const eventDetailPanel = document.getElementById("admin-event-detail-panel");
 const alertsList = document.getElementById("admin-alerts-list");
+const alertHistoryList = document.getElementById("admin-alert-history-list");
 const debugList = document.getElementById("admin-debug-list");
 const cleanupList = document.getElementById("admin-cleanup-list");
 
@@ -26,6 +27,7 @@ const refreshIngestButton = document.getElementById("refresh-ingest-button");
 const refreshLatestStateButton = document.getElementById("refresh-latest-state-button");
 const refreshEventsButton = document.getElementById("refresh-admin-events-button");
 const refreshAlertsButton = document.getElementById("refresh-alerts-button");
+const refreshAlertHistoryButton = document.getElementById("refresh-alert-history-button");
 const refreshDebugButton = document.getElementById("refresh-debug-button");
 const refreshCleanupButton = document.getElementById("refresh-cleanup-button");
 const refreshMetamodelVersionsButton = document.getElementById("refresh-metamodel-versions-button");
@@ -402,6 +404,7 @@ function renderAlerts(items) {
                             <span class="meta-pill">${escapeHtml(item.status)}</span>
                             ${item.is_acknowledged ? '<span class="meta-pill">ACK</span>' : ""}
                             <button class="button ghost small toggle-alert-ack-button" type="button" data-alert-id="${escapeHtml(item.id)}" data-acknowledged="${item.is_acknowledged ? "true" : "false"}" data-ack-note="${escapeHtml(item.ack_note || "")}">${item.is_acknowledged ? "ACK 해제" : "ACK"}</button>
+                            ${item.status !== "resolved" ? `<button class="button ghost small resolve-alert-button" type="button" data-alert-id="${escapeHtml(item.id)}" data-resolution-reason="${escapeHtml(item.status_note || "")}">해결 처리</button>` : ""}
                             ${buildAlertStatusButtons(item)}
                         </div>
                     </div>
@@ -437,14 +440,39 @@ function buildAlertStatusButtons(item) {
     if (item.status !== "suppressed") {
         buttonSpecs.push(["suppressed", "억제"]);
     }
-    if (item.status !== "resolved") {
-        buttonSpecs.push(["resolved", "해결"]);
-    }
 
     return buttonSpecs
         .map(
             ([nextStatus, label]) =>
                 `<button class="button ghost small change-alert-status-button" type="button" data-alert-id="${escapeHtml(item.id)}" data-next-status="${escapeHtml(nextStatus)}" data-status-note="${escapeHtml(item.status_note || "")}">${escapeHtml(label)}</button>`
+        )
+        .join("");
+}
+
+function renderAlertHistoryArchive(items) {
+    if (items.length === 0) {
+        alertHistoryList.innerHTML = '<p class="section-copy">종료된 alert 이력이 없습니다.</p>';
+        return;
+    }
+
+    alertHistoryList.innerHTML = items
+        .map(
+            (item) => `
+                <article class="admin-item compact-admin-item">
+                    <div class="section-header">
+                        <h3>${escapeHtml(item.display_name || item.runtime_binding_key || item.alert_code)}</h3>
+                        <div class="toolbar-inline">
+                            <span class="meta-pill">${escapeHtml(item.alert_code)}</span>
+                            <span class="meta-pill">${escapeHtml(item.final_severity)}</span>
+                            <span class="meta-pill">${escapeHtml(item.resolution_source)}</span>
+                        </div>
+                    </div>
+                    <p class="admin-meta">opened=${escapeHtml(formatTimestamp(item.opened_at))} | resolved=${escapeHtml(formatTimestamp(item.resolved_at))}</p>
+                    <p class="admin-meta">repeat ${escapeHtml(item.repeat_count)}회 | ack ${item.was_acknowledged ? "yes" : "no"}</p>
+                    <p class="admin-meta">resolved by ${escapeHtml(item.resolved_by_username || "-")} | target ${escapeHtml(item.source_rule_target_label || item.semantic_type_code || "-")}</p>
+                    <p class="admin-meta">${escapeHtml(item.resolution_reason || item.latest_message || "이유 없음")}</p>
+                </article>
+            `
         )
         .join("");
 }
@@ -774,6 +802,11 @@ async function loadAlerts() {
     renderAlerts(payload.items);
 }
 
+async function loadAlertHistoryArchive() {
+    const payload = await apiFetch("/api/admin/alert-history?limit=10");
+    renderAlertHistoryArchive(payload.items);
+}
+
 async function loadDebug() {
     const params = new URLSearchParams({ limit: "10" });
     if (debugDirectionFilter.value) {
@@ -958,6 +991,20 @@ async function updateAlertStatus(alertId, nextStatus, currentNote) {
     });
 }
 
+async function resolveAlert(alertId, currentReason) {
+    const resolutionReason = window.prompt("해결 사유를 입력하세요.", currentReason || "");
+    if (resolutionReason === null) {
+        return;
+    }
+
+    await apiFetch(`/api/admin/alerts/${alertId}/resolve`, {
+        method: "POST",
+        body: {
+            resolution_reason: resolutionReason,
+        },
+    });
+}
+
 async function refreshAll() {
     clearBanner();
     try {
@@ -970,6 +1017,7 @@ async function refreshAll() {
             loadLatestStates(),
             loadEvents(),
             loadAlerts(),
+            loadAlertHistoryArchive(),
             loadDebug(),
             loadCleanupRuns(),
         ]);
@@ -983,6 +1031,7 @@ refreshIngestButton?.addEventListener("click", loadIngest);
 refreshLatestStateButton?.addEventListener("click", loadLatestStates);
 refreshEventsButton?.addEventListener("click", loadEvents);
 refreshAlertsButton?.addEventListener("click", loadAlerts);
+refreshAlertHistoryButton?.addEventListener("click", loadAlertHistoryArchive);
 refreshDebugButton?.addEventListener("click", loadDebug);
 refreshCleanupButton?.addEventListener("click", loadCleanupRuns);
 refreshMetamodelVersionsButton?.addEventListener("click", loadMetamodelVersions);
@@ -1075,8 +1124,21 @@ alertsList?.addEventListener("click", (event) => {
         const currentNote = ackButton.dataset.ackNote || "";
         updateAlertAcknowledgement(alertId, acknowledged, currentNote)
             .then(async () => {
-                await Promise.all([loadAlerts(), loadSummary()]);
+                await Promise.all([loadAlerts(), loadAlertHistoryArchive(), loadSummary()]);
                 showBanner(`alert를 ${acknowledged ? "ACK" : "ACK 해제"}했습니다.`, "success");
+            })
+            .catch((error) => showBanner(error.message, "error"));
+        return;
+    }
+
+    const resolveButton = event.target instanceof HTMLElement ? event.target.closest(".resolve-alert-button") : null;
+    if (resolveButton) {
+        const alertId = Number(resolveButton.dataset.alertId);
+        const currentReason = resolveButton.dataset.resolutionReason || "";
+        resolveAlert(alertId, currentReason)
+            .then(async () => {
+                await Promise.all([loadAlerts(), loadAlertHistoryArchive(), loadSummary()]);
+                showBanner("alert를 수동 해결 처리했습니다.", "success");
             })
             .catch((error) => showBanner(error.message, "error"));
         return;
@@ -1092,7 +1154,7 @@ alertsList?.addEventListener("click", (event) => {
     const currentNote = statusButton.dataset.statusNote || "";
     updateAlertStatus(alertId, nextStatus, currentNote)
         .then(async () => {
-            await Promise.all([loadAlerts(), loadSummary()]);
+            await Promise.all([loadAlerts(), loadAlertHistoryArchive(), loadSummary()]);
             showBanner(`alert 상태를 ${nextStatus}(으)로 변경했습니다.`, "success");
         })
         .catch((error) => showBanner(error.message, "error"));

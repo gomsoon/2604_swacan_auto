@@ -360,6 +360,36 @@ CREATE TABLE IF NOT EXISTS alert_history (
     FOREIGN KEY (performed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS alert_history_archive (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    monitored_object_id INTEGER NOT NULL,
+    alert_code TEXT NOT NULL,
+    source_rule_id INTEGER,
+    opened_at TEXT NOT NULL,
+    resolved_at TEXT NOT NULL,
+    first_severity TEXT NOT NULL,
+    highest_severity TEXT NOT NULL,
+    final_severity TEXT NOT NULL,
+    final_status TEXT NOT NULL CHECK (final_status IN ('resolved', 'closed_with_exception')),
+    repeat_count INTEGER NOT NULL DEFAULT 1,
+    was_acknowledged INTEGER NOT NULL DEFAULT 0 CHECK (was_acknowledged IN (0, 1)),
+    last_acknowledged_at TEXT,
+    last_acknowledged_by_user_id INTEGER,
+    resolution_source TEXT NOT NULL CHECK (
+        resolution_source IN ('auto_recovery', 'manual_operator', 'auto_policy_timeout', 'system_cleanup')
+    ),
+    resolution_reason TEXT,
+    resolved_by_user_id INTEGER,
+    latest_message TEXT,
+    metadata_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (monitored_object_id) REFERENCES monitored_objects(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_rule_id) REFERENCES alert_rules(id) ON DELETE SET NULL,
+    FOREIGN KEY (last_acknowledged_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (resolved_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS alert_rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     scope_type TEXT NOT NULL CHECK (scope_type IN ('object_type', 'monitored_object')),
@@ -574,6 +604,15 @@ CREATE INDEX IF NOT EXISTS idx_alert_history_alert_instance_created
 
 CREATE INDEX IF NOT EXISTS idx_alert_history_action_type_created
     ON alert_history(action_type, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_alert_history_archive_monitored_object_resolved
+    ON alert_history_archive(monitored_object_id, resolved_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_alert_history_archive_alert_code_resolved
+    ON alert_history_archive(alert_code, resolved_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_alert_history_archive_resolution_source_resolved
+    ON alert_history_archive(resolution_source, resolved_at DESC, id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_node_bindings_monitored_object
     ON node_bindings(monitored_object_id);

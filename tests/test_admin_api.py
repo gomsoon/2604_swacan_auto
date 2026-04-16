@@ -837,6 +837,107 @@ def test_admin_alert_history_accepts_boundary_limits_and_rejects_invalid_values(
     assert missing_response.get_json()["error"]["code"] == "not_found"
 
 
+def test_admin_manual_resolve_archives_alert_and_returns_summary(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/alerts/1/resolve",
+        json={"resolution_reason": "운영자가 수동 종료"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["alert"]["status"] == "resolved"
+    assert payload["alert"]["resolved_by_username"] == "admin"
+    assert payload["archive"]["alert_code"] == "agent.warning"
+    assert payload["archive"]["resolution_source"] == "manual_operator"
+    assert payload["archive"]["resolution_reason"] == "운영자가 수동 종료"
+    assert payload["archive"]["was_acknowledged"] is False
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        archive_rows = db_conn.execute(
+            """
+            SELECT resolution_source, resolution_reason, final_status
+            FROM alert_history_archive
+            ORDER BY id DESC
+            """
+        ).fetchall()
+        assert len(archive_rows) == 1
+        assert archive_rows[0]["resolution_source"] == "manual_operator"
+        assert archive_rows[0]["resolution_reason"] == "운영자가 수동 종료"
+        assert archive_rows[0]["final_status"] == "resolved"
+
+
+def test_admin_manual_resolve_accepts_and_rejects_boundary_reason_lengths(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    login(seeded_client)
+
+    ok_response = seeded_client.post(
+        "/api/admin/alerts/1/resolve",
+        json={"resolution_reason": "a" * 500},
+    )
+    too_long_response = seeded_client.post(
+        "/api/admin/alerts/1/resolve",
+        json={"resolution_reason": "a" * 501},
+    )
+
+    assert ok_response.status_code == 200
+    assert too_long_response.status_code == 400
+    assert too_long_response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_manual_resolve_rejects_missing_reason_and_already_resolved(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    login(seeded_client)
+
+    missing_reason_response = seeded_client.post(
+        "/api/admin/alerts/1/resolve",
+        json={"resolution_reason": ""},
+    )
+    first_resolve_response = seeded_client.post(
+        "/api/admin/alerts/1/resolve",
+        json={"resolution_reason": "1차 수동 종료"},
+    )
+    second_resolve_response = seeded_client.post(
+        "/api/admin/alerts/1/resolve",
+        json={"resolution_reason": "2차 수동 종료"},
+    )
+
+    assert missing_reason_response.status_code == 400
+    assert missing_reason_response.get_json()["error"]["code"] == "validation_error"
+    assert first_resolve_response.status_code == 200
+    assert second_resolve_response.status_code == 409
+    assert second_resolve_response.get_json()["error"]["code"] == "invalid_state"
+
+
+def test_admin_alert_history_archive_accepts_boundary_limits_and_filters(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    login(seeded_client)
+    seeded_client.post(
+        "/api/admin/alerts/1/resolve",
+        json={"resolution_reason": "운영자가 수동 종료"},
+    )
+
+    low_response = seeded_client.get("/api/admin/alert-history?limit=1")
+    high_response = seeded_client.get("/api/admin/alert-history?limit=100")
+    zero_response = seeded_client.get("/api/admin/alert-history?limit=0")
+    over_response = seeded_client.get("/api/admin/alert-history?limit=101")
+    invalid_response = seeded_client.get("/api/admin/alert-history?limit=abc")
+    filtered_response = seeded_client.get("/api/admin/alert-history?limit=10&resolution_source=manual_operator")
+
+    assert low_response.status_code == 200
+    assert high_response.status_code == 200
+    assert len(low_response.get_json()["items"]) == 1
+    assert len(high_response.get_json()["items"]) == 1
+    assert zero_response.status_code == 400
+    assert over_response.status_code == 400
+    assert invalid_response.status_code == 400
+    assert filtered_response.status_code == 200
+    assert filtered_response.get_json()["items"][0]["resolution_source"] == "manual_operator"
+
+
 def test_admin_alerts_support_active_and_resolved_status_filters(seeded_app, seeded_client) -> None:
     seed_admin_dashboard_rows(seeded_app)
     with seeded_app.app_context():

@@ -6,6 +6,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, g, request
 
+from .alert_archive import insert_alert_history_archive, serialize_alert_archive_row
 from .alert_history import record_alert_history
 from .auth import admin_required, error_response
 from .db import get_db
@@ -23,6 +24,7 @@ ALLOWED_ALERT_SCOPE_TYPES = {"object_type", "monitored_object"}
 ALLOWED_ALERT_COMPARISONS = {"gte", "lte"}
 ALERT_INSTANCE_STATUSES = {"open", "in_progress", "suppressed", "resolved"}
 ALERT_ACTIVE_STATUSES = {"open", "in_progress", "suppressed"}
+ALERT_ARCHIVE_FINAL_STATUSES = {"resolved", "closed_with_exception"}
 
 
 def now_iso() -> str:
@@ -252,6 +254,34 @@ def serialize_alert_history_row(row) -> dict[str, Any]:
     return payload
 
 
+def fetch_alert_archive_row(archive_id: int):
+    return get_db().execute(
+        """
+        SELECT archive.id, archive.monitored_object_id, mo.runtime_binding_key, mo.display_name,
+               mo.object_type AS semantic_type_code,
+               archive.alert_code, archive.source_rule_id,
+               rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
+               COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
+               archive.opened_at, archive.resolved_at,
+               archive.first_severity, archive.highest_severity, archive.final_severity, archive.final_status,
+               archive.repeat_count, archive.was_acknowledged,
+               archive.last_acknowledged_at, archive.last_acknowledged_by_user_id,
+               ack_user.username AS last_acknowledged_by_username,
+               archive.resolution_source, archive.resolution_reason,
+               archive.resolved_by_user_id, resolved_user.username AS resolved_by_username,
+               archive.latest_message, archive.metadata_json, archive.created_at, archive.updated_at
+        FROM alert_history_archive AS archive
+        JOIN monitored_objects AS mo ON mo.id = archive.monitored_object_id
+        LEFT JOIN alert_rules AS rules ON rules.id = archive.source_rule_id
+        LEFT JOIN monitored_objects AS rule_mo ON rule_mo.id = rules.monitored_object_id
+        LEFT JOIN users AS ack_user ON ack_user.id = archive.last_acknowledged_by_user_id
+        LEFT JOIN users AS resolved_user ON resolved_user.id = archive.resolved_by_user_id
+        WHERE archive.id = ?
+        """,
+        (archive_id,),
+    ).fetchone()
+
+
 def fetch_alert_instance_row(alert_id: int):
     return get_db().execute(
         """
@@ -277,6 +307,86 @@ def fetch_alert_instance_row(alert_id: int):
         """,
         (alert_id,),
     ).fetchone()
+
+
+def resolve_alert_instance(
+    db_conn,
+    *,
+    alert_id: int,
+    resolution_reason: str,
+    resolved_by_user_id: int,
+    resolution_source: str = "manual_operator",
+):
+    existing = db_conn.execute(
+        """
+        SELECT id, monitored_object_id, alert_code, source_rule_id, severity, status,
+               acknowledged_at, acknowledged_by_user_id,
+               first_occurred_at, last_occurred_at, repeat_count,
+               latest_message, metadata_json
+        FROM alert_instances
+        WHERE id = ?
+        """,
+        (alert_id,),
+    ).fetchone()
+    if existing is None:
+        return None, error_response("not_found", "alert not found", 404)
+
+    if existing["status"] == "resolved":
+        return None, error_response("invalid_state", "alert is already resolved", 409)
+
+    timestamp = now_iso()
+    db_conn.execute(
+        """
+        UPDATE alert_instances
+        SET status = 'resolved',
+            status_updated_at = ?,
+            status_updated_by_user_id = ?,
+            status_note = ?,
+            resolved_at = ?,
+            resolved_by_user_id = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            timestamp,
+            resolved_by_user_id,
+            resolution_reason,
+            timestamp,
+            resolved_by_user_id,
+            timestamp,
+            alert_id,
+        ),
+    )
+
+    archive_id = insert_alert_history_archive(
+        db_conn,
+        alert_row=existing,
+        resolved_at=timestamp,
+        resolution_source=resolution_source,
+        resolution_reason=resolution_reason,
+        resolved_by_user_id=resolved_by_user_id,
+    )
+    record_alert_history(
+        db_conn,
+        alert_instance_id=alert_id,
+        action_type="resolved",
+        created_at=timestamp,
+        performed_by_user_id=resolved_by_user_id,
+        previous_status=existing["status"],
+        new_status="resolved",
+        note=resolution_reason,
+        payload={
+            "source": "admin_resolve",
+            "resolution_source": resolution_source,
+            "archive_id": archive_id,
+        },
+    )
+    archive_row = fetch_alert_archive_row(archive_id)
+    alert_row = fetch_alert_instance_row(alert_id)
+    return {
+        "archive": serialize_alert_archive_row(archive_row),
+        "alert": serialize_alert_instance(alert_row),
+    }, None
 
 
 def serialize_alert_rule(row) -> dict[str, Any]:
@@ -881,6 +991,65 @@ def get_alert_history(alert_id: int):
     return {"items": [serialize_alert_history_row(row) for row in rows]}
 
 
+@bp.get("/alert-history")
+@admin_required
+def list_alert_history_archive():
+    limit, error = parse_limit()
+    if error:
+        return error
+
+    resolution_source = request.args.get("resolution_source")
+    if resolution_source and resolution_source not in {
+        "auto_recovery",
+        "manual_operator",
+        "auto_policy_timeout",
+        "system_cleanup",
+    }:
+        return error_response("validation_error", "invalid resolution_source filter", 400)
+
+    final_status = request.args.get("final_status")
+    if final_status and final_status not in ALERT_ARCHIVE_FINAL_STATUSES:
+        return error_response("validation_error", "invalid final_status filter", 400)
+
+    clauses: list[str] = []
+    params: list[Any] = []
+    if resolution_source:
+        clauses.append("archive.resolution_source = ?")
+        params.append(resolution_source)
+    if final_status:
+        clauses.append("archive.final_status = ?")
+        params.append(final_status)
+
+    sql = """
+        SELECT archive.id, archive.monitored_object_id, mo.runtime_binding_key, mo.display_name,
+               mo.object_type AS semantic_type_code,
+               archive.alert_code, archive.source_rule_id,
+               rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
+               COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
+               archive.opened_at, archive.resolved_at,
+               archive.first_severity, archive.highest_severity, archive.final_severity, archive.final_status,
+               archive.repeat_count, archive.was_acknowledged,
+               archive.last_acknowledged_at, archive.last_acknowledged_by_user_id,
+               ack_user.username AS last_acknowledged_by_username,
+               archive.resolution_source, archive.resolution_reason,
+               archive.resolved_by_user_id, resolved_user.username AS resolved_by_username,
+               archive.latest_message, archive.metadata_json, archive.created_at, archive.updated_at
+        FROM alert_history_archive AS archive
+        JOIN monitored_objects AS mo ON mo.id = archive.monitored_object_id
+        LEFT JOIN alert_rules AS rules ON rules.id = archive.source_rule_id
+        LEFT JOIN monitored_objects AS rule_mo ON rule_mo.id = rules.monitored_object_id
+        LEFT JOIN users AS ack_user ON ack_user.id = archive.last_acknowledged_by_user_id
+        LEFT JOIN users AS resolved_user ON resolved_user.id = archive.resolved_by_user_id
+    """
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY archive.resolved_at DESC, archive.id DESC LIMIT ?"
+    params.append(limit)
+
+    rows = get_db().execute(sql, tuple(params)).fetchall()
+    return {"items": [serialize_alert_archive_row(row) for row in rows]}
+
+
 @bp.patch("/alerts/<int:alert_id>")
 @admin_required
 def update_alert_instance(alert_id: int):
@@ -953,6 +1122,36 @@ def update_alert_instance(alert_id: int):
     return {"alert": serialize_alert_instance(row)}
 
 
+@bp.post("/alerts/<int:alert_id>/resolve")
+@admin_required
+def resolve_alert(alert_id: int):
+    data = request.get_json(silent=True) or {}
+    try:
+        resolution_reason = parse_optional_string(
+            data.get("resolution_reason"),
+            field_name="resolution_reason",
+            max_length=500,
+        )
+    except ValueError as exc:
+        return error_response("validation_error", str(exc), 400)
+
+    if not resolution_reason:
+        return error_response("validation_error", "resolution_reason is required", 400)
+
+    db_conn = get_db()
+    payload, error = resolve_alert_instance(
+        db_conn,
+        alert_id=alert_id,
+        resolution_reason=resolution_reason,
+        resolved_by_user_id=g.user["id"],
+    )
+    if error:
+        return error
+
+    db_conn.commit()
+    return payload
+
+
 @bp.patch("/alerts/<int:alert_id>/status")
 @admin_required
 def update_alert_status(alert_id: int):
@@ -977,6 +1176,19 @@ def update_alert_status(alert_id: int):
         status_note = parse_optional_string(data.get("status_note"), field_name="status_note", max_length=500)
     except ValueError as exc:
         return error_response("validation_error", str(exc), 400)
+
+    if next_status == "resolved":
+        resolution_reason = status_note or "resolved from status API"
+        payload, error = resolve_alert_instance(
+            db_conn,
+            alert_id=alert_id,
+            resolution_reason=resolution_reason,
+            resolved_by_user_id=g.user["id"],
+        )
+        if error:
+            return error
+        db_conn.commit()
+        return payload
 
     timestamp = now_iso()
     previous_status = existing["status"]
