@@ -485,6 +485,21 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     expect(page.locator("#admin-metamodel-semantic-types-list .admin-item", has_text="Worker Pool Inspector").first).to_contain_text("groupable=false")
     expect(page.locator("#metamodel-workspace-inspector")).to_contain_text("Worker Pool Inspector")
     expect(page.locator("#metamodel-semantic-type-display-name")).to_have_value("Worker Pool Inspector")
+    worker_pool_canvas_node = page.locator(
+        '#metamodel-workspace-canvas g.diagram-node[data-workspace-kind="semantic_type"]',
+        has_text="Worker Pool Inspector",
+    ).first
+    page.get_by_role("button", name="레이아웃 초기화").click()
+    before_drag_box = worker_pool_canvas_node.bounding_box()
+    assert before_drag_box is not None
+    page.locator("#metamodel-workspace-inspector").get_by_role("button", name="오른쪽으로").click()
+    after_drag_box = worker_pool_canvas_node.bounding_box()
+    assert after_drag_box is not None
+    assert after_drag_box["x"] > before_drag_box["x"] + 15
+    page.get_by_role("button", name="레이아웃 초기화").click()
+    reset_drag_box = worker_pool_canvas_node.bounding_box()
+    assert reset_drag_box is not None
+    assert abs(reset_drag_box["x"] - before_drag_box["x"]) < 30
     page.locator("#metamodel-workspace-inspector").get_by_role("button", name="새 Property").click()
     expect(page.locator("#metamodel-property-form-mode")).to_contain_text("create")
     expect(page.locator("#metamodel-property-semantic-type-id option:checked")).to_contain_text("Worker Pool Inspector (WorkerPool)")

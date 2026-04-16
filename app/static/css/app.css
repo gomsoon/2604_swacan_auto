@@ -771,6 +771,10 @@ a {
     min-height: 560px;
 }
 
+.metamodel-workspace-canvas.is-dragging {
+    user-select: none;
+}
+
 .metamodel-workspace-outline,
 .metamodel-workspace-inspector {
     display: grid;
@@ -850,6 +854,7 @@ a {
     fill: #fff;
     stroke: #405162;
     stroke-width: 2;
+    cursor: grab;
 }
 
 .metamodel-node.kind-container .node-shape {
@@ -871,6 +876,11 @@ a {
 .metamodel-node.is-selected .node-shape {
     stroke: var(--accent);
     stroke-width: 3;
+}
+
+.metamodel-workspace-canvas.is-dragging .metamodel-node .node-shape,
+.metamodel-node.is-dragging .node-shape {
+    cursor: grabbing;
 }
 
 .metamodel-node:hover .node-shape,

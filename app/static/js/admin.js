@@ -31,6 +31,7 @@ const metamodelWorkspaceCreateSemanticTypeButton = document.getElementById("meta
 const metamodelWorkspaceSelectModeButton = document.getElementById("metamodel-workspace-select-mode");
 const metamodelWorkspaceCreateContainmentModeButton = document.getElementById("metamodel-workspace-create-containment-mode");
 const metamodelWorkspaceCreateAssociationModeButton = document.getElementById("metamodel-workspace-create-association-mode");
+const metamodelWorkspaceResetLayoutButton = document.getElementById("metamodel-workspace-reset-layout-button");
 const metamodelSemanticTypeSection = document.getElementById("metamodel-semantic-type-form")?.closest(".admin-subcard, .card");
 const metamodelPropertySection = document.getElementById("metamodel-property-form")?.closest(".admin-subcard, .card");
 const metamodelContainmentRuleSection = document.getElementById("metamodel-containment-rule-form")?.closest(".admin-subcard, .card");
@@ -195,6 +196,10 @@ let metamodelEditorFocusTimer = null;
 let metamodelWorkspaceInteractionMode = "select";
 let metamodelWorkspacePendingTypeId = null;
 let metamodelWorkspaceHovered = null;
+let metamodelWorkspaceNodePositions = {};
+let metamodelWorkspaceLayoutVersionId = null;
+let metamodelWorkspaceDragState = null;
+let metamodelWorkspaceSuppressClickUntil = 0;
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -288,6 +293,225 @@ function focusMetamodelWorkspaceInspectorInput(inputId) {
             input.select();
         }
     }, 180);
+}
+
+function getCurrentMetamodelDraftVersionId() {
+    return metamodelDraftVersionSelect?.value ? String(metamodelDraftVersionSelect.value) : "";
+}
+
+function getMetamodelWorkspaceLayoutStorageKey(versionId) {
+    return `metamodel-workspace-layout:${versionId}`;
+}
+
+function loadMetamodelWorkspaceLayoutState(force = false) {
+    const versionId = getCurrentMetamodelDraftVersionId();
+    if (!force && metamodelWorkspaceLayoutVersionId === versionId) {
+        return;
+    }
+
+    metamodelWorkspaceLayoutVersionId = versionId;
+    metamodelWorkspaceNodePositions = {};
+    if (!versionId) {
+        return;
+    }
+
+    try {
+        const raw = window.localStorage.getItem(getMetamodelWorkspaceLayoutStorageKey(versionId));
+        if (!raw) {
+            return;
+        }
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") {
+            return;
+        }
+        metamodelWorkspaceNodePositions = parsed;
+    } catch (error) {
+        console.warn("Failed to load metamodel workspace layout", error);
+        metamodelWorkspaceNodePositions = {};
+    }
+}
+
+function persistMetamodelWorkspaceLayoutState() {
+    const versionId = getCurrentMetamodelDraftVersionId();
+    if (!versionId) {
+        return;
+    }
+
+    try {
+        if (Object.keys(metamodelWorkspaceNodePositions).length === 0) {
+            window.localStorage.removeItem(getMetamodelWorkspaceLayoutStorageKey(versionId));
+            return;
+        }
+        window.localStorage.setItem(
+            getMetamodelWorkspaceLayoutStorageKey(versionId),
+            JSON.stringify(metamodelWorkspaceNodePositions)
+        );
+    } catch (error) {
+        console.warn("Failed to persist metamodel workspace layout", error);
+    }
+}
+
+function clearMetamodelWorkspaceLayoutState() {
+    const versionId = getCurrentMetamodelDraftVersionId();
+    metamodelWorkspaceNodePositions = {};
+    if (!versionId) {
+        return;
+    }
+    try {
+        window.localStorage.removeItem(getMetamodelWorkspaceLayoutStorageKey(versionId));
+    } catch (error) {
+        console.warn("Failed to clear metamodel workspace layout", error);
+    }
+}
+
+function getStoredMetamodelNodePosition(typeId) {
+    const value = metamodelWorkspaceNodePositions[String(typeId)];
+    if (!value || typeof value !== "object") {
+        return null;
+    }
+    const x = Number(value.x);
+    const y = Number(value.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return null;
+    }
+    return { x, y };
+}
+
+function setStoredMetamodelNodePosition(typeId, x, y) {
+    metamodelWorkspaceNodePositions[String(typeId)] = {
+        x: Math.round(x),
+        y: Math.round(y),
+    };
+}
+
+function clampMetamodelNodePosition(x, y, width, height) {
+    return {
+        x: Math.max(40, Math.min(Math.round(x), Math.max(40, width - 280))),
+        y: Math.max(40, Math.min(Math.round(y), Math.max(40, height - 120))),
+    };
+}
+
+function getRenderedMetamodelNodePosition(typeId) {
+    const node = metamodelWorkspaceCanvas?.querySelector(
+        `g.diagram-node[data-workspace-kind="semantic_type"][data-workspace-id="${typeId}"]`
+    );
+    if (!node) {
+        return null;
+    }
+    const x = Number(node.dataset.positionX);
+    const y = Number(node.dataset.positionY);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return null;
+    }
+    return { x, y };
+}
+
+function getWorkspaceCanvasSvgPoint(event) {
+    if (!metamodelWorkspaceCanvas) {
+        return { x: 0, y: 0 };
+    }
+    const rect = metamodelWorkspaceCanvas.getBoundingClientRect();
+    const viewBox = metamodelWorkspaceCanvas.viewBox.baseVal;
+    const scaleX = rect.width > 0 ? viewBox.width / rect.width : 1;
+    const scaleY = rect.height > 0 ? viewBox.height / rect.height : 1;
+    return {
+        x: viewBox.x + (event.clientX - rect.left) * scaleX,
+        y: viewBox.y + (event.clientY - rect.top) * scaleY,
+    };
+}
+
+function getMetamodelWorkspacePointerKey(event) {
+    if ("pointerType" in event && event.pointerType && event.pointerType !== "mouse") {
+        return `pointer:${event.pointerId}`;
+    }
+    return "mouse";
+}
+
+function startMetamodelWorkspaceDrag(item, event) {
+    if (metamodelWorkspaceDragState || metamodelWorkspaceInteractionMode !== "select" || event.button !== 0) {
+        return;
+    }
+    const typeId = Number(item.dataset.workspaceId);
+    if (!typeId) {
+        return;
+    }
+    loadMetamodelWorkspaceLayoutState();
+    const originX = Number(item.dataset.positionX || 0);
+    const originY = Number(item.dataset.positionY || 0);
+    const point = getWorkspaceCanvasSvgPoint(event);
+    metamodelWorkspaceDragState = {
+        pointerKey: getMetamodelWorkspacePointerKey(event),
+        typeId,
+        startX: point.x,
+        startY: point.y,
+        originX,
+        originY,
+        moved: false,
+    };
+    metamodelWorkspaceCanvas?.classList.add("is-dragging");
+    event.preventDefault();
+}
+
+function handleMetamodelWorkspacePointerMove(event) {
+    if (!metamodelWorkspaceDragState || getMetamodelWorkspacePointerKey(event) !== metamodelWorkspaceDragState.pointerKey) {
+        return;
+    }
+
+    const point = getWorkspaceCanvasSvgPoint(event);
+    const deltaX = point.x - metamodelWorkspaceDragState.startX;
+    const deltaY = point.y - metamodelWorkspaceDragState.startY;
+    if (!metamodelWorkspaceDragState.moved && Math.hypot(deltaX, deltaY) < 6) {
+        return;
+    }
+
+    metamodelWorkspaceDragState.moved = true;
+    const viewBox = metamodelWorkspaceCanvas?.viewBox?.baseVal;
+    const nextPosition = clampMetamodelNodePosition(
+        metamodelWorkspaceDragState.originX + deltaX,
+        metamodelWorkspaceDragState.originY + deltaY,
+        viewBox?.width || 1200,
+        viewBox?.height || 760
+    );
+    setStoredMetamodelNodePosition(
+        metamodelWorkspaceDragState.typeId,
+        nextPosition.x,
+        nextPosition.y
+    );
+    renderMetamodelWorkspaceCanvas();
+}
+
+function handleMetamodelWorkspacePointerUp(event) {
+    if (!metamodelWorkspaceDragState || getMetamodelWorkspacePointerKey(event) !== metamodelWorkspaceDragState.pointerKey) {
+        return;
+    }
+    const moved = metamodelWorkspaceDragState.moved;
+    metamodelWorkspaceDragState = null;
+    metamodelWorkspaceCanvas?.classList.remove("is-dragging");
+    if (moved) {
+        persistMetamodelWorkspaceLayoutState();
+        metamodelWorkspaceSuppressClickUntil = Date.now() + 250;
+    }
+}
+
+function moveSelectedMetamodelWorkspaceNode(deltaX, deltaY) {
+    if (selectedMetamodelWorkspace?.kind !== "semantic_type") {
+        return;
+    }
+    const currentPosition = getRenderedMetamodelNodePosition(selectedMetamodelWorkspace.id);
+    if (!currentPosition) {
+        return;
+    }
+    const viewBox = metamodelWorkspaceCanvas?.viewBox?.baseVal;
+    const nextPosition = clampMetamodelNodePosition(
+        currentPosition.x + deltaX,
+        currentPosition.y + deltaY,
+        viewBox?.width || 1200,
+        viewBox?.height || 760
+    );
+    setStoredMetamodelNodePosition(selectedMetamodelWorkspace.id, nextPosition.x, nextPosition.y);
+    persistMetamodelWorkspaceLayoutState();
+    renderMetamodelWorkspaceCanvas();
+    showBanner("Semantic type 위치를 Metamodel Canvas에서 조정했습니다.", "success");
 }
 
 function setMetamodelWorkspaceInteractionMode(mode) {
@@ -1595,6 +1819,10 @@ function renderMetamodelWorkspaceInspector() {
             <p class="admin-meta">${escapeHtml(item.description || "설명 없음")}</p>
             <div class="toolbar-inline inspector-actions">
                 <button class="button primary small" type="button" data-inspector-save="semantic_type" data-workspace-id="${escapeHtml(item.id)}">빠른 저장</button>
+                <button class="button ghost small" type="button" data-inspector-layout-move="-80,0">왼쪽으로</button>
+                <button class="button ghost small" type="button" data-inspector-layout-move="80,0">오른쪽으로</button>
+                <button class="button ghost small" type="button" data-inspector-layout-move="0,-60">위로</button>
+                <button class="button ghost small" type="button" data-inspector-layout-move="0,60">아래로</button>
             </div>
             ${
                 defaultNotation
@@ -1762,21 +1990,33 @@ function renderMetamodelWorkspaceCanvas() {
     const width = 240;
     const height = 92;
     const positions = new Map();
+    loadMetamodelWorkspaceLayoutState();
 
     layoutTypes.forEach((item, index) => {
         const col = index % columns;
         const row = Math.floor(index / columns);
-        positions.set(item.id, {
+        const defaultPosition = {
             x: startX + col * colGap,
             y: startY + row * rowGap,
             width,
             height,
-        });
+        };
+        const storedPosition = getStoredMetamodelNodePosition(item.id);
+        const nextPosition = storedPosition
+            ? {
+                  x: Math.max(40, Math.round(storedPosition.x)),
+                  y: Math.max(40, Math.round(storedPosition.y)),
+                  width,
+                  height,
+              }
+            : defaultPosition;
+        positions.set(item.id, nextPosition);
     });
 
-    const rows = Math.max(1, Math.ceil(layoutTypes.length / columns));
-    const viewWidth = Math.max(1200, startX + (columns - 1) * colGap + width + 120);
-    const viewHeight = Math.max(560, startY + (rows - 1) * rowGap + height + 140);
+    const maxX = Math.max(...layoutTypes.map((item) => (positions.get(item.id)?.x || 0) + width), 1200 - 120);
+    const maxY = Math.max(...layoutTypes.map((item) => (positions.get(item.id)?.y || 0) + height), 560 - 120);
+    const viewWidth = Math.max(1200, maxX + 120);
+    const viewHeight = Math.max(560, maxY + 140);
 
     const containmentSvg = metamodelContainmentRules
         .map((item) => {
@@ -1827,7 +2067,7 @@ function renderMetamodelWorkspaceCanvas() {
             const pos = positions.get(item.id);
             const nodeClass = item.kind === "runtime-only" ? "runtime-only" : item.kind;
             return `
-                <g class="diagram-node metamodel-node kind-${escapeHtml(nodeClass)} ${isSelectedMetamodelWorkspace("semantic_type", item.id) ? "is-selected" : ""}" data-workspace-kind="semantic_type" data-workspace-id="${escapeHtml(item.id)}">
+                <g class="diagram-node metamodel-node kind-${escapeHtml(nodeClass)} ${isSelectedMetamodelWorkspace("semantic_type", item.id) ? "is-selected" : ""} ${metamodelWorkspaceDragState?.typeId === item.id ? "is-dragging" : ""}" data-workspace-kind="semantic_type" data-workspace-id="${escapeHtml(item.id)}" data-position-x="${escapeHtml(pos.x)}" data-position-y="${escapeHtml(pos.y)}">
                     <rect class="node-shape" x="${pos.x}" y="${pos.y}" width="${pos.width}" height="${pos.height}" rx="${item.kind === "container" ? 22 : 14}" ry="${item.kind === "container" ? 22 : 14}"></rect>
                     <text class="node-label" x="${pos.x + 20}" y="${pos.y + 36}">${escapeHtml(item.display_name)}</text>
                     <text class="node-meta" x="${pos.x + 20}" y="${pos.y + 58}">${escapeHtml(item.code)} | ${escapeHtml(item.kind)}</text>
@@ -3223,6 +3463,7 @@ metamodelVersionForm?.addEventListener("submit", createMetamodelVersion);
 metamodelNamespaceSelect?.addEventListener("change", renderMetamodelSelectOptions);
 metamodelDraftVersionSelect?.addEventListener("change", () => {
     selectedMetamodelWorkspace = null;
+    metamodelWorkspaceLayoutVersionId = null;
     resetMetamodelSemanticTypeForm();
     resetMetamodelPropertyForm({ preserveSemanticType: false });
     resetMetamodelContainmentRuleForm();
@@ -3267,16 +3508,51 @@ metamodelWorkspaceOutline?.addEventListener("click", (event) => {
     selectMetamodelWorkspaceItem(item.dataset.workspaceKind, item.dataset.workspaceId).catch((error) => showBanner(error.message, "error"));
 });
 metamodelWorkspaceCanvas?.addEventListener("click", (event) => {
+    if (Date.now() < metamodelWorkspaceSuppressClickUntil) {
+        return;
+    }
     const item = event.target instanceof Element ? event.target.closest("[data-workspace-kind][data-workspace-id]") : null;
     if (!item) {
         return;
     }
     selectMetamodelWorkspaceItem(item.dataset.workspaceKind, item.dataset.workspaceId).catch((error) => showBanner(error.message, "error"));
 });
+metamodelWorkspaceCanvas?.addEventListener("pointerdown", (event) => {
+    const item = event.target instanceof Element
+        ? event.target.closest('g.diagram-node[data-workspace-kind="semantic_type"][data-workspace-id]')
+        : null;
+    if (!item) {
+        return;
+    }
+    startMetamodelWorkspaceDrag(item, event);
+});
+metamodelWorkspaceCanvas?.addEventListener("mousedown", (event) => {
+    const item = event.target instanceof Element
+        ? event.target.closest('g.diagram-node[data-workspace-kind="semantic_type"][data-workspace-id]')
+        : null;
+    if (!item) {
+        return;
+    }
+    startMetamodelWorkspaceDrag(item, event);
+});
 metamodelWorkspaceCanvas?.addEventListener("pointerleave", () => {
     updateMetamodelWorkspaceHovered(null);
 });
+window.addEventListener("pointermove", handleMetamodelWorkspacePointerMove);
+window.addEventListener("pointerup", handleMetamodelWorkspacePointerUp);
+window.addEventListener("pointercancel", handleMetamodelWorkspacePointerUp);
+window.addEventListener("mousemove", handleMetamodelWorkspacePointerMove);
+window.addEventListener("mouseup", handleMetamodelWorkspacePointerUp);
 metamodelWorkspaceInspector?.addEventListener("click", (event) => {
+    const layoutMoveButton = event.target instanceof Element ? event.target.closest("[data-inspector-layout-move]") : null;
+    if (layoutMoveButton) {
+        const [deltaX, deltaY] = String(layoutMoveButton.dataset.inspectorLayoutMove || "0,0")
+            .split(",")
+            .map((value) => Number.parseInt(value, 10) || 0);
+        moveSelectedMetamodelWorkspaceNode(deltaX, deltaY);
+        return;
+    }
+
     const saveButton = event.target instanceof Element ? event.target.closest("[data-inspector-save][data-workspace-id]") : null;
     if (saveButton) {
         const workspaceId = Number(saveButton.dataset.workspaceId);
@@ -3322,6 +3598,11 @@ metamodelWorkspaceCreateAssociationModeButton?.addEventListener("click", () => {
 });
 metamodelWorkspaceCreateSemanticTypeButton?.addEventListener("click", () => {
     createSemanticTypeFromCanvasQuick().catch((error) => showBanner(error.message, "error"));
+});
+metamodelWorkspaceResetLayoutButton?.addEventListener("click", () => {
+    clearMetamodelWorkspaceLayoutState();
+    renderMetamodelWorkspaceCanvas();
+    showBanner("Metamodel Canvas 레이아웃을 초기화했습니다.", "success");
 });
 alertRuleForm?.addEventListener("submit", saveAlertRule);
 alertRuleFormResetButton?.addEventListener("click", resetAlertRuleForm);
