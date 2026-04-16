@@ -81,6 +81,7 @@ def test_admin_can_create_draft_version_by_cloning_existing_version(seeded_app, 
     assert payload["version"]["version_code"] == "seed-v2-draft"
     assert payload["version"]["status"] == "draft"
     assert payload["version"]["based_on_version_id"] == 1
+    assert payload["version"]["based_on_version_code"] == "seed-v1"
 
     with seeded_app.app_context():
         db_conn = get_db()

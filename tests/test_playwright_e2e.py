@@ -322,14 +322,12 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     expect(page.locator("#admin-summary-cards")).to_contain_text("사용자")
     expect(page.locator("#admin-metamodel-versions-list")).to_contain_text("seed-v1")
     expect(page.locator("#admin-alert-rules-list")).to_contain_text("cpu_usage")
-
-    page.locator("#metamodel-version-code").fill("core-v2-ui-draft")
-    page.locator("#metamodel-version-description").fill("Playwright draft create")
-    page.get_by_role("button", name="Draft 생성").click()
-
-    createdVersion = page.locator(".admin-item", has_text="core-v2-ui-draft").first
-    expect(createdVersion).to_contain_text("draft")
-    expect(page.locator("#metamodel-draft-version-select")).to_contain_text("core / core-v2-ui-draft")
+    page.locator(".admin-item", has_text="core / seed-v1").first.get_by_role("button", name="새 Draft").click()
+    derivedDraftVersion = page.locator(".admin-item", has_text=re.compile(r"seed-v1-draft-\d{12}")).first
+    expect(derivedDraftVersion).to_contain_text("draft")
+    expect(derivedDraftVersion).to_contain_text("기준 seed-v1")
+    expect(page.locator("#metamodel-draft-version-select")).to_contain_text(re.compile(r"seed-v1-draft-\d{12}"))
+    createdVersion = derivedDraftVersion
 
     page.locator("#metamodel-workspace-create-semantic-type-kind").select_option("runtime-only")
     page.get_by_role("button", name="새 Semantic Type").click()
@@ -401,7 +399,6 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
 
     expect(page.locator("#admin-metamodel-properties-list .admin-item", has_text="Worker Count Updated").first).to_contain_text("user_editable=false")
 
-    page.locator("#metamodel-containment-rule-version-id").select_option(label="core / core-v2-ui-draft")
     page.locator("#metamodel-containment-parent-type-id").select_option(label="Physical Server (PhysicalServer)")
     page.locator("#metamodel-containment-child-type-id").select_option(label="Worker Pool Updated (WorkerPool)")
     page.locator("#metamodel-containment-min-count").fill("0")
@@ -594,21 +591,21 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     expect(page.locator("#admin-metamodel-associations-list")).not_to_contain_text("worker_pool_to_monitoring_agent")
 
     createdVersion.get_by_role("button", name="Diff").click()
-    expect(page.locator("#metamodel-validation-panel")).to_contain_text("core / core-v2-ui-draft review")
+    expect(page.locator("#metamodel-validation-panel")).to_contain_text("review")
     expect(page.locator("#metamodel-validation-panel")).to_contain_text("baseline seed-v1")
     expect(page.locator("#metamodel-validation-panel")).to_contain_text("active view")
     expect(page.locator("#metamodel-validation-panel")).to_contain_text("WorkerPool")
     expect(page.locator("#metamodel-validation-panel")).to_contain_text("Worker Count Updated")
 
     createdVersion.get_by_role("button", name="Validate").click()
-    expect(page.locator("#metamodel-validation-panel")).to_contain_text("core / core-v2-ui-draft review")
+    expect(page.locator("#metamodel-validation-panel")).to_contain_text("review")
     expect(page.locator("#metamodel-validation-panel")).to_contain_text("Validation")
     expect(page.locator("#metamodel-validation-panel")).to_contain_text("valid")
     expect(page.locator("#metamodel-validation-panel")).to_contain_text("error 0")
 
     createdVersion.locator(".publish-metamodel-button").click()
 
-    expect(page.locator(".admin-item", has_text="core-v2-ui-draft").first).to_contain_text("published")
+    expect(createdVersion).to_contain_text("published")
     page.locator("#alert-rule-object-type").fill("SoftwareProcess")
     page.locator("#alert-rule-metric-key").fill("fd_count")
     page.locator("#alert-rule-warning-threshold").fill("50")

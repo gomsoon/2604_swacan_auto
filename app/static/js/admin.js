@@ -1532,6 +1532,8 @@ function renderMetamodelVersions(items) {
     metamodelVersionsList.innerHTML = items
         .map((item) => {
             const canPublish = item.status === "draft";
+            const canCreateDraft = item.status === "published" || item.status === "deprecated";
+            const basedOnLabel = item.based_on_version_code || item.based_on_version_id || "-";
             return `
                 <article class="admin-item">
                     <div class="section-header">
@@ -1544,11 +1546,12 @@ function renderMetamodelVersions(items) {
                             <span class="meta-pill">notation ${escapeHtml(item.notation_count)}</span>
                             <span class="meta-pill">palette ${escapeHtml(item.palette_group_count)}</span>
                             <button class="button ghost small diff-metamodel-button" type="button" data-version-id="${escapeHtml(item.id)}">Diff</button>
+                            ${canCreateDraft ? `<button class="button ghost small clone-draft-metamodel-button" type="button" data-version-id="${escapeHtml(item.id)}">새 Draft</button>` : ""}
                             ${canPublish ? `<button class="button ghost small validate-metamodel-button" type="button" data-version-id="${escapeHtml(item.id)}">Validate</button>` : ""}
                             ${canPublish ? `<button class="button small primary publish-metamodel-button" type="button" data-version-id="${escapeHtml(item.id)}">Publish</button>` : ""}
                         </div>
                     </div>
-                    <p class="admin-meta">기준 버전 ${escapeHtml(item.based_on_version_id ?? "-")} | published ${escapeHtml(formatTimestamp(item.published_at))}</p>
+                    <p class="admin-meta">기준 ${escapeHtml(basedOnLabel)} | published ${escapeHtml(formatTimestamp(item.published_at))}</p>
                     <p class="admin-meta">${escapeHtml(item.description || "설명 없음")}</p>
                 </article>
             `;
@@ -3197,24 +3200,73 @@ async function createMetamodelVersion(event) {
             description: metamodelVersionDescriptionInput.value.trim() || null,
         };
 
-        await apiFetch("/api/admin/metamodel/versions", {
+        const created = await apiFetch("/api/admin/metamodel/versions", {
             method: "POST",
             body: payload,
         });
 
         metamodelVersionForm.reset();
-        await Promise.all([loadMetamodelVersions(), loadMetamodelSemanticTypes()]);
-        await loadMetamodelProperties();
-        await loadMetamodelPaletteGroups();
-        await loadMetamodelNotations();
-        resetMetamodelSemanticTypeForm();
-        resetMetamodelPropertyForm();
-        resetMetamodelContainmentRuleForm();
-        resetMetamodelNotationForm({ preserveSemanticType: false });
+        await loadMetamodelVersions();
+        await switchMetamodelDraftVersion(created.version.id);
         showBanner("메타모델 draft 버전을 생성했습니다.", "success");
     } catch (error) {
         showBanner(error.message, "error");
     }
+}
+
+function buildDerivedMetamodelVersionCode(sourceVersion) {
+    const now = new Date();
+    const stamp = [
+        String(now.getFullYear()).slice(-2),
+        String(now.getMonth() + 1).padStart(2, "0"),
+        String(now.getDate()).padStart(2, "0"),
+        String(now.getHours()).padStart(2, "0"),
+        String(now.getMinutes()).padStart(2, "0"),
+        String(now.getSeconds()).padStart(2, "0"),
+    ].join("");
+    const baseCode = String(sourceVersion.version_code || "draft").replace(/-draft(?:-\d+)?$/i, "");
+    return `${baseCode}-draft-${stamp}`;
+}
+
+async function switchMetamodelDraftVersion(versionId) {
+    if (versionId) {
+        metamodelDraftVersionSelect.value = String(versionId);
+    }
+    selectedMetamodelWorkspace = null;
+    metamodelWorkspaceLayoutVersionId = null;
+    resetMetamodelSemanticTypeForm();
+    resetMetamodelPropertyForm({ preserveSemanticType: false });
+    resetMetamodelContainmentRuleForm();
+    resetMetamodelNotationForm({ preserveSemanticType: false });
+    resetMetamodelAssociationForm();
+    await loadMetamodelSemanticTypes();
+    await loadMetamodelProperties();
+    await loadMetamodelContainmentRules();
+    await loadMetamodelPaletteGroups();
+    await loadMetamodelNotations();
+    await loadMetamodelAssociations();
+}
+
+async function createDraftFromMetamodelVersion(versionId) {
+    clearBanner();
+    const sourceVersion = metamodelVersions.find((item) => Number(item.id) === Number(versionId));
+    if (!sourceVersion) {
+        showBanner("기준 메타모델 버전을 찾을 수 없습니다.", "error");
+        return;
+    }
+
+    const created = await apiFetch("/api/admin/metamodel/versions", {
+        method: "POST",
+        body: {
+            namespace_code: sourceVersion.namespace_code,
+            based_on_version_id: sourceVersion.id,
+            version_code: buildDerivedMetamodelVersionCode(sourceVersion),
+            description: sourceVersion.description ? `${sourceVersion.description} (derived draft)` : `Derived from ${sourceVersion.version_code}`,
+        },
+    });
+    await loadMetamodelVersions();
+    await switchMetamodelDraftVersion(created.version.id);
+    showBanner(`메타모델 draft '${created.version.version_code}'을(를) 생성했습니다.`, "success");
 }
 
 async function publishMetamodelVersion(versionId) {
@@ -3769,22 +3821,7 @@ eventDetailPanel?.addEventListener("click", (event) => {
 metamodelVersionForm?.addEventListener("submit", createMetamodelVersion);
 metamodelNamespaceSelect?.addEventListener("change", renderMetamodelSelectOptions);
 metamodelDraftVersionSelect?.addEventListener("change", () => {
-    selectedMetamodelWorkspace = null;
-    metamodelWorkspaceLayoutVersionId = null;
-    resetMetamodelSemanticTypeForm();
-    resetMetamodelPropertyForm({ preserveSemanticType: false });
-    resetMetamodelContainmentRuleForm();
-    resetMetamodelNotationForm({ preserveSemanticType: false });
-    resetMetamodelAssociationForm();
-    loadMetamodelSemanticTypes()
-        .then(async () => {
-            await loadMetamodelProperties();
-            await loadMetamodelContainmentRules();
-            await loadMetamodelPaletteGroups();
-            await loadMetamodelNotations();
-            await loadMetamodelAssociations();
-        })
-        .catch((error) => showBanner(error.message, "error"));
+    switchMetamodelDraftVersion(metamodelDraftVersionSelect.value).catch((error) => showBanner(error.message, "error"));
 });
 metamodelSemanticTypeForm?.addEventListener("submit", saveMetamodelSemanticType);
 metamodelSemanticTypeFormResetButton?.addEventListener("click", resetMetamodelSemanticTypeForm);
@@ -3945,6 +3982,21 @@ metamodelVersionsList?.addEventListener("click", async (event) => {
             clearBanner();
             await loadMetamodelDiff(versionId);
             showBanner("메타모델 diff/영향도를 갱신했습니다.", "success");
+        } catch (error) {
+            showBanner(error.message, "error");
+        }
+        return;
+    }
+
+    const cloneDraftButton = event.target instanceof HTMLElement ? event.target.closest(".clone-draft-metamodel-button") : null;
+    if (cloneDraftButton) {
+        const versionId = Number(cloneDraftButton.dataset.versionId);
+        if (!versionId) {
+            return;
+        }
+
+        try {
+            await createDraftFromMetamodelVersion(versionId);
         } catch (error) {
             showBanner(error.message, "error");
         }

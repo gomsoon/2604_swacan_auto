@@ -35,9 +35,11 @@ def fetch_version(version_id: int):
         """
         SELECT mv.id, mv.namespace_id, mv.version_code, mv.status, mv.description, mv.based_on_version_id,
                mv.published_at, mv.created_at, mv.updated_at,
-               ns.code AS namespace_code, ns.name AS namespace_name
+               ns.code AS namespace_code, ns.name AS namespace_name,
+               base_mv.version_code AS based_on_version_code
         FROM metamodel_versions AS mv
         JOIN metamodel_namespaces AS ns ON ns.id = mv.namespace_id
+        LEFT JOIN metamodel_versions AS base_mv ON base_mv.id = mv.based_on_version_id
         WHERE mv.id = ?
         """,
         (version_id,),
@@ -54,6 +56,7 @@ def serialize_version(row) -> dict[str, Any]:
         "status": row["status"],
         "description": row["description"],
         "based_on_version_id": row["based_on_version_id"],
+        "based_on_version_code": row["based_on_version_code"],
         "published_at": row["published_at"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
@@ -1445,11 +1448,13 @@ def list_versions():
         SELECT mv.id, mv.namespace_id, mv.version_code, mv.status, mv.description, mv.based_on_version_id,
                mv.published_at, mv.created_at, mv.updated_at,
                ns.code AS namespace_code, ns.name AS namespace_name,
+               base_mv.version_code AS based_on_version_code,
                (SELECT COUNT(*) FROM semantic_types AS st WHERE st.metamodel_version_id = mv.id) AS semantic_type_count,
                (SELECT COUNT(*) FROM notation_definitions AS nd WHERE nd.metamodel_version_id = mv.id) AS notation_count,
                (SELECT COUNT(*) FROM palette_groups AS pg WHERE pg.metamodel_version_id = mv.id) AS palette_group_count
         FROM metamodel_versions AS mv
         JOIN metamodel_namespaces AS ns ON ns.id = mv.namespace_id
+        LEFT JOIN metamodel_versions AS base_mv ON base_mv.id = mv.based_on_version_id
         ORDER BY ns.code ASC, mv.id ASC
         """
     ).fetchall()
