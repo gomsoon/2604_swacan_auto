@@ -339,7 +339,8 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     createdRule = page.locator(".admin-item", has_text="fd_count").first
     createdRule.get_by_role("button", name="미리보기").click()
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("App Process")
-    expect(page.locator("#alert-rule-preview-panel")).to_contain_text("open alert 0")
+    expect(page.locator("#alert-rule-preview-panel")).to_contain_text("active alert 0")
+    expect(page.locator("#alert-rule-preview-panel")).to_contain_text("current metric fd_count")
 
     createdRule.get_by_role("button", name="비활성화").click()
     expect(page.locator(".admin-item", has_text="fd_count").first).to_contain_text("disabled")

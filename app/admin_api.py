@@ -264,6 +264,47 @@ def serialize_monitored_object(row) -> dict[str, Any]:
     }
 
 
+def preview_metric_value(state: dict[str, Any], metric_key: str) -> float | None:
+    if metric_key == "memory_used_ratio":
+        total = state.get("memory_total")
+        used = state.get("memory_used")
+        try:
+            total_value = float(total)
+            used_value = float(used)
+        except (TypeError, ValueError):
+            return None
+        if total_value <= 0:
+            return None
+        return (used_value / total_value) * 100.0
+
+    value = state.get(metric_key)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def preview_threshold_level(
+    metric_value: float | None,
+    comparison: str,
+    warning_threshold: float | None,
+    critical_threshold: float | None,
+) -> str:
+    if metric_value is None:
+        return "unknown"
+
+    def matches(value: float, threshold: float | None) -> bool:
+        if threshold is None:
+            return False
+        return value >= threshold if comparison == "gte" else value <= threshold
+
+    if matches(metric_value, critical_threshold):
+        return "critical"
+    if matches(metric_value, warning_threshold):
+        return "warning"
+    return "normal"
+
+
 def parse_optional_float(value) -> float | None:
     if value in (None, ""):
         return None
@@ -1054,7 +1095,6 @@ def get_alert_rule_targets_preview(rule_id: int):
         clauses.append("mo.object_type = ?")
         params.append(row["object_type"])
 
-    params.append(limit)
     preview_rows = get_db().execute(
         f"""
         SELECT
@@ -1078,23 +1118,65 @@ def get_alert_rule_targets_preview(rule_id: int):
                 WHERE nb.monitored_object_id = mo.id
                   AND vv.status = 'active'
             ) AS active_node_count,
-              (
-                  SELECT COUNT(*)
-                  FROM alert_instances AS alerts
-                  WHERE alerts.monitored_object_id = mo.id
-                    AND alerts.status != 'resolved'
-              ) AS open_alert_count
+            (
+                SELECT COUNT(*)
+                FROM alert_instances AS alerts
+                WHERE alerts.monitored_object_id = mo.id
+                  AND alerts.status != 'resolved'
+            ) AS open_alert_count,
+            (
+                SELECT COUNT(*)
+                FROM alert_instances AS alerts
+                WHERE alerts.monitored_object_id = mo.id
+                  AND alerts.status != 'resolved'
+                  AND alerts.source_rule_id = ?
+            ) AS source_rule_open_alert_count,
+            ls.status AS latest_state_status,
+            ls.severity AS latest_state_severity,
+            ls.received_at AS latest_received_at,
+            ls.state_json AS latest_state_json
         FROM monitored_objects AS mo
+        LEFT JOIN latest_states AS ls ON ls.id = (
+            SELECT ls2.id
+            FROM latest_states AS ls2
+            WHERE ls2.monitored_object_id = mo.id
+              AND ls2.state_type = ?
+            ORDER BY ls2.received_at DESC, ls2.id DESC
+            LIMIT 1
+        )
         WHERE {' AND '.join(clauses)}
         ORDER BY mo.display_name ASC, mo.id ASC
-        LIMIT ?
         """,
-        tuple(params),
+        (row["id"], row["state_type"], *params),
     ).fetchall()
 
-    return {
-        "rule": serialize_alert_rule(row),
-        "items": [
+    all_items: list[dict[str, Any]] = []
+    monitored_object_ids: list[int] = []
+    warning_match_count = 0
+    critical_match_count = 0
+    metric_available_count = 0
+
+    for preview_row in preview_rows:
+        state = parse_json_or_text(preview_row["latest_state_json"])
+        if not isinstance(state, dict):
+            state = {}
+        current_metric_value = preview_metric_value(state, row["metric_key"])
+        threshold_level = preview_threshold_level(
+            current_metric_value,
+            row["comparison"],
+            row["warning_threshold"],
+            row["critical_threshold"],
+        )
+        if current_metric_value is not None:
+            metric_available_count += 1
+        if threshold_level == "critical":
+            critical_match_count += 1
+            warning_match_count += 1
+        elif threshold_level == "warning":
+            warning_match_count += 1
+
+        monitored_object_ids.append(preview_row["monitored_object_id"])
+        all_items.append(
             {
                 "monitored_object_id": preview_row["monitored_object_id"],
                 "display_name": preview_row["display_name"],
@@ -1103,9 +1185,51 @@ def get_alert_rule_targets_preview(rule_id: int):
                 "active_view_count": preview_row["active_view_count"],
                 "active_node_count": preview_row["active_node_count"],
                 "open_alert_count": preview_row["open_alert_count"],
+                "source_rule_open_alert_count": preview_row["source_rule_open_alert_count"],
+                "latest_state_status": preview_row["latest_state_status"],
+                "latest_state_severity": preview_row["latest_state_severity"],
+                "latest_received_at": preview_row["latest_received_at"],
+                "current_metric_value": current_metric_value,
+                "threshold_level": threshold_level,
             }
-            for preview_row in preview_rows
-        ],
+        )
+
+    distinct_active_view_count = 0
+    total_active_node_count = sum(int(item["active_node_count"]) for item in all_items)
+    total_open_alert_count = sum(int(item["open_alert_count"]) for item in all_items)
+    total_source_rule_open_alert_count = sum(int(item["source_rule_open_alert_count"]) for item in all_items)
+
+    if monitored_object_ids:
+        placeholders = ", ".join("?" for _ in monitored_object_ids)
+        distinct_active_view_count = int(
+            get_db()
+            .execute(
+                f"""
+                SELECT COUNT(DISTINCT vv.view_id)
+                FROM node_bindings AS nb
+                JOIN view_version_nodes AS vn ON vn.id = nb.view_version_node_id
+                JOIN view_versions AS vv ON vv.id = vn.view_version_id
+                WHERE nb.monitored_object_id IN ({placeholders})
+                  AND vv.status = 'active'
+                """,
+                tuple(monitored_object_ids),
+            )
+            .fetchone()[0]
+        )
+
+    return {
+        "rule": serialize_alert_rule(row),
+        "summary": {
+            "matched_object_count": len(all_items),
+            "active_view_count": distinct_active_view_count,
+            "active_node_count": total_active_node_count,
+            "open_alert_count": total_open_alert_count,
+            "source_rule_open_alert_count": total_source_rule_open_alert_count,
+            "metric_available_count": metric_available_count,
+            "warning_match_count": warning_match_count,
+            "critical_match_count": critical_match_count,
+        },
+        "items": all_items[:limit],
     }
 
 

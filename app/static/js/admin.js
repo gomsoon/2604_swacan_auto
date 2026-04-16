@@ -659,7 +659,7 @@ function renderAlertRulePreviewPanel() {
         return;
     }
 
-    const { rule, items } = selectedAlertRulePreview;
+    const { rule, summary, items } = selectedAlertRulePreview;
     const header = `
         <div class="section-header">
             <h3>${escapeHtml(rule.metric_key)}</h3>
@@ -672,9 +672,25 @@ function renderAlertRulePreviewPanel() {
         <p class="admin-meta">warning=${escapeHtml(rule.warning_threshold ?? "-")} | critical=${escapeHtml(rule.critical_threshold ?? "-")} | comparison=${escapeHtml(rule.comparison)}</p>
     `;
 
+    const summaryBlock = `
+        <div class="summary-metrics">
+            ${renderMetaPills([
+                ["matched object", summary?.matched_object_count ?? 0],
+                ["active view", summary?.active_view_count ?? 0],
+                ["active node", summary?.active_node_count ?? 0],
+                ["active alert", summary?.open_alert_count ?? 0],
+                ["rule alert", summary?.source_rule_open_alert_count ?? 0],
+                ["metric available", summary?.metric_available_count ?? 0],
+                ["warning match", summary?.warning_match_count ?? 0],
+                ["critical match", summary?.critical_match_count ?? 0],
+            ])}
+        </div>
+    `;
+
     if (items.length === 0) {
         alertRulePreviewPanel.innerHTML = `
             ${header}
+            ${summaryBlock}
             <p class="section-copy">현재 이 rule에 매칭되는 monitored object가 없습니다.</p>
         `;
         return;
@@ -682,6 +698,7 @@ function renderAlertRulePreviewPanel() {
 
     alertRulePreviewPanel.innerHTML = `
         ${header}
+        ${summaryBlock}
         <div class="admin-list compact-admin-list">
             ${items
                 .map(
@@ -689,11 +706,17 @@ function renderAlertRulePreviewPanel() {
                         <article class="admin-item compact-admin-item">
                             <div class="section-header">
                                 <h4>${escapeHtml(item.display_name)}</h4>
-                                <span class="meta-pill">open alert ${escapeHtml(item.open_alert_count)}</span>
+                                <div class="toolbar-inline">
+                                    <span class="meta-pill">active alert ${escapeHtml(item.open_alert_count)}</span>
+                                    <span class="meta-pill">rule alert ${escapeHtml(item.source_rule_open_alert_count)}</span>
+                                    <span class="meta-pill">${escapeHtml(item.threshold_level)}</span>
+                                </div>
                             </div>
                             <p class="admin-meta">object=${escapeHtml(item.monitored_object_id)} | type=${escapeHtml(item.object_type)}</p>
                             <p class="admin-meta">binding=${escapeHtml(item.runtime_binding_key || "-")}</p>
                             <p class="admin-meta">active view ${escapeHtml(item.active_view_count)} | active node ${escapeHtml(item.active_node_count)}</p>
+                            <p class="admin-meta">latest state ${escapeHtml(item.latest_state_status || "-")} | latest severity ${escapeHtml(item.latest_state_severity || "-")} | received ${escapeHtml(formatTimestamp(item.latest_received_at))}</p>
+                            <p class="admin-meta">current metric ${escapeHtml(rule.metric_key)}=${escapeHtml(item.current_metric_value ?? "-")}</p>
                         </article>
                     `
                 )

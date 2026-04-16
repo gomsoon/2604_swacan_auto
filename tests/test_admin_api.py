@@ -958,11 +958,84 @@ def test_admin_alert_rule_targets_preview_returns_matching_objects(seeded_client
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["rule"]["id"] == 1501
+    assert payload["summary"] == {
+        "matched_object_count": 1,
+        "active_view_count": 1,
+        "active_node_count": 1,
+        "open_alert_count": 0,
+        "source_rule_open_alert_count": 0,
+        "metric_available_count": 0,
+        "warning_match_count": 0,
+        "critical_match_count": 0,
+    }
     assert len(payload["items"]) == 1
     assert payload["items"][0]["display_name"] == "App Process"
     assert payload["items"][0]["object_type"] == "SoftwareProcess"
     assert payload["items"][0]["active_view_count"] == 1
     assert payload["items"][0]["active_node_count"] == 1
+    assert payload["items"][0]["current_metric_value"] is None
+    assert payload["items"][0]["threshold_level"] == "unknown"
+
+
+def test_admin_alert_rule_targets_preview_includes_current_alert_impact(seeded_app, seeded_client) -> None:
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO latest_states (
+                view_node_id, monitored_object_id, target_id, state_type, status, severity,
+                state_json, occurred_at, received_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                102,
+                1302,
+                "app_main",
+                "process",
+                "warning",
+                "warning",
+                json.dumps({"cpu_usage": 88.0}),
+                "2026-04-12T11:10:00.000+09:00",
+                "2026-04-12T11:10:00.100+09:00",
+                "2026-04-12T11:10:00.100+09:00",
+            ),
+        )
+        db_conn.execute(
+            """
+            INSERT INTO alert_instances (
+                monitored_object_id, alert_code, source_rule_id, severity, status, first_occurred_at, last_occurred_at,
+                repeat_count, latest_message, metadata_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1302,
+                "rule.1501",
+                1501,
+                "warning",
+                "open",
+                "2026-04-12T11:10:00.000+09:00",
+                "2026-04-12T11:10:00.000+09:00",
+                1,
+                "cpu warning",
+                json.dumps({"metric_key": "cpu_usage"}),
+                "2026-04-12T11:10:00.100+09:00",
+                "2026-04-12T11:10:00.100+09:00",
+            ),
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/alert-rules/1501/targets-preview?limit=10")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["summary"]["open_alert_count"] == 1
+    assert payload["summary"]["source_rule_open_alert_count"] == 1
+    assert payload["summary"]["warning_match_count"] == 1
+    assert payload["summary"]["critical_match_count"] == 0
+    assert payload["items"][0]["current_metric_value"] == 88.0
+    assert payload["items"][0]["threshold_level"] == "warning"
+    assert payload["items"][0]["source_rule_open_alert_count"] == 1
 
 
 def test_admin_alert_rule_targets_preview_accepts_boundary_limits(seeded_client) -> None:
