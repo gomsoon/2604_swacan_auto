@@ -873,6 +873,16 @@ a {
     stroke-width: 3;
 }
 
+.metamodel-node:hover .node-shape,
+.metamodel-node.is-hovered .node-shape {
+    stroke: #0b7a75;
+    stroke-width: 3;
+}
+
+.metamodel-link:hover {
+    stroke-width: 4;
+}
+
 .metamodel-notation-preview {
     display: grid;
     gap: 10px;

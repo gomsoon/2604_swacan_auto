@@ -193,6 +193,7 @@ let selectedMetamodelWorkspace = null;
 let metamodelEditorFocusTimer = null;
 let metamodelWorkspaceInteractionMode = "select";
 let metamodelWorkspacePendingTypeId = null;
+let metamodelWorkspaceHovered = null;
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -291,7 +292,43 @@ function focusMetamodelWorkspaceInspectorInput(inputId) {
 function setMetamodelWorkspaceInteractionMode(mode) {
     metamodelWorkspaceInteractionMode = mode;
     metamodelWorkspacePendingTypeId = null;
+    metamodelWorkspaceHovered = null;
     renderMetamodelWorkspaceModeControls();
+}
+
+function updateMetamodelWorkspaceHovered(nextHovered) {
+    const normalizedNext = nextHovered
+        ? { kind: nextHovered.kind, id: Number(nextHovered.id) }
+        : null;
+    const sameHovered =
+        normalizedNext &&
+        metamodelWorkspaceHovered &&
+        normalizedNext.kind === metamodelWorkspaceHovered.kind &&
+        Number(normalizedNext.id) === Number(metamodelWorkspaceHovered.id);
+
+    if (sameHovered) {
+        return;
+    }
+
+    if (!normalizedNext && !metamodelWorkspaceHovered) {
+        return;
+    }
+
+    metamodelWorkspaceHovered = normalizedNext;
+    renderMetamodelWorkspaceModeControls();
+}
+
+function bindMetamodelWorkspaceCanvasHoverTargets() {
+    metamodelWorkspaceCanvas
+        ?.querySelectorAll("[data-workspace-kind][data-workspace-id]")
+        .forEach((item) => {
+            item.addEventListener("pointerover", () => {
+                updateMetamodelWorkspaceHovered({
+                    kind: item.dataset.workspaceKind,
+                    id: item.dataset.workspaceId,
+                });
+            });
+        });
 }
 
 function renderMetamodelWorkspaceModeControls() {
@@ -299,16 +336,39 @@ function renderMetamodelWorkspaceModeControls() {
     const isContainment = metamodelWorkspaceInteractionMode === "create_containment";
     const isAssociation = metamodelWorkspaceInteractionMode === "create_association";
     const pendingSemanticType = metamodelSemanticTypes.find((item) => item.id === metamodelWorkspacePendingTypeId);
+    const hoveredSemanticType =
+        metamodelWorkspaceHovered?.kind === "semantic_type"
+            ? metamodelSemanticTypes.find((item) => Number(item.id) === Number(metamodelWorkspaceHovered.id))
+            : null;
 
     if (metamodelWorkspaceModeStatus) {
         if (isContainment) {
-            metamodelWorkspaceModeStatus.textContent = pendingSemanticType
-                ? `Containment: ${pendingSemanticType.display_name} 다음 대상 선택`
-                : "Containment 연결 모드";
+            if (pendingSemanticType && hoveredSemanticType && hoveredSemanticType.id !== pendingSemanticType.id) {
+                const existingRule = metamodelContainmentRules.find(
+                    (item) =>
+                        Number(item.parent_type_id) === Number(pendingSemanticType.id) &&
+                        Number(item.child_type_id) === Number(hoveredSemanticType.id) &&
+                        Number(item.metamodel_version_id) === Number(metamodelDraftVersionSelect.value)
+                );
+                metamodelWorkspaceModeStatus.textContent = `Containment: ${pendingSemanticType.display_name} -> ${hoveredSemanticType.display_name} (${existingRule ? "기존 rule 편집" : "새 rule 생성"})`;
+            } else {
+                metamodelWorkspaceModeStatus.textContent = pendingSemanticType
+                    ? `Containment: ${pendingSemanticType.display_name} 다음 대상 선택`
+                    : "Containment 연결 모드";
+            }
         } else if (isAssociation) {
-            metamodelWorkspaceModeStatus.textContent = pendingSemanticType
-                ? `Association: ${pendingSemanticType.display_name} 다음 대상 선택`
-                : "Association 연결 모드";
+            if (pendingSemanticType && hoveredSemanticType && hoveredSemanticType.id !== pendingSemanticType.id) {
+                const existingAssociation = metamodelAssociations.find(
+                    (item) =>
+                        Number(item.source_type_id) === Number(pendingSemanticType.id) &&
+                        Number(item.target_type_id) === Number(hoveredSemanticType.id)
+                );
+                metamodelWorkspaceModeStatus.textContent = `Association: ${pendingSemanticType.display_name} -> ${hoveredSemanticType.display_name} (${existingAssociation ? "기존 definition 편집" : "새 definition 생성"})`;
+            } else {
+                metamodelWorkspaceModeStatus.textContent = pendingSemanticType
+                    ? `Association: ${pendingSemanticType.display_name} 다음 대상 선택`
+                    : "Association 연결 모드";
+            }
         } else {
             metamodelWorkspaceModeStatus.textContent = "선택 모드";
         }
@@ -1643,6 +1703,7 @@ function renderMetamodelWorkspaceCanvas() {
         ${associationSvg}
         ${nodeSvg}
     `;
+    bindMetamodelWorkspaceCanvasHoverTargets();
 }
 
 function refreshMetamodelWorkspace() {
@@ -3058,6 +3119,9 @@ metamodelWorkspaceCanvas?.addEventListener("click", (event) => {
         return;
     }
     selectMetamodelWorkspaceItem(item.dataset.workspaceKind, item.dataset.workspaceId).catch((error) => showBanner(error.message, "error"));
+});
+metamodelWorkspaceCanvas?.addEventListener("pointerleave", () => {
+    updateMetamodelWorkspaceHovered(null);
 });
 metamodelWorkspaceInspector?.addEventListener("click", (event) => {
     const saveButton = event.target instanceof Element ? event.target.closest("[data-inspector-save][data-workspace-id]") : null;
