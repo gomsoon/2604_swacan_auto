@@ -89,6 +89,10 @@
 - 동일 원인 반복 이벤트가 요약되어 표시된다.
 - 운영자는 필요할 때만 raw event를 세부 조회한다.
 
+추가 검토:
+- alert 관리 고도화 시 `alert_instances(current)` 와 `alert_history(archive)` 의 역할 분리를 적용한다.
+- 수동 resolve, 자동 resolve, 시간 경과 escalation 정책을 `resolution_source / resolution_reason` 기준으로 기록한다.
+
 ### Phase 5. agent 효율화와 식별 전략 강화
 목표:
 - 실제 운영 Linux 서버에서 agent 부하를 줄이고 multi-process daemon 감시 품질을 높인다.
