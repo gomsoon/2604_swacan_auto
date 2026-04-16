@@ -318,6 +318,18 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     expect(createdVersion).to_contain_text("draft")
     expect(page.locator("#metamodel-draft-version-select")).to_contain_text("core / core-v2-ui-draft")
 
+    page.locator("#metamodel-workspace-create-semantic-type-kind").select_option("runtime-only")
+    page.get_by_role("button", name="새 Semantic Type").click()
+    expect(page.locator("#metamodel-semantic-type-form-mode")).to_contain_text("edit")
+    expect(page.locator("#metamodel-semantic-type-kind")).to_have_value("runtime-only")
+    expect(page.locator("#metamodel-semantic-type-runtime-kind")).to_have_value("runtime")
+    expect(page.locator("#metamodel-semantic-type-code")).to_have_value("untitled_runtime_only_1")
+    expect(page.locator("#metamodel-semantic-type-display-name")).to_have_value("Untitled Runtime Only 1")
+    expect(page.locator("#metamodel-workspace-outline")).to_contain_text("Untitled Runtime Only 1")
+    page.locator("#metamodel-semantic-type-display-name").fill("Runtime Worker Quick")
+    page.locator("#save-metamodel-semantic-type-button").click()
+    expect(page.locator("#admin-metamodel-semantic-types-list .admin-item", has_text="Runtime Worker Quick").first).to_contain_text("runtime-only")
+
     page.locator("#metamodel-semantic-type-code").fill("WorkerPool")
     page.locator("#metamodel-semantic-type-display-name").fill("Worker Pool")
     page.locator("#metamodel-semantic-type-kind").select_option("container")

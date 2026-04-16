@@ -121,6 +121,13 @@
                     <h3>Metamodel Canvas</h3>
                     <div class="toolbar-inline">
                         <span id="metamodel-workspace-mode-status" class="meta-pill">선택 모드</span>
+                        <select id="metamodel-workspace-create-semantic-type-kind" class="compact-inline-select">
+                            <option value="node">node</option>
+                            <option value="container">container</option>
+                            <option value="edge">edge</option>
+                            <option value="runtime-only">runtime-only</option>
+                        </select>
+                        <button id="metamodel-workspace-create-semantic-type-button" class="button ghost small" type="button">새 Semantic Type</button>
                         <button id="metamodel-workspace-select-mode" class="button ghost small" type="button">선택</button>
                         <button id="metamodel-workspace-create-containment-mode" class="button ghost small" type="button">Containment 연결</button>
                         <button id="metamodel-workspace-create-association-mode" class="button ghost small" type="button">Association 연결</button>

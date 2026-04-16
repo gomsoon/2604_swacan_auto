@@ -26,6 +26,8 @@ const metamodelWorkspaceOutline = document.getElementById("metamodel-workspace-o
 const metamodelWorkspaceCanvas = document.getElementById("metamodel-workspace-canvas");
 const metamodelWorkspaceInspector = document.getElementById("metamodel-workspace-inspector");
 const metamodelWorkspaceModeStatus = document.getElementById("metamodel-workspace-mode-status");
+const metamodelWorkspaceCreateSemanticTypeKindInput = document.getElementById("metamodel-workspace-create-semantic-type-kind");
+const metamodelWorkspaceCreateSemanticTypeButton = document.getElementById("metamodel-workspace-create-semantic-type-button");
 const metamodelWorkspaceSelectModeButton = document.getElementById("metamodel-workspace-select-mode");
 const metamodelWorkspaceCreateContainmentModeButton = document.getElementById("metamodel-workspace-create-containment-mode");
 const metamodelWorkspaceCreateAssociationModeButton = document.getElementById("metamodel-workspace-create-association-mode");
@@ -391,6 +393,77 @@ async function openAssociationCreateFromCanvas(sourceTypeId, targetTypeId) {
         }
     }
     scrollToMetamodelEditorSection(metamodelAssociationSection, metamodelAssociationCodeInput);
+}
+
+function buildSemanticTypeQuickCreatePayload(kind) {
+    const labelBase =
+        kind === "container"
+            ? "Untitled Container"
+            : kind === "edge"
+                ? "Untitled Edge"
+                : kind === "runtime-only"
+                    ? "Untitled Runtime Only"
+                    : "Untitled Node";
+    const codeBase =
+        kind === "container"
+            ? "untitled_container"
+            : kind === "edge"
+                ? "untitled_edge"
+                : kind === "runtime-only"
+                    ? "untitled_runtime_only"
+                    : "untitled_node";
+
+    let index = 1;
+    while (
+        metamodelSemanticTypes.some(
+            (item) =>
+                item.code === `${codeBase}_${index}` ||
+                item.display_name === `${labelBase} ${index}`
+        )
+    ) {
+        index += 1;
+    }
+
+    return {
+        code: `${codeBase}_${index}`,
+        display_name: `${labelBase} ${index}`,
+        kind,
+        runtime_kind: kind === "runtime-only" ? "runtime" : null,
+        description: "Canvas quick create",
+        is_groupable: kind === "container",
+        allows_runtime_binding: kind !== "edge",
+        is_active: true,
+    };
+}
+
+async function createSemanticTypeFromCanvasQuick() {
+    const versionId = Number(metamodelDraftVersionSelect.value);
+    if (!versionId) {
+        showBanner("편집할 draft version을 먼저 선택하세요.", "error");
+        return;
+    }
+
+    const kind = metamodelWorkspaceCreateSemanticTypeKindInput?.value || "node";
+    const payload = buildSemanticTypeQuickCreatePayload(kind);
+    const createdPayload = await apiFetch(`/api/admin/metamodel/versions/${versionId}/semantic-types`, {
+        method: "POST",
+        body: payload,
+    });
+
+    setMetamodelWorkspaceInteractionMode("select");
+    await Promise.all([loadMetamodelVersions(), loadMetamodelSemanticTypes()]);
+    await Promise.all([loadMetamodelProperties(), loadMetamodelNotations(), loadMetamodelAssociations()]);
+
+    const created = createdPayload.semantic_type;
+    if (created) {
+        selectedMetamodelWorkspace = { kind: "semantic_type", id: created.id };
+        fillMetamodelSemanticTypeForm(created);
+        metamodelPropertySemanticTypeIdInput.value = String(created.id);
+        metamodelNotationSemanticTypeIdInput.value = String(created.id);
+        refreshMetamodelWorkspace();
+    }
+    scrollToMetamodelEditorSection(metamodelSemanticTypeSection, metamodelSemanticTypeCodeInput);
+    showBanner("Semantic type을 canvas에서 생성했습니다.", "success");
 }
 
 function openMetamodelEditorFromInspector(action, kind, id) {
@@ -2929,6 +3002,9 @@ metamodelWorkspaceCreateContainmentModeButton?.addEventListener("click", () => {
 });
 metamodelWorkspaceCreateAssociationModeButton?.addEventListener("click", () => {
     setMetamodelWorkspaceInteractionMode("create_association");
+});
+metamodelWorkspaceCreateSemanticTypeButton?.addEventListener("click", () => {
+    createSemanticTypeFromCanvasQuick().catch((error) => showBanner(error.message, "error"));
 });
 alertRuleForm?.addEventListener("submit", saveAlertRule);
 alertRuleFormResetButton?.addEventListener("click", resetAlertRuleForm);
