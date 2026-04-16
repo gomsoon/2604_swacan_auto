@@ -14,6 +14,7 @@ const metamodelVersionCount = document.getElementById("metamodel-version-count")
 const metamodelValidationPanel = document.getElementById("metamodel-validation-panel");
 const metamodelPermissionPill = document.getElementById("metamodel-permission-pill");
 const metamodelAuditList = document.getElementById("admin-metamodel-audit-list");
+const metamodelAuditDetailPanel = document.getElementById("metamodel-audit-detail-panel");
 const metamodelSemanticTypesList = document.getElementById("admin-metamodel-semantic-types-list");
 const metamodelSemanticTypeCount = document.getElementById("metamodel-semantic-type-count");
 const metamodelPropertiesList = document.getElementById("admin-metamodel-properties-list");
@@ -74,6 +75,10 @@ const latestStateTypeFilter = document.getElementById("latest-state-type-filter"
 const latestStateStatusFilter = document.getElementById("latest-state-status-filter");
 const debugDirectionFilter = document.getElementById("debug-direction-filter");
 const metamodelVersionForm = document.getElementById("metamodel-version-form");
+const metamodelAuditVersionFilter = document.getElementById("metamodel-audit-version-filter");
+const metamodelAuditEntityTypeFilter = document.getElementById("metamodel-audit-entity-type-filter");
+const metamodelAuditActionTypeFilter = document.getElementById("metamodel-audit-action-type-filter");
+const metamodelAuditLimitFilter = document.getElementById("metamodel-audit-limit-filter");
 const metamodelNamespaceSelect = document.getElementById("metamodel-namespace-select");
 const metamodelBaseVersionSelect = document.getElementById("metamodel-base-version-select");
 const metamodelVersionCodeInput = document.getElementById("metamodel-version-code");
@@ -197,6 +202,7 @@ let selectedMetamodelValidation = null;
 let selectedMetamodelDiff = null;
 let selectedMetamodelWorkspace = null;
 let metamodelAuditLogs = [];
+let selectedMetamodelAuditLogId = null;
 let metamodelEditorFocusTimer = null;
 let metamodelWorkspaceInteractionMode = "select";
 let metamodelWorkspacePendingTypeId = null;
@@ -1565,6 +1571,86 @@ function renderMetamodelSelectOptions() {
     metamodelDraftVersionSelect.disabled = draftVersions.length === 0;
 }
 
+function renderMetamodelAuditFilterOptions() {
+    if (!metamodelAuditVersionFilter) {
+        return;
+    }
+    const currentValue = metamodelAuditVersionFilter.value;
+    const options = [
+        '<option value="">전체 버전</option>',
+        ...metamodelVersions.map(
+            (item) => `
+                <option value="${escapeHtml(item.id)}" ${String(item.id) === String(currentValue) ? "selected" : ""}>
+                    ${escapeHtml(item.namespace_code)} / ${escapeHtml(item.version_code)} (${escapeHtml(item.status)})
+                </option>
+            `
+        ),
+    ];
+    metamodelAuditVersionFilter.innerHTML = options.join("");
+}
+
+function getSelectedMetamodelAuditLog() {
+    return metamodelAuditLogs.find((item) => Number(item.id) === Number(selectedMetamodelAuditLogId)) || null;
+}
+
+function renderMetamodelAuditDetail(item) {
+    if (!metamodelAuditDetailPanel) {
+        return;
+    }
+    if (!item) {
+        metamodelAuditDetailPanel.innerHTML =
+            '<p class="section-copy">감사 로그를 선택하면 상세 정보와 관련 객체 정보를 확인할 수 있습니다.</p>';
+        return;
+    }
+
+    const detailRows = [
+        ["액션", item.action_type],
+        ["엔터티", item.entity_type],
+        ["엔터티 ID", item.entity_id],
+        ["버전", item.metamodel_version_code || "-"],
+        ["버전 상태", item.metamodel_version_status || "-"],
+        ["Semantic Type", item.semantic_type_code || "-"],
+        ["작업자", item.actor_username || "system"],
+        ["시간", formatTimestamp(item.created_at)],
+    ];
+
+    metamodelAuditDetailPanel.innerHTML = `
+        <div class="section-header">
+            <h4>${escapeHtml(item.summary)}</h4>
+            <div class="toolbar-inline">
+                <span class="meta-pill">${escapeHtml(item.action_type)}</span>
+                <span class="meta-pill">${escapeHtml(item.entity_type)}</span>
+            </div>
+        </div>
+        <div class="admin-list compact-admin-list">
+            ${detailRows
+                .map(
+                    ([label, value]) => `
+                        <article class="admin-item compact-admin-item">
+                            <strong>${escapeHtml(label)}</strong>
+                            <p class="admin-meta">${escapeHtml(value ?? "-")}</p>
+                        </article>
+                    `
+                )
+                .join("")}
+        </div>
+        <div class="audit-detail-actions">
+            ${
+                item.metamodel_version_id
+                    ? `<button class="button ghost small" type="button" data-audit-version-id="${escapeHtml(item.metamodel_version_id)}">이 버전만 보기</button>`
+                    : ""
+            }
+            ${
+                item.semantic_type_id && String(item.metamodel_version_id || "") === String(getCurrentMetamodelDraftVersionId())
+                    ? `<button class="button ghost small" type="button" data-audit-semantic-type-id="${escapeHtml(item.semantic_type_id)}">Semantic Type 열기</button>`
+                    : ""
+            }
+            <button class="button ghost small" type="button" data-audit-clear-filter="true">필터 초기화</button>
+        </div>
+        <pre class="payload-preview">${escapeHtml(formatJson(item.details || {}))}</pre>
+    `;
+}
+
 function renderMetamodelAuditLogs(items) {
     metamodelAuditLogs = items;
     if (!metamodelAuditList) {
@@ -1572,21 +1658,32 @@ function renderMetamodelAuditLogs(items) {
     }
     if (!items.length) {
         metamodelAuditList.innerHTML = '<p class="section-copy">메타모델 감사 로그가 아직 없습니다.</p>';
+        selectedMetamodelAuditLogId = null;
+        renderMetamodelAuditDetail(null);
         return;
+    }
+
+    const selectedItemExists = items.some((item) => Number(item.id) === Number(selectedMetamodelAuditLogId));
+    if (!selectedItemExists) {
+        selectedMetamodelAuditLogId = items[0].id;
     }
 
     metamodelAuditList.innerHTML = items
         .map(
             (item) => `
-                <article class="list-card">
+                <article class="list-card ${Number(item.id) === Number(selectedMetamodelAuditLogId) ? "is-selected" : ""}" data-audit-log-id="${escapeHtml(item.id)}">
                     <div class="list-card-header">
                         <strong>${escapeHtml(item.summary)}</strong>
-                        <span class="meta-pill">${escapeHtml(item.action_type)}</span>
+                        <div class="toolbar-inline">
+                            <span class="meta-pill">${escapeHtml(item.action_type)}</span>
+                            <span class="meta-pill">${escapeHtml(item.entity_type)}</span>
+                        </div>
                     </div>
                     <div class="list-card-body">
                         <div class="meta-row">
                             <span>${escapeHtml(item.actor_username || "system")}</span>
                             <span>${escapeHtml(item.metamodel_version_code || "-")}</span>
+                            <span>${escapeHtml(item.semantic_type_code || "-")}</span>
                             <span>${escapeHtml(formatTimestamp(item.created_at))}</span>
                         </div>
                     </div>
@@ -1594,12 +1691,14 @@ function renderMetamodelAuditLogs(items) {
             `
         )
         .join("");
+    renderMetamodelAuditDetail(getSelectedMetamodelAuditLog());
 }
 
 function renderMetamodelVersions(items) {
     metamodelVersions = items;
     metamodelVersionCount.textContent = `${items.length}개`;
     renderMetamodelSelectOptions();
+    renderMetamodelAuditFilterOptions();
     renderContainmentVersionOptions(metamodelContainmentRuleVersionIdInput.value || metamodelDraftVersionSelect.value);
 
     if (items.length === 0) {
@@ -3046,7 +3145,18 @@ async function loadMetamodelVersions() {
 }
 
 async function loadMetamodelAuditLogs() {
-    const payload = await apiFetch("/api/admin/metamodel/audit-logs?limit=20");
+    const params = new URLSearchParams();
+    params.set("limit", metamodelAuditLimitFilter?.value || "20");
+    if (metamodelAuditVersionFilter?.value) {
+        params.set("version_id", metamodelAuditVersionFilter.value);
+    }
+    if (metamodelAuditEntityTypeFilter?.value) {
+        params.set("entity_type", metamodelAuditEntityTypeFilter.value);
+    }
+    if (metamodelAuditActionTypeFilter?.value) {
+        params.set("action_type", metamodelAuditActionTypeFilter.value);
+    }
+    const payload = await apiFetch(`/api/admin/metamodel/audit-logs?${params.toString()}`);
     renderMetamodelAuditLogs(payload.items || []);
 }
 
@@ -3864,6 +3974,18 @@ refreshDebugButton?.addEventListener("click", loadDebug);
 refreshCleanupButton?.addEventListener("click", loadCleanupRuns);
 refreshMetamodelVersionsButton?.addEventListener("click", loadMetamodelVersions);
 refreshMetamodelAuditButton?.addEventListener("click", loadMetamodelAuditLogs);
+metamodelAuditVersionFilter?.addEventListener("change", () => {
+    loadMetamodelAuditLogs().catch((error) => showBanner(error.message, "error"));
+});
+metamodelAuditEntityTypeFilter?.addEventListener("change", () => {
+    loadMetamodelAuditLogs().catch((error) => showBanner(error.message, "error"));
+});
+metamodelAuditActionTypeFilter?.addEventListener("change", () => {
+    loadMetamodelAuditLogs().catch((error) => showBanner(error.message, "error"));
+});
+metamodelAuditLimitFilter?.addEventListener("change", () => {
+    loadMetamodelAuditLogs().catch((error) => showBanner(error.message, "error"));
+});
 refreshMetamodelSemanticTypesButton?.addEventListener("click", () => {
     loadMetamodelSemanticTypes()
         .then(async () => {
@@ -4102,6 +4224,52 @@ metamodelVersionsList?.addEventListener("click", async (event) => {
     }
 
     await publishMetamodelVersion(versionId);
+});
+metamodelAuditList?.addEventListener("click", (event) => {
+    const card = event.target instanceof HTMLElement ? event.target.closest("[data-audit-log-id]") : null;
+    if (!card) {
+        return;
+    }
+    selectedMetamodelAuditLogId = Number(card.dataset.auditLogId);
+    renderMetamodelAuditLogs(metamodelAuditLogs);
+});
+metamodelAuditDetailPanel?.addEventListener("click", (event) => {
+    const versionButton = event.target instanceof HTMLElement ? event.target.closest("[data-audit-version-id]") : null;
+    if (versionButton) {
+        if (metamodelAuditVersionFilter) {
+            metamodelAuditVersionFilter.value = String(versionButton.dataset.auditVersionId || "");
+        }
+        loadMetamodelAuditLogs().catch((error) => showBanner(error.message, "error"));
+        return;
+    }
+
+    const semanticTypeButton =
+        event.target instanceof HTMLElement ? event.target.closest("[data-audit-semantic-type-id]") : null;
+    if (semanticTypeButton) {
+        const semanticTypeId = Number(semanticTypeButton.dataset.auditSemanticTypeId);
+        selectMetamodelWorkspaceItem("semantic_type", semanticTypeId).catch((error) => showBanner(error.message, "error"));
+        return;
+    }
+
+    const clearFilterButton =
+        event.target instanceof HTMLElement ? event.target.closest("[data-audit-clear-filter='true']") : null;
+    if (!clearFilterButton) {
+        return;
+    }
+
+    if (metamodelAuditVersionFilter) {
+        metamodelAuditVersionFilter.value = "";
+    }
+    if (metamodelAuditEntityTypeFilter) {
+        metamodelAuditEntityTypeFilter.value = "";
+    }
+    if (metamodelAuditActionTypeFilter) {
+        metamodelAuditActionTypeFilter.value = "";
+    }
+    if (metamodelAuditLimitFilter) {
+        metamodelAuditLimitFilter.value = "20";
+    }
+    loadMetamodelAuditLogs().catch((error) => showBanner(error.message, "error"));
 });
 metamodelSemanticTypesList?.addEventListener("click", (event) => {
     const button = event.target instanceof HTMLElement ? event.target.closest(".edit-metamodel-semantic-type-button") : null;

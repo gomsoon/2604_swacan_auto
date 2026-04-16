@@ -113,7 +113,49 @@
             </div>
             <button id="refresh-metamodel-audit-button" class="button ghost small" type="button">갱신</button>
         </div>
+        <div class="toolbar-inline metamodel-audit-toolbar">
+            <label class="field compact-field">
+                <span>버전</span>
+                <select id="metamodel-audit-version-filter">
+                    <option value="">전체 버전</option>
+                </select>
+            </label>
+            <label class="field compact-field">
+                <span>엔터티</span>
+                <select id="metamodel-audit-entity-type-filter">
+                    <option value="">전체 엔터티</option>
+                    <option value="metamodel_version">metamodel_version</option>
+                    <option value="semantic_type">semantic_type</option>
+                    <option value="property_definition">property_definition</option>
+                    <option value="notation_definition">notation_definition</option>
+                    <option value="containment_rule">containment_rule</option>
+                    <option value="association_definition">association_definition</option>
+                </select>
+            </label>
+            <label class="field compact-field">
+                <span>액션</span>
+                <select id="metamodel-audit-action-type-filter">
+                    <option value="">전체 액션</option>
+                    <option value="create">create</option>
+                    <option value="update">update</option>
+                    <option value="clone">clone</option>
+                    <option value="delete">delete</option>
+                    <option value="publish">publish</option>
+                </select>
+            </label>
+            <label class="field compact-field">
+                <span>개수</span>
+                <select id="metamodel-audit-limit-filter">
+                    <option value="20">20</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select>
+            </label>
+        </div>
         <div id="admin-metamodel-audit-list" class="admin-list"></div>
+        <section id="metamodel-audit-detail-panel" class="raw-event-detail-panel">
+            <p class="section-copy">감사 로그를 선택하면 상세 정보와 관련 객체 정보를 확인할 수 있습니다.</p>
+        </section>
     </section>
 
     <section class="card">

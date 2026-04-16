@@ -8,7 +8,12 @@ from flask import Blueprint, request
 
 from .auth import error_response, metamodel_permission_required
 from .db import get_db
-from .metamodel_audit import serialize_metamodel_audit_log, write_metamodel_audit_log
+from .metamodel_audit import (
+    ALLOWED_METAMODEL_AUDIT_ACTION_TYPES,
+    ALLOWED_METAMODEL_AUDIT_ENTITY_TYPES,
+    serialize_metamodel_audit_log,
+    write_metamodel_audit_log,
+)
 
 bp = Blueprint("admin_metamodel_api", __name__, url_prefix="/api/admin/metamodel")
 
@@ -92,12 +97,19 @@ def serialize_version_summary(row) -> dict[str, Any]:
     }
 
 
-def fetch_metamodel_audit_log_rows(*, limit: int, metamodel_version_id: int | None = None):
+def fetch_metamodel_audit_log_rows(
+    *,
+    limit: int,
+    metamodel_version_id: int | None = None,
+    entity_type: str | None = None,
+    action_type: str | None = None,
+):
     params: list[Any] = []
     sql = """
         SELECT logs.id, logs.metamodel_version_id, logs.semantic_type_id, logs.entity_type, logs.entity_id,
                logs.action_type, logs.actor_user_id, logs.summary, logs.details_json, logs.created_at,
                mv.version_code AS metamodel_version_code,
+               mv.status AS metamodel_version_status,
                st.code AS semantic_type_code,
                users.username AS actor_username
         FROM metamodel_audit_logs AS logs
@@ -105,9 +117,18 @@ def fetch_metamodel_audit_log_rows(*, limit: int, metamodel_version_id: int | No
         LEFT JOIN semantic_types AS st ON st.id = logs.semantic_type_id
         LEFT JOIN users ON users.id = logs.actor_user_id
     """
+    clauses: list[str] = []
     if metamodel_version_id is not None:
-        sql += " WHERE logs.metamodel_version_id = ?"
+        clauses.append("logs.metamodel_version_id = ?")
         params.append(metamodel_version_id)
+    if entity_type is not None:
+        clauses.append("logs.entity_type = ?")
+        params.append(entity_type)
+    if action_type is not None:
+        clauses.append("logs.action_type = ?")
+        params.append(action_type)
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
     sql += " ORDER BY logs.created_at DESC, logs.id DESC LIMIT ?"
     params.append(limit)
     return get_db().execute(sql, tuple(params)).fetchall()
@@ -1498,7 +1519,24 @@ def list_metamodel_audit_logs():
         if version_id <= 0:
             return error_response("validation_error", "version_id must be a positive integer", 400)
 
-    rows = fetch_metamodel_audit_log_rows(limit=limit, metamodel_version_id=version_id)
+    entity_type = request.args.get("entity_type")
+    if entity_type in ("", None):
+        entity_type = None
+    elif entity_type not in ALLOWED_METAMODEL_AUDIT_ENTITY_TYPES:
+        return error_response("validation_error", "entity_type is invalid", 400)
+
+    action_type = request.args.get("action_type")
+    if action_type in ("", None):
+        action_type = None
+    elif action_type not in ALLOWED_METAMODEL_AUDIT_ACTION_TYPES:
+        return error_response("validation_error", "action_type is invalid", 400)
+
+    rows = fetch_metamodel_audit_log_rows(
+        limit=limit,
+        metamodel_version_id=version_id,
+        entity_type=entity_type,
+        action_type=action_type,
+    )
     return {"items": [serialize_metamodel_audit_log(row) for row in rows]}
 
 

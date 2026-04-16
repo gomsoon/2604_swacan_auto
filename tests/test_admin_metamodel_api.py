@@ -265,6 +265,48 @@ def test_admin_can_list_metamodel_audit_logs_for_recent_actions(seeded_client) -
     assert payload["items"][0]["actor_username"] == "admin"
     assert any(item["entity_type"] == "metamodel_version" and item["action_type"] == "create" for item in payload["items"])
     assert any(item["entity_type"] == "semantic_type" and item["action_type"] == "create" for item in payload["items"])
+    assert all(item["metamodel_version_id"] == version_id for item in payload["items"])
+
+
+def test_admin_can_filter_metamodel_audit_logs_by_entity_and_action(seeded_client) -> None:
+    login(seeded_client)
+
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v2-audit-filter-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for audit filter test",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    create_type = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPoolFiltered",
+            "display_name": "Worker Pool Filtered",
+            "kind": "container",
+            "runtime_kind": "process-group",
+            "description": "Audit filter target",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+    assert create_type.status_code == 201
+
+    response = seeded_client.get(
+        f"/api/admin/metamodel/audit-logs?version_id={version_id}&entity_type=semantic_type&action_type=create&limit=20"
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["items"]
+    assert all(item["entity_type"] == "semantic_type" for item in payload["items"])
+    assert all(item["action_type"] == "create" for item in payload["items"])
 
 
 def test_admin_metamodel_audit_logs_limit_uses_boundary_validation(seeded_client) -> None:
@@ -275,12 +317,16 @@ def test_admin_metamodel_audit_logs_limit_uses_boundary_validation(seeded_client
     too_low = seeded_client.get("/api/admin/metamodel/audit-logs?limit=0")
     too_high = seeded_client.get("/api/admin/metamodel/audit-logs?limit=101")
     not_integer = seeded_client.get("/api/admin/metamodel/audit-logs?limit=abc")
+    invalid_entity = seeded_client.get("/api/admin/metamodel/audit-logs?entity_type=bad_type")
+    invalid_action = seeded_client.get("/api/admin/metamodel/audit-logs?action_type=bad_action")
 
     assert ok_min.status_code == 200
     assert ok_max.status_code == 200
     assert too_low.status_code == 400
     assert too_high.status_code == 400
     assert not_integer.status_code == 400
+    assert invalid_entity.status_code == 400
+    assert invalid_action.status_code == 400
 
 
 def test_admin_rejects_publish_for_non_draft_version(seeded_client) -> None:

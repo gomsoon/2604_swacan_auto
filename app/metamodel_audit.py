@@ -91,6 +91,7 @@ def serialize_metamodel_audit_log(row) -> dict[str, Any]:
         "id": row["id"],
         "metamodel_version_id": row["metamodel_version_id"],
         "metamodel_version_code": row["metamodel_version_code"],
+        "metamodel_version_status": row["metamodel_version_status"],
         "semantic_type_id": row["semantic_type_id"],
         "semantic_type_code": row["semantic_type_code"],
         "entity_type": row["entity_type"],
