@@ -779,6 +779,64 @@ def test_admin_unacknowledge_alert_clears_ack_fields(seeded_app, seeded_client) 
     assert payload["ack_note"] is None
 
 
+def test_admin_alert_history_tracks_ack_and_status_changes(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    login(seeded_client)
+
+    ack_response = seeded_client.patch(
+        "/api/admin/alerts/1",
+        json={"acknowledged": True, "ack_note": "운영자가 확인함"},
+    )
+    status_response = seeded_client.patch(
+        "/api/admin/alerts/1/status",
+        json={"status": "in_progress", "status_note": "조사중"},
+    )
+    history_response = seeded_client.get("/api/admin/alerts/1/history?limit=10")
+
+    assert ack_response.status_code == 200
+    assert status_response.status_code == 200
+    assert history_response.status_code == 200
+
+    payload = history_response.get_json()
+    assert len(payload["items"]) == 2
+    assert payload["items"][0]["action_type"] == "status_changed"
+    assert payload["items"][0]["previous_status"] == "open"
+    assert payload["items"][0]["new_status"] == "in_progress"
+    assert payload["items"][0]["performed_by_username"] == "admin"
+    assert payload["items"][0]["note"] == "조사중"
+    assert payload["items"][1]["action_type"] == "acknowledged"
+    assert payload["items"][1]["previous_acknowledged"] is False
+    assert payload["items"][1]["new_acknowledged"] is True
+    assert payload["items"][1]["note"] == "운영자가 확인함"
+    assert payload["items"][1]["payload"]["source"] == "admin"
+
+
+def test_admin_alert_history_accepts_boundary_limits_and_rejects_invalid_values(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    login(seeded_client)
+    seeded_client.patch(
+        "/api/admin/alerts/1",
+        json={"acknowledged": True, "ack_note": "운영자가 확인함"},
+    )
+
+    low_response = seeded_client.get("/api/admin/alerts/1/history?limit=1")
+    high_response = seeded_client.get("/api/admin/alerts/1/history?limit=100")
+    zero_response = seeded_client.get("/api/admin/alerts/1/history?limit=0")
+    over_response = seeded_client.get("/api/admin/alerts/1/history?limit=101")
+    invalid_response = seeded_client.get("/api/admin/alerts/1/history?limit=abc")
+    missing_response = seeded_client.get("/api/admin/alerts/999/history?limit=10")
+
+    assert low_response.status_code == 200
+    assert high_response.status_code == 200
+    assert len(low_response.get_json()["items"]) == 1
+    assert len(high_response.get_json()["items"]) == 1
+    assert zero_response.status_code == 400
+    assert over_response.status_code == 400
+    assert invalid_response.status_code == 400
+    assert missing_response.status_code == 404
+    assert missing_response.get_json()["error"]["code"] == "not_found"
+
+
 def test_admin_alerts_support_active_and_resolved_status_filters(seeded_app, seeded_client) -> None:
     seed_admin_dashboard_rows(seeded_app)
     with seeded_app.app_context():

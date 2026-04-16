@@ -6,6 +6,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, g, request
 
+from .alert_history import record_alert_history
 from .auth import admin_required, error_response
 from .db import get_db
 from .runtime_state import derive_latest_state
@@ -230,6 +231,52 @@ def serialize_alert_instance(row) -> dict[str, Any]:
     if row["metadata_json"]:
         payload["metadata"] = parse_json_or_text(row["metadata_json"])
     return payload
+
+
+def serialize_alert_history_row(row) -> dict[str, Any]:
+    payload = {
+        "id": row["id"],
+        "alert_instance_id": row["alert_instance_id"],
+        "action_type": row["action_type"],
+        "previous_status": row["previous_status"],
+        "new_status": row["new_status"],
+        "previous_acknowledged": None if row["previous_acknowledged"] is None else bool(row["previous_acknowledged"]),
+        "new_acknowledged": None if row["new_acknowledged"] is None else bool(row["new_acknowledged"]),
+        "performed_by_user_id": row["performed_by_user_id"],
+        "performed_by_username": row["performed_by_username"],
+        "note": row["note"],
+        "created_at": row["created_at"],
+    }
+    if row["payload_json"]:
+        payload["payload"] = parse_json_or_text(row["payload_json"])
+    return payload
+
+
+def fetch_alert_instance_row(alert_id: int):
+    return get_db().execute(
+        """
+        SELECT alerts.id, alerts.monitored_object_id, mo.runtime_binding_key, mo.object_type AS semantic_type_code,
+               mo.display_name, alerts.alert_code, alerts.severity, alerts.status,
+               alerts.source_rule_id, rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
+               COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
+               alerts.acknowledged_at, alerts.acknowledged_by_user_id, ack_user.username AS acknowledged_by_username,
+               alerts.ack_note,
+               alerts.status_updated_at, alerts.status_updated_by_user_id, status_user.username AS status_updated_by_username,
+               alerts.status_note,
+               alerts.resolved_at, alerts.resolved_by_user_id, resolved_user.username AS resolved_by_username,
+               alerts.first_occurred_at, alerts.last_occurred_at, alerts.repeat_count,
+               alerts.latest_message, alerts.metadata_json
+        FROM alert_instances AS alerts
+        JOIN monitored_objects AS mo ON mo.id = alerts.monitored_object_id
+        LEFT JOIN alert_rules AS rules ON rules.id = alerts.source_rule_id
+        LEFT JOIN monitored_objects AS rule_mo ON rule_mo.id = rules.monitored_object_id
+        LEFT JOIN users AS ack_user ON ack_user.id = alerts.acknowledged_by_user_id
+        LEFT JOIN users AS status_user ON status_user.id = alerts.status_updated_by_user_id
+        LEFT JOIN users AS resolved_user ON resolved_user.id = alerts.resolved_by_user_id
+        WHERE alerts.id = ?
+        """,
+        (alert_id,),
+    ).fetchone()
 
 
 def serialize_alert_rule(row) -> dict[str, Any]:
@@ -802,6 +849,38 @@ def list_alert_instances():
     return {"items": [serialize_alert_instance(row) for row in rows]}
 
 
+@bp.get("/alerts/<int:alert_id>/history")
+@admin_required
+def get_alert_history(alert_id: int):
+    limit, error = parse_limit()
+    if error:
+        return error
+
+    alert_row = get_db().execute(
+        "SELECT id FROM alert_instances WHERE id = ?",
+        (alert_id,),
+    ).fetchone()
+    if alert_row is None:
+        return error_response("not_found", "alert not found", 404)
+
+    rows = get_db().execute(
+        """
+        SELECT history.id, history.alert_instance_id, history.action_type,
+               history.previous_status, history.new_status,
+               history.previous_acknowledged, history.new_acknowledged,
+               history.performed_by_user_id, users.username AS performed_by_username,
+               history.note, history.payload_json, history.created_at
+        FROM alert_history AS history
+        LEFT JOIN users ON users.id = history.performed_by_user_id
+        WHERE history.alert_instance_id = ?
+        ORDER BY history.created_at DESC, history.id DESC
+        LIMIT ?
+        """,
+        (alert_id, limit),
+    ).fetchall()
+    return {"items": [serialize_alert_history_row(row) for row in rows]}
+
+
 @bp.patch("/alerts/<int:alert_id>")
 @admin_required
 def update_alert_instance(alert_id: int):
@@ -831,6 +910,7 @@ def update_alert_instance(alert_id: int):
         return error_response("invalid_state", "resolved alert cannot be acknowledged", 409)
 
     timestamp = now_iso()
+    previous_acknowledged = existing["acknowledged_at"] is not None
     if acknowledged:
         db_conn.execute(
             """
@@ -849,32 +929,27 @@ def update_alert_instance(alert_id: int):
             """,
             (timestamp, alert_id),
         )
+
+    record_alert_history(
+        db_conn,
+        alert_instance_id=alert_id,
+        action_type="acknowledged" if acknowledged else "unacknowledged",
+        created_at=timestamp,
+        performed_by_user_id=g.user["id"],
+        previous_status=existing["status"],
+        new_status=existing["status"],
+        previous_acknowledged=previous_acknowledged,
+        new_acknowledged=acknowledged,
+        note=ack_note if acknowledged else None,
+        payload={
+            "source": "admin",
+            "previous_acknowledged_at": existing["acknowledged_at"],
+            "previous_ack_note": existing["ack_note"],
+        },
+    )
     db_conn.commit()
 
-    row = db_conn.execute(
-        """
-        SELECT alerts.id, alerts.monitored_object_id, mo.runtime_binding_key, mo.object_type AS semantic_type_code,
-               mo.display_name, alerts.alert_code, alerts.severity, alerts.status,
-               alerts.source_rule_id, rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
-               COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
-               alerts.acknowledged_at, alerts.acknowledged_by_user_id, ack_user.username AS acknowledged_by_username,
-               alerts.ack_note,
-               alerts.status_updated_at, alerts.status_updated_by_user_id, status_user.username AS status_updated_by_username,
-               alerts.status_note,
-               alerts.resolved_at, alerts.resolved_by_user_id, resolved_user.username AS resolved_by_username,
-               alerts.first_occurred_at, alerts.last_occurred_at, alerts.repeat_count,
-               alerts.latest_message, alerts.metadata_json
-        FROM alert_instances AS alerts
-        JOIN monitored_objects AS mo ON mo.id = alerts.monitored_object_id
-        LEFT JOIN alert_rules AS rules ON rules.id = alerts.source_rule_id
-        LEFT JOIN monitored_objects AS rule_mo ON rule_mo.id = rules.monitored_object_id
-        LEFT JOIN users AS ack_user ON ack_user.id = alerts.acknowledged_by_user_id
-        LEFT JOIN users AS status_user ON status_user.id = alerts.status_updated_by_user_id
-        LEFT JOIN users AS resolved_user ON resolved_user.id = alerts.resolved_by_user_id
-        WHERE alerts.id = ?
-        """,
-        (alert_id,),
-    ).fetchone()
+    row = fetch_alert_instance_row(alert_id)
     return {"alert": serialize_alert_instance(row)}
 
 
@@ -904,6 +979,7 @@ def update_alert_status(alert_id: int):
         return error_response("validation_error", str(exc), 400)
 
     timestamp = now_iso()
+    previous_status = existing["status"]
     resolved_at = timestamp if next_status == "resolved" else None
     resolved_by_user_id = g.user["id"] if next_status == "resolved" else None
 
@@ -930,32 +1006,20 @@ def update_alert_status(alert_id: int):
             alert_id,
         ),
     )
+    record_alert_history(
+        db_conn,
+        alert_instance_id=alert_id,
+        action_type="resolved" if next_status == "resolved" else "status_changed",
+        created_at=timestamp,
+        performed_by_user_id=g.user["id"],
+        previous_status=previous_status,
+        new_status=next_status,
+        note=status_note,
+        payload={"source": "admin"},
+    )
     db_conn.commit()
 
-    row = db_conn.execute(
-        """
-        SELECT alerts.id, alerts.monitored_object_id, mo.runtime_binding_key, mo.object_type AS semantic_type_code,
-               mo.display_name, alerts.alert_code, alerts.severity, alerts.status,
-               alerts.source_rule_id, rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
-               COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
-               alerts.acknowledged_at, alerts.acknowledged_by_user_id, ack_user.username AS acknowledged_by_username,
-               alerts.ack_note,
-               alerts.status_updated_at, alerts.status_updated_by_user_id, status_user.username AS status_updated_by_username,
-               alerts.status_note,
-               alerts.resolved_at, alerts.resolved_by_user_id, resolved_user.username AS resolved_by_username,
-               alerts.first_occurred_at, alerts.last_occurred_at, alerts.repeat_count,
-               alerts.latest_message, alerts.metadata_json
-        FROM alert_instances AS alerts
-        JOIN monitored_objects AS mo ON mo.id = alerts.monitored_object_id
-        LEFT JOIN alert_rules AS rules ON rules.id = alerts.source_rule_id
-        LEFT JOIN monitored_objects AS rule_mo ON rule_mo.id = rules.monitored_object_id
-        LEFT JOIN users AS ack_user ON ack_user.id = alerts.acknowledged_by_user_id
-        LEFT JOIN users AS status_user ON status_user.id = alerts.status_updated_by_user_id
-        LEFT JOIN users AS resolved_user ON resolved_user.id = alerts.resolved_by_user_id
-        WHERE alerts.id = ?
-        """,
-        (alert_id,),
-    ).fetchone()
+    row = fetch_alert_instance_row(alert_id)
     return {"alert": serialize_alert_instance(row)}
 
 

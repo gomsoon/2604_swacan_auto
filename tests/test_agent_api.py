@@ -247,6 +247,15 @@ def test_process_pending_ingest_updates_states_and_events(seeded_app, seeded_cli
         event_rows = db_conn.execute(
             "SELECT target_id, monitored_object_id, event_type, severity FROM raw_events ORDER BY id"
         ).fetchall()
+        history_rows = db_conn.execute(
+            """
+            SELECT history.action_type, alerts.alert_code
+            FROM alert_history AS history
+            JOIN alert_instances AS alerts ON alerts.id = history.alert_instance_id
+            WHERE alerts.monitored_object_id = 1302
+            ORDER BY history.id
+            """
+        ).fetchall()
 
     assert result == {
         "processed_batches": 1,
@@ -262,6 +271,9 @@ def test_process_pending_ingest_updates_states_and_events(seeded_app, seeded_cli
     ]
     assert [(row["target_id"], row["monitored_object_id"], row["event_type"], row["severity"]) for row in event_rows] == [
         ("app_main", 1302, "process_stopped", "warning"),
+    ]
+    assert [(row["action_type"], row["alert_code"]) for row in history_rows] == [
+        ("created", "process.down"),
     ]
 
 
@@ -588,10 +600,23 @@ def test_alert_instance_resolves_when_process_recovers(seeded_app, seeded_client
         resolved_count = db_conn.execute(
             "SELECT COUNT(*) AS count FROM alert_instances WHERE monitored_object_id = 1302 AND status = 'resolved'"
         ).fetchone()["count"]
+        history_rows = db_conn.execute(
+            """
+            SELECT history.action_type, history.note, alerts.alert_code
+            FROM alert_history AS history
+            JOIN alert_instances AS alerts ON alerts.id = history.alert_instance_id
+            WHERE alerts.monitored_object_id = 1302
+            ORDER BY history.id
+            """
+        ).fetchall()
 
     assert second_result["processed_items"] == 1
     assert open_count_after == 0
     assert resolved_count == 1
+    assert [(row["action_type"], row["note"], row["alert_code"]) for row in history_rows] == [
+        ("created", None, "process.down"),
+        ("resolved", "state normalized", "process.down"),
+    ]
 
 
 def test_alert_instance_preserves_manual_in_progress_status_until_resolution(seeded_app, seeded_client) -> None:

@@ -342,6 +342,24 @@ CREATE TABLE IF NOT EXISTS alert_instances (
     FOREIGN KEY (resolved_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS alert_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    alert_instance_id INTEGER NOT NULL,
+    action_type TEXT NOT NULL CHECK (
+        action_type IN ('created', 'acknowledged', 'unacknowledged', 'status_changed', 'resolved')
+    ),
+    previous_status TEXT,
+    new_status TEXT,
+    previous_acknowledged INTEGER CHECK (previous_acknowledged IN (0, 1)),
+    new_acknowledged INTEGER CHECK (new_acknowledged IN (0, 1)),
+    performed_by_user_id INTEGER,
+    note TEXT,
+    payload_json TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (alert_instance_id) REFERENCES alert_instances(id) ON DELETE CASCADE,
+    FOREIGN KEY (performed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS alert_rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     scope_type TEXT NOT NULL CHECK (scope_type IN ('object_type', 'monitored_object')),
@@ -550,6 +568,12 @@ CREATE INDEX IF NOT EXISTS idx_alert_instances_source_rule_status
 
 CREATE INDEX IF NOT EXISTS idx_alert_instances_status_last_occurred
     ON alert_instances(status, last_occurred_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_alert_history_alert_instance_created
+    ON alert_history(alert_instance_id, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_alert_history_action_type_created
+    ON alert_history(action_type, created_at DESC, id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_node_bindings_monitored_object
     ON node_bindings(monitored_object_id);

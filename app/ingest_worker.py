@@ -9,6 +9,7 @@ import click
 from flask import current_app
 from flask.cli import with_appcontext
 
+from .alert_history import record_alert_history
 from .db import get_db
 
 VALID_EVENT_TYPES = {
@@ -136,6 +137,89 @@ def alert_message_for_state(*, state_type: str, status: str, state: dict) -> str
     return f"{state_type} status changed to {status}"
 
 
+def create_alert_instance(
+    *,
+    monitored_object_id: int,
+    alert_code: str,
+    severity: str,
+    occurred_at: str,
+    received_at: str,
+    latest_message: str,
+    metadata_json: str,
+    source_rule_id: int | None = None,
+) -> None:
+    db_conn = get_db()
+    cursor = db_conn.execute(
+        """
+        INSERT INTO alert_instances (
+            monitored_object_id, alert_code, source_rule_id, severity, status,
+            status_updated_at, status_updated_by_user_id, status_note,
+            first_occurred_at, last_occurred_at, repeat_count,
+            latest_message, metadata_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'open', ?, NULL, NULL, ?, ?, 1, ?, ?, ?, ?)
+        """,
+        (
+            monitored_object_id,
+            alert_code,
+            source_rule_id,
+            severity,
+            received_at,
+            occurred_at,
+            occurred_at,
+            latest_message,
+            metadata_json,
+            received_at,
+            received_at,
+        ),
+    )
+    record_alert_history(
+        db_conn,
+        alert_instance_id=cursor.lastrowid,
+        action_type="created",
+        created_at=received_at,
+        previous_status=None,
+        new_status="open",
+        previous_acknowledged=False,
+        new_acknowledged=False,
+        payload={
+            "source": "worker",
+            "alert_code": alert_code,
+            "source_rule_id": source_rule_id,
+        },
+    )
+
+
+def resolve_alert_rows(*, rows, occurred_at: str, received_at: str, note: str, payload: dict) -> None:
+    db_conn = get_db()
+    for row in rows:
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET status = 'resolved',
+                resolved_at = COALESCE(resolved_at, ?),
+                resolved_by_user_id = NULL,
+                status_updated_at = ?,
+                status_updated_by_user_id = NULL,
+                updated_at = ?,
+                last_occurred_at = ?
+            WHERE id = ?
+            """,
+            (received_at, received_at, received_at, occurred_at, row["id"]),
+        )
+        record_alert_history(
+            db_conn,
+            alert_instance_id=row["id"],
+            action_type="resolved",
+            created_at=received_at,
+            previous_status=row["status"],
+            new_status="resolved",
+            previous_acknowledged=row["acknowledged_at"] is not None,
+            new_acknowledged=row["acknowledged_at"] is not None,
+            note=note,
+            payload=payload,
+        )
+
+
 def sync_latest_state_alert(
     *,
     monitored_object_id: int | None,
@@ -154,21 +238,22 @@ def sync_latest_state_alert(
     alert_code = alert_code_for_state(state_type=state_type, status=status, severity=severity)
 
     if alert_code is None:
-        db_conn.execute(
+        rows_to_resolve = db_conn.execute(
             """
-            UPDATE alert_instances
-            SET status = 'resolved',
-                resolved_at = COALESCE(resolved_at, ?),
-                resolved_by_user_id = NULL,
-                status_updated_at = ?,
-                status_updated_by_user_id = NULL,
-                updated_at = ?,
-                last_occurred_at = ?
+            SELECT id, status, acknowledged_at
+            FROM alert_instances
             WHERE monitored_object_id = ?
               AND status != 'resolved'
               AND alert_code LIKE ?
             """,
-            (received_at, received_at, received_at, occurred_at, monitored_object_id, f"{alert_prefix}%"),
+            (monitored_object_id, f"{alert_prefix}%"),
+        ).fetchall()
+        resolve_alert_rows(
+            rows=rows_to_resolve,
+            occurred_at=occurred_at,
+            received_at=received_at,
+            note="state normalized",
+            payload={"source": "worker", "reason": "state_normalized", "state_type": state_type},
         )
         return
 
@@ -176,22 +261,28 @@ def sync_latest_state_alert(
     latest_message = alert_message_for_state(state_type=state_type, status=status, state=state)
     metadata_json = json.dumps(state, ensure_ascii=False)
 
-    db_conn.execute(
+    rows_to_resolve = db_conn.execute(
         """
-        UPDATE alert_instances
-        SET status = 'resolved',
-            resolved_at = COALESCE(resolved_at, ?),
-            resolved_by_user_id = NULL,
-            status_updated_at = ?,
-            status_updated_by_user_id = NULL,
-            updated_at = ?,
-            last_occurred_at = ?
+        SELECT id, status, acknowledged_at
+        FROM alert_instances
         WHERE monitored_object_id = ?
           AND status != 'resolved'
           AND alert_code LIKE ?
           AND alert_code != ?
         """,
-        (received_at, received_at, received_at, occurred_at, monitored_object_id, f"{alert_prefix}%", alert_code),
+        (monitored_object_id, f"{alert_prefix}%", alert_code),
+    ).fetchall()
+    resolve_alert_rows(
+        rows=rows_to_resolve,
+        occurred_at=occurred_at,
+        received_at=received_at,
+        note="superseded by new state",
+        payload={
+            "source": "worker",
+            "reason": "superseded",
+            "state_type": state_type,
+            "active_alert_code": alert_code,
+        },
     )
 
     existing = db_conn.execute(
@@ -208,27 +299,14 @@ def sync_latest_state_alert(
     ).fetchone()
 
     if existing is None:
-        db_conn.execute(
-            """
-            INSERT INTO alert_instances (
-                monitored_object_id, alert_code, severity, status,
-                status_updated_at, status_updated_by_user_id, status_note,
-                first_occurred_at, last_occurred_at, repeat_count,
-                latest_message, metadata_json, created_at, updated_at
-            ) VALUES (?, ?, ?, 'open', ?, NULL, NULL, ?, ?, 1, ?, ?, ?, ?)
-            """,
-            (
-                monitored_object_id,
-                alert_code,
-                normalized_severity,
-                received_at,
-                occurred_at,
-                occurred_at,
-                latest_message,
-                metadata_json,
-                received_at,
-                received_at,
-            ),
+        create_alert_instance(
+            monitored_object_id=monitored_object_id,
+            alert_code=alert_code,
+            severity=normalized_severity,
+            occurred_at=occurred_at,
+            received_at=received_at,
+            latest_message=latest_message,
+            metadata_json=metadata_json,
         )
         return
 
@@ -341,21 +419,22 @@ def sync_threshold_alerts(
         alert_code = f"rule.{rule['id']}"
 
         if level is None:
-            db_conn.execute(
+            rows_to_resolve = db_conn.execute(
                 """
-                UPDATE alert_instances
-                SET status = 'resolved',
-                    resolved_at = COALESCE(resolved_at, ?),
-                    resolved_by_user_id = NULL,
-                    status_updated_at = ?,
-                    status_updated_by_user_id = NULL,
-                    updated_at = ?,
-                    last_occurred_at = ?
+                SELECT id, status, acknowledged_at
+                FROM alert_instances
                 WHERE monitored_object_id = ?
                   AND alert_code = ?
                   AND status != 'resolved'
                 """,
-                (received_at, received_at, received_at, occurred_at, monitored_object_id, alert_code),
+                (monitored_object_id, alert_code),
+            ).fetchall()
+            resolve_alert_rows(
+                rows=rows_to_resolve,
+                occurred_at=occurred_at,
+                received_at=received_at,
+                note="threshold no longer matched",
+                payload={"source": "worker", "reason": "threshold_cleared", "rule_id": rule["id"]},
             )
             continue
 
@@ -387,28 +466,15 @@ def sync_threshold_alerts(
         ).fetchone()
 
         if existing is None:
-            db_conn.execute(
-                """
-                INSERT INTO alert_instances (
-                    monitored_object_id, alert_code, source_rule_id, severity, status,
-                    status_updated_at, status_updated_by_user_id, status_note,
-                    first_occurred_at, last_occurred_at, repeat_count,
-                    latest_message, metadata_json, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, 'open', ?, NULL, NULL, ?, ?, 1, ?, ?, ?, ?)
-                """,
-                (
-                    monitored_object_id,
-                    alert_code,
-                    rule["id"],
-                    level,
-                    received_at,
-                    occurred_at,
-                    occurred_at,
-                    latest_message,
-                    metadata_json,
-                    received_at,
-                    received_at,
-                ),
+            create_alert_instance(
+                monitored_object_id=monitored_object_id,
+                alert_code=alert_code,
+                source_rule_id=rule["id"],
+                severity=level,
+                occurred_at=occurred_at,
+                received_at=received_at,
+                latest_message=latest_message,
+                metadata_json=metadata_json,
             )
             continue
 
