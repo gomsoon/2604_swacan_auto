@@ -25,6 +25,10 @@ const metamodelWorkspaceSummary = document.getElementById("metamodel-workspace-s
 const metamodelWorkspaceOutline = document.getElementById("metamodel-workspace-outline");
 const metamodelWorkspaceCanvas = document.getElementById("metamodel-workspace-canvas");
 const metamodelWorkspaceInspector = document.getElementById("metamodel-workspace-inspector");
+const metamodelWorkspaceModeStatus = document.getElementById("metamodel-workspace-mode-status");
+const metamodelWorkspaceSelectModeButton = document.getElementById("metamodel-workspace-select-mode");
+const metamodelWorkspaceCreateContainmentModeButton = document.getElementById("metamodel-workspace-create-containment-mode");
+const metamodelWorkspaceCreateAssociationModeButton = document.getElementById("metamodel-workspace-create-association-mode");
 const metamodelSemanticTypeSection = document.getElementById("metamodel-semantic-type-form")?.closest(".admin-subcard, .card");
 const metamodelPropertySection = document.getElementById("metamodel-property-form")?.closest(".admin-subcard, .card");
 const metamodelContainmentRuleSection = document.getElementById("metamodel-containment-rule-form")?.closest(".admin-subcard, .card");
@@ -185,6 +189,8 @@ let selectedMetamodelAssociationId = null;
 let selectedMetamodelValidation = null;
 let selectedMetamodelWorkspace = null;
 let metamodelEditorFocusTimer = null;
+let metamodelWorkspaceInteractionMode = "select";
+let metamodelWorkspacePendingTypeId = null;
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -254,6 +260,53 @@ function scrollToMetamodelEditorSection(section, input) {
             }
         }, 160);
     }
+}
+
+function setMetamodelWorkspaceInteractionMode(mode) {
+    metamodelWorkspaceInteractionMode = mode;
+    metamodelWorkspacePendingTypeId = null;
+    renderMetamodelWorkspaceModeControls();
+}
+
+function renderMetamodelWorkspaceModeControls() {
+    const isSelect = metamodelWorkspaceInteractionMode === "select";
+    const isContainment = metamodelWorkspaceInteractionMode === "create_containment";
+    const isAssociation = metamodelWorkspaceInteractionMode === "create_association";
+    const pendingSemanticType = metamodelSemanticTypes.find((item) => item.id === metamodelWorkspacePendingTypeId);
+
+    if (metamodelWorkspaceModeStatus) {
+        if (isContainment) {
+            metamodelWorkspaceModeStatus.textContent = pendingSemanticType
+                ? `Containment: ${pendingSemanticType.display_name} 다음 대상 선택`
+                : "Containment 연결 모드";
+        } else if (isAssociation) {
+            metamodelWorkspaceModeStatus.textContent = pendingSemanticType
+                ? `Association: ${pendingSemanticType.display_name} 다음 대상 선택`
+                : "Association 연결 모드";
+        } else {
+            metamodelWorkspaceModeStatus.textContent = "선택 모드";
+        }
+    }
+
+    metamodelWorkspaceSelectModeButton?.classList.toggle("is-active", isSelect);
+    metamodelWorkspaceCreateContainmentModeButton?.classList.toggle("is-active", isContainment);
+    metamodelWorkspaceCreateAssociationModeButton?.classList.toggle("is-active", isAssociation);
+}
+
+function openContainmentCreateFromCanvas(parentTypeId, childTypeId) {
+    renderContainmentVersionOptions(metamodelDraftVersionSelect.value);
+    resetMetamodelContainmentRuleForm();
+    if (metamodelDraftVersionSelect.value) {
+        metamodelContainmentRuleVersionIdInput.value = metamodelDraftVersionSelect.value;
+    }
+    renderContainmentSemanticTypeOptions(parentTypeId, childTypeId);
+    scrollToMetamodelEditorSection(metamodelContainmentRuleSection, metamodelContainmentParentTypeIdInput);
+}
+
+function openAssociationCreateFromCanvas(sourceTypeId, targetTypeId) {
+    resetMetamodelAssociationForm();
+    renderMetamodelAssociationTypeOptions(sourceTypeId, targetTypeId);
+    scrollToMetamodelEditorSection(metamodelAssociationSection, metamodelAssociationCodeInput);
 }
 
 function openMetamodelEditorFromInspector(action, kind, id) {
@@ -1255,6 +1308,7 @@ function refreshMetamodelWorkspace() {
     renderMetamodelWorkspaceOutline();
     renderMetamodelWorkspaceCanvas();
     renderMetamodelWorkspaceInspector();
+    renderMetamodelWorkspaceModeControls();
 }
 
 function resetMetamodelSemanticTypeForm() {
@@ -2073,10 +2127,42 @@ async function loadGroupedEventDetails(groupedEventId) {
 }
 
 async function selectMetamodelWorkspaceItem(kind, id) {
-    selectedMetamodelWorkspace = { kind, id: Number(id) };
+    const numericId = Number(id);
+
+    if (metamodelWorkspaceInteractionMode !== "select") {
+        if (kind !== "semantic_type") {
+            showBanner("생성 모드에서는 semantic type을 선택하세요.", "error");
+            return;
+        }
+
+        if (!metamodelWorkspacePendingTypeId) {
+            metamodelWorkspacePendingTypeId = numericId;
+            selectedMetamodelWorkspace = { kind: "semantic_type", id: numericId };
+            refreshMetamodelWorkspace();
+            return;
+        }
+
+        if (Number(metamodelWorkspacePendingTypeId) === numericId) {
+            showBanner("다른 semantic type을 선택하세요.", "error");
+            return;
+        }
+
+        if (metamodelWorkspaceInteractionMode === "create_containment") {
+            openContainmentCreateFromCanvas(metamodelWorkspacePendingTypeId, numericId);
+        } else if (metamodelWorkspaceInteractionMode === "create_association") {
+            openAssociationCreateFromCanvas(metamodelWorkspacePendingTypeId, numericId);
+        }
+
+        selectedMetamodelWorkspace = { kind: "semantic_type", id: numericId };
+        setMetamodelWorkspaceInteractionMode("select");
+        refreshMetamodelWorkspace();
+        return;
+    }
+
+    selectedMetamodelWorkspace = { kind, id: numericId };
 
     if (kind === "semantic_type") {
-        const item = metamodelSemanticTypes.find((entry) => entry.id === Number(id));
+        const item = metamodelSemanticTypes.find((entry) => entry.id === numericId);
         if (item) {
             fillMetamodelSemanticTypeForm(item);
         }
@@ -2088,7 +2174,7 @@ async function selectMetamodelWorkspaceItem(kind, id) {
     }
 
     if (kind === "containment_rule") {
-        const item = metamodelContainmentRules.find((entry) => entry.id === Number(id));
+        const item = metamodelContainmentRules.find((entry) => entry.id === numericId);
         if (item) {
             fillMetamodelContainmentRuleForm(item);
             refreshMetamodelWorkspace();
@@ -2098,7 +2184,7 @@ async function selectMetamodelWorkspaceItem(kind, id) {
     }
 
     if (kind === "notation_definition") {
-        const item = metamodelNotations.find((entry) => entry.id === Number(id));
+        const item = metamodelNotations.find((entry) => entry.id === numericId);
         if (item) {
             fillMetamodelNotationForm(item);
             refreshMetamodelWorkspace();
@@ -2108,7 +2194,7 @@ async function selectMetamodelWorkspaceItem(kind, id) {
     }
 
     if (kind === "association_definition") {
-        const item = metamodelAssociations.find((entry) => entry.id === Number(id));
+        const item = metamodelAssociations.find((entry) => entry.id === numericId);
         if (item) {
             fillMetamodelAssociationForm(item);
             refreshMetamodelWorkspace();
@@ -2643,6 +2729,15 @@ metamodelWorkspaceInspector?.addEventListener("click", (event) => {
         button.dataset.workspaceKind,
         button.dataset.workspaceId
     );
+});
+metamodelWorkspaceSelectModeButton?.addEventListener("click", () => {
+    setMetamodelWorkspaceInteractionMode("select");
+});
+metamodelWorkspaceCreateContainmentModeButton?.addEventListener("click", () => {
+    setMetamodelWorkspaceInteractionMode("create_containment");
+});
+metamodelWorkspaceCreateAssociationModeButton?.addEventListener("click", () => {
+    setMetamodelWorkspaceInteractionMode("create_association");
 });
 alertRuleForm?.addEventListener("submit", saveAlertRule);
 alertRuleFormResetButton?.addEventListener("click", resetAlertRuleForm);

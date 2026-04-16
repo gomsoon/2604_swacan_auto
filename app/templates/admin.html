@@ -119,7 +119,12 @@
             <section class="admin-subcard canvas-card">
                 <div class="section-header">
                     <h3>Metamodel Canvas</h3>
-                    <span class="meta-pill">draft structure</span>
+                    <div class="toolbar-inline">
+                        <span id="metamodel-workspace-mode-status" class="meta-pill">선택 모드</span>
+                        <button id="metamodel-workspace-select-mode" class="button ghost small" type="button">선택</button>
+                        <button id="metamodel-workspace-create-containment-mode" class="button ghost small" type="button">Containment 연결</button>
+                        <button id="metamodel-workspace-create-association-mode" class="button ghost small" type="button">Association 연결</button>
+                    </div>
                 </div>
                 <svg id="metamodel-workspace-canvas" class="diagram-canvas metamodel-workspace-canvas" viewBox="0 0 1200 760" role="img" aria-label="Metamodel workspace canvas"></svg>
             </section>

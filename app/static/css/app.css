@@ -801,6 +801,12 @@ a {
     box-shadow: 0 0 0 2px rgba(10, 91, 145, 0.12);
 }
 
+.button.is-active {
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(10, 91, 145, 0.12);
+}
+
 .workspace-outline-item p,
 .workspace-outline-item h4 {
     margin: 0;
