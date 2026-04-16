@@ -294,18 +294,72 @@ function renderMetamodelWorkspaceModeControls() {
 }
 
 function openContainmentCreateFromCanvas(parentTypeId, childTypeId) {
+    const existingRule = metamodelContainmentRules.find(
+        (item) =>
+            Number(item.parent_type_id) === Number(parentTypeId) &&
+            Number(item.child_type_id) === Number(childTypeId) &&
+            Number(item.metamodel_version_id) === Number(metamodelDraftVersionSelect.value)
+    );
+
+    if (existingRule) {
+        fillMetamodelContainmentRuleForm(existingRule);
+        scrollToMetamodelEditorSection(metamodelContainmentRuleSection, metamodelContainmentParentTypeIdInput);
+        showBanner("이미 존재하는 containment rule을 편집 모드로 열었습니다.", "success");
+        return;
+    }
+
     renderContainmentVersionOptions(metamodelDraftVersionSelect.value);
     resetMetamodelContainmentRuleForm();
     if (metamodelDraftVersionSelect.value) {
         metamodelContainmentRuleVersionIdInput.value = metamodelDraftVersionSelect.value;
     }
     renderContainmentSemanticTypeOptions(parentTypeId, childTypeId);
+    metamodelContainmentMinCountInput.value = "0";
+    metamodelContainmentMaxCountInput.value = "";
+    metamodelContainmentCardinalityScopeInput.value = "group_total";
+    metamodelContainmentIsRequiredInput.checked = false;
     scrollToMetamodelEditorSection(metamodelContainmentRuleSection, metamodelContainmentParentTypeIdInput);
 }
 
 function openAssociationCreateFromCanvas(sourceTypeId, targetTypeId) {
+    const existingAssociation = metamodelAssociations.find(
+        (item) =>
+            Number(item.source_type_id) === Number(sourceTypeId) &&
+            Number(item.target_type_id) === Number(targetTypeId)
+    );
+    if (existingAssociation) {
+        fillMetamodelAssociationForm(existingAssociation);
+        scrollToMetamodelEditorSection(metamodelAssociationSection, metamodelAssociationCodeInput);
+        showBanner("이미 존재하는 association definition을 편집 모드로 열었습니다.", "success");
+        return;
+    }
+
     resetMetamodelAssociationForm();
     renderMetamodelAssociationTypeOptions(sourceTypeId, targetTypeId);
+    const sourceType = metamodelSemanticTypes.find((item) => Number(item.id) === Number(sourceTypeId));
+    const targetType = metamodelSemanticTypes.find((item) => Number(item.id) === Number(targetTypeId));
+    const edgeType = metamodelSemanticTypes.find((item) => item.kind === "edge" && item.is_active);
+    const normalizeCodeToken = (value) =>
+        String(value || "")
+            .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+            .replace(/[^A-Za-z0-9]+/g, "_")
+            .replace(/^_+|_+$/g, "")
+            .toLowerCase();
+
+    if (sourceType && targetType) {
+        metamodelAssociationCodeInput.value = `${normalizeCodeToken(sourceType.code)}_to_${normalizeCodeToken(targetType.code)}`;
+        metamodelAssociationDisplayNameInput.value = `${sourceType.display_name} -> ${targetType.display_name}`;
+        metamodelAssociationMultiplicitySourceInput.value = "1";
+        metamodelAssociationMultiplicityTargetInput.value = "0..n";
+        metamodelAssociationDescriptionInput.value = `${sourceType.display_name}에서 ${targetType.display_name}로 향하는 association`;
+        if (edgeType) {
+            metamodelAssociationSemanticsJsonInput.value = JSON.stringify(
+                { default_edge_type: edgeType.code },
+                null,
+                2
+            );
+        }
+    }
     scrollToMetamodelEditorSection(metamodelAssociationSection, metamodelAssociationCodeInput);
 }
 
