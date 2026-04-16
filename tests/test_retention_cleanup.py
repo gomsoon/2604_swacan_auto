@@ -47,6 +47,50 @@ def seed_retention_rows(app) -> None:
                 "2026-04-13T09:00:00.100+09:00",
             ),
         )
+        db_conn.execute(
+            """
+            INSERT INTO grouped_events (
+                id, monitored_object_id, target_id, event_type, severity, first_occurred_at, last_occurred_at,
+                repeat_count, latest_message, latest_event_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                211,
+                None,
+                "old_target",
+                "process_stopped",
+                "warning",
+                "2026-04-01T09:00:00.000+09:00",
+                "2026-04-01T09:30:00.000+09:00",
+                3,
+                "old grouped event",
+                json.dumps({"source": "old-group"}),
+                "2026-04-01T09:00:00.100+09:00",
+                "2026-04-01T09:30:00.100+09:00",
+            ),
+        )
+        db_conn.execute(
+            """
+            INSERT INTO grouped_events (
+                id, monitored_object_id, target_id, event_type, severity, first_occurred_at, last_occurred_at,
+                repeat_count, latest_message, latest_event_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                212,
+                None,
+                "fresh_target",
+                "process_started",
+                "normal",
+                "2026-04-13T09:00:00.000+09:00",
+                "2026-04-13T09:05:00.000+09:00",
+                2,
+                "fresh grouped event",
+                json.dumps({"source": "fresh-group"}),
+                "2026-04-13T09:00:00.100+09:00",
+                "2026-04-13T09:05:00.100+09:00",
+            ),
+        )
 
         db_conn.execute(
             """
@@ -179,15 +223,18 @@ def test_cleanup_runtime_data_removes_only_expired_rows(app) -> None:
         summary = cleanup_runtime_data(
             current_time=datetime.fromisoformat("2026-04-14T08:00:00.000+09:00"),
             raw_event_retention_days=7,
+            grouped_event_retention_days=7,
             debug_payload_retention_hours=24,
             ingest_inbox_retention_days=7,
         )
         assert summary.raw_events_deleted == 1
+        assert summary.grouped_events_deleted == 1
         assert summary.debug_payload_logs_deleted == 1
         assert summary.ingest_inbox_deleted == 1
 
         db_conn = get_db()
         raw_ids = {row["id"] for row in db_conn.execute("SELECT id FROM raw_events").fetchall()}
+        grouped_ids = {row["id"] for row in db_conn.execute("SELECT id FROM grouped_events").fetchall()}
         debug_ids = {row["id"] for row in db_conn.execute("SELECT id FROM debug_payload_logs").fetchall()}
         inbox_ids = {row["id"] for row in db_conn.execute("SELECT id FROM ingest_inbox").fetchall()}
         receipt_ids = {
@@ -195,7 +242,7 @@ def test_cleanup_runtime_data_removes_only_expired_rows(app) -> None:
         }
         cleanup_runs = db_conn.execute(
             """
-            SELECT raw_events_deleted, debug_payload_logs_deleted, ingest_inbox_deleted
+            SELECT raw_events_deleted, grouped_events_deleted, debug_payload_logs_deleted, ingest_inbox_deleted
             FROM cleanup_runs
             ORDER BY id DESC
             LIMIT 1
@@ -203,11 +250,13 @@ def test_cleanup_runtime_data_removes_only_expired_rows(app) -> None:
         ).fetchone()
 
         assert raw_ids == {202}
+        assert grouped_ids == {212}
         assert debug_ids == {302}
         assert inbox_ids == {402, 403}
         assert receipt_ids == set()
         assert cleanup_runs is not None
         assert cleanup_runs["raw_events_deleted"] == 1
+        assert cleanup_runs["grouped_events_deleted"] == 1
         assert cleanup_runs["debug_payload_logs_deleted"] == 1
         assert cleanup_runs["ingest_inbox_deleted"] == 1
 
@@ -216,6 +265,7 @@ def test_cleanup_runtime_data_command_uses_app_config(app, runner) -> None:
     app.config.update(
         CURRENT_TIME_PROVIDER=lambda: datetime.fromisoformat("2026-04-14T08:00:00.000+09:00"),
         RAW_EVENT_RETENTION_DAYS=7,
+        GROUPED_EVENT_RETENTION_DAYS=7,
         DEBUG_PAYLOAD_RETENTION_HOURS=24,
         INGEST_INBOX_RETENTION_DAYS=7,
     )
@@ -225,5 +275,6 @@ def test_cleanup_runtime_data_command_uses_app_config(app, runner) -> None:
 
     assert result.exit_code == 0
     assert "raw_events_deleted=1" in result.output
+    assert "grouped_events_deleted=1" in result.output
     assert "debug_payload_logs_deleted=1" in result.output
     assert "ingest_inbox_deleted=1" in result.output

@@ -42,6 +42,7 @@ class IngestWorkerRunSummary:
 @dataclass(frozen=True)
 class RetentionCleanupSummary:
     raw_events_deleted: int
+    grouped_events_deleted: int
     debug_payload_logs_deleted: int
     ingest_inbox_deleted: int
     started_at: str | None = None
@@ -814,6 +815,7 @@ def cleanup_runtime_data(
     *,
     current_time: datetime | None = None,
     raw_event_retention_days: int | None = None,
+    grouped_event_retention_days: int | None = None,
     debug_payload_retention_hours: int | None = None,
     ingest_inbox_retention_days: int | None = None,
 ) -> RetentionCleanupSummary:
@@ -824,6 +826,11 @@ def cleanup_runtime_data(
         raw_event_retention_days
         if raw_event_retention_days is not None
         else current_app.config.get("RAW_EVENT_RETENTION_DAYS", 7)
+    )
+    grouped_days = int(
+        grouped_event_retention_days
+        if grouped_event_retention_days is not None
+        else current_app.config.get("GROUPED_EVENT_RETENTION_DAYS", raw_days)
     )
     debug_hours = int(
         debug_payload_retention_hours
@@ -837,11 +844,15 @@ def cleanup_runtime_data(
     )
 
     raw_cutoff = now - timedelta(days=raw_days)
+    grouped_cutoff = now - timedelta(days=grouped_days)
     debug_cutoff = now - timedelta(hours=debug_hours)
     inbox_cutoff = now - timedelta(days=inbox_days)
 
     raw_rows = db_conn.execute("SELECT id, occurred_at FROM raw_events").fetchall()
     raw_delete_ids = [row["id"] for row in raw_rows if is_older_than(row["occurred_at"], raw_cutoff)]
+
+    grouped_rows = db_conn.execute("SELECT id, last_occurred_at FROM grouped_events").fetchall()
+    grouped_delete_ids = [row["id"] for row in grouped_rows if is_older_than(row["last_occurred_at"], grouped_cutoff)]
 
     debug_rows = db_conn.execute("SELECT id, occurred_at FROM debug_payload_logs").fetchall()
     debug_delete_ids = [row["id"] for row in debug_rows if is_older_than(row["occurred_at"], debug_cutoff)]
@@ -863,6 +874,10 @@ def cleanup_runtime_data(
         placeholders = ", ".join("?" for _ in raw_delete_ids)
         db_conn.execute(f"DELETE FROM raw_events WHERE id IN ({placeholders})", tuple(raw_delete_ids))
 
+    if grouped_delete_ids:
+        placeholders = ", ".join("?" for _ in grouped_delete_ids)
+        db_conn.execute(f"DELETE FROM grouped_events WHERE id IN ({placeholders})", tuple(grouped_delete_ids))
+
     if debug_delete_ids:
         placeholders = ", ".join("?" for _ in debug_delete_ids)
         db_conn.execute(f"DELETE FROM debug_payload_logs WHERE id IN ({placeholders})", tuple(debug_delete_ids))
@@ -875,13 +890,14 @@ def cleanup_runtime_data(
     db_conn.execute(
         """
         INSERT INTO cleanup_runs (
-            started_at, finished_at, raw_events_deleted, debug_payload_logs_deleted, ingest_inbox_deleted
-        ) VALUES (?, ?, ?, ?, ?)
+            started_at, finished_at, raw_events_deleted, grouped_events_deleted, debug_payload_logs_deleted, ingest_inbox_deleted
+        ) VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
             started_at,
             finished_at,
             len(raw_delete_ids),
+            len(grouped_delete_ids),
             len(debug_delete_ids),
             len(inbox_delete_ids),
         ),
@@ -889,6 +905,7 @@ def cleanup_runtime_data(
     db_conn.commit()
     return RetentionCleanupSummary(
         raw_events_deleted=len(raw_delete_ids),
+        grouped_events_deleted=len(grouped_delete_ids),
         debug_payload_logs_deleted=len(debug_delete_ids),
         ingest_inbox_deleted=len(inbox_delete_ids),
         started_at=started_at,
@@ -1011,8 +1028,9 @@ def run_ingest_worker_command(
 def cleanup_runtime_data_command() -> None:
     summary = cleanup_runtime_data()
     click.echo(
-        "raw_events_deleted={0} debug_payload_logs_deleted={1} ingest_inbox_deleted={2}".format(
+        "raw_events_deleted={0} grouped_events_deleted={1} debug_payload_logs_deleted={2} ingest_inbox_deleted={3}".format(
             summary.raw_events_deleted,
+            summary.grouped_events_deleted,
             summary.debug_payload_logs_deleted,
             summary.ingest_inbox_deleted,
         )

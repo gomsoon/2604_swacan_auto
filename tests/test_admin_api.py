@@ -274,13 +274,14 @@ def seed_admin_dashboard_rows(app) -> None:
         db_conn.execute(
             """
             INSERT INTO cleanup_runs (
-                started_at, finished_at, raw_events_deleted, debug_payload_logs_deleted, ingest_inbox_deleted
-            ) VALUES (?, ?, ?, ?, ?)
+                started_at, finished_at, raw_events_deleted, grouped_events_deleted, debug_payload_logs_deleted, ingest_inbox_deleted
+            ) VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 "2026-04-12T10:50:00.000+09:00",
                 "2026-04-12T10:50:05.000+09:00",
                 2,
+                1,
                 1,
                 1,
             ),
@@ -340,10 +341,12 @@ def test_admin_summary_returns_counts_and_recent_failures(seeded_app, seeded_cli
     assert payload["stale_agents"][0]["target_id"] == "agent_local"
     assert payload["retention_policy"] == {
         "raw_events_days": 7,
+        "grouped_events_days": 7,
         "debug_payload_hours": 24,
         "ingest_inbox_days": 7,
     }
     assert payload["last_cleanup"]["raw_events_deleted"] == 2
+    assert payload["last_cleanup"]["grouped_events_deleted"] == 1
     assert payload["last_cleanup"]["debug_payload_logs_deleted"] == 1
 
 
@@ -583,6 +586,7 @@ def test_admin_cleanup_runs_returns_recent_history(seeded_app, seeded_client) ->
     payload = response.get_json()
     assert len(payload["items"]) == 1
     assert payload["items"][0]["raw_events_deleted"] == 2
+    assert payload["items"][0]["grouped_events_deleted"] == 1
     assert payload["items"][0]["debug_payload_logs_deleted"] == 1
 
 

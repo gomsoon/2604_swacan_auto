@@ -191,6 +191,7 @@ function renderSummary(payload) {
 
     retentionPolicy.innerHTML = renderMetaPills([
         ["raw event", `${payload.retention_policy.raw_events_days}일`],
+        ["grouped event", `${payload.retention_policy.grouped_events_days}일`],
         ["debug payload", `${payload.retention_policy.debug_payload_hours}시간`],
         ["ingest inbox", `${payload.retention_policy.ingest_inbox_days}일`],
     ]);
@@ -226,7 +227,7 @@ function renderSummary(payload) {
                 <h3>최근 실행</h3>
                 <span class="meta-pill">${escapeHtml(formatTimestamp(payload.last_cleanup.finished_at))}</span>
             </div>
-            <p class="admin-meta">raw event ${escapeHtml(payload.last_cleanup.raw_events_deleted)} | debug payload ${escapeHtml(payload.last_cleanup.debug_payload_logs_deleted)} | inbox ${escapeHtml(payload.last_cleanup.ingest_inbox_deleted)}</p>
+            <p class="admin-meta">raw event ${escapeHtml(payload.last_cleanup.raw_events_deleted)} | grouped event ${escapeHtml(payload.last_cleanup.grouped_events_deleted)} | debug payload ${escapeHtml(payload.last_cleanup.debug_payload_logs_deleted)} | inbox ${escapeHtml(payload.last_cleanup.ingest_inbox_deleted)}</p>
             <p class="admin-meta">started=${escapeHtml(formatTimestamp(payload.last_cleanup.started_at))}</p>
         </article>
     `;
@@ -409,7 +410,7 @@ function renderCleanupRuns(items) {
                         <h3>cleanup #${escapeHtml(item.id)}</h3>
                         <span class="meta-pill">${escapeHtml(formatTimestamp(item.finished_at))}</span>
                     </div>
-                    <p class="admin-meta">raw event ${escapeHtml(item.raw_events_deleted)} | debug payload ${escapeHtml(item.debug_payload_logs_deleted)} | inbox ${escapeHtml(item.ingest_inbox_deleted)}</p>
+                    <p class="admin-meta">raw event ${escapeHtml(item.raw_events_deleted)} | grouped event ${escapeHtml(item.grouped_events_deleted)} | debug payload ${escapeHtml(item.debug_payload_logs_deleted)} | inbox ${escapeHtml(item.ingest_inbox_deleted)}</p>
                     <p class="admin-meta">started=${escapeHtml(formatTimestamp(item.started_at))}</p>
                 </article>
             `

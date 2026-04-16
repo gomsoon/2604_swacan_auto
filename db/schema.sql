@@ -439,6 +439,7 @@ CREATE TABLE IF NOT EXISTS cleanup_runs (
     started_at TEXT NOT NULL,
     finished_at TEXT NOT NULL,
     raw_events_deleted INTEGER NOT NULL,
+    grouped_events_deleted INTEGER NOT NULL,
     debug_payload_logs_deleted INTEGER NOT NULL,
     ingest_inbox_deleted INTEGER NOT NULL
 );

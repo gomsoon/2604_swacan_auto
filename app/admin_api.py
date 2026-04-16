@@ -188,6 +188,7 @@ def serialize_cleanup_run(row) -> dict[str, Any]:
         "started_at": row["started_at"],
         "finished_at": row["finished_at"],
         "raw_events_deleted": row["raw_events_deleted"],
+        "grouped_events_deleted": row["grouped_events_deleted"],
         "debug_payload_logs_deleted": row["debug_payload_logs_deleted"],
         "ingest_inbox_deleted": row["ingest_inbox_deleted"],
     }
@@ -390,7 +391,7 @@ def get_summary():
 
     last_cleanup_row = db_conn.execute(
         """
-        SELECT id, started_at, finished_at, raw_events_deleted, debug_payload_logs_deleted, ingest_inbox_deleted
+        SELECT id, started_at, finished_at, raw_events_deleted, grouped_events_deleted, debug_payload_logs_deleted, ingest_inbox_deleted
         FROM cleanup_runs
         ORDER BY finished_at DESC, id DESC
         LIMIT 1
@@ -414,6 +415,7 @@ def get_summary():
         "stale_agents": stale_agents[:5],
         "retention_policy": {
             "raw_events_days": int(current_app.config.get("RAW_EVENT_RETENTION_DAYS", 7)),
+            "grouped_events_days": int(current_app.config.get("GROUPED_EVENT_RETENTION_DAYS", 7)),
             "debug_payload_hours": int(current_app.config.get("DEBUG_PAYLOAD_RETENTION_HOURS", 24)),
             "ingest_inbox_days": int(current_app.config.get("INGEST_INBOX_RETENTION_DAYS", 7)),
         },
@@ -617,7 +619,7 @@ def list_cleanup_runs():
 
     rows = get_db().execute(
         """
-        SELECT id, started_at, finished_at, raw_events_deleted, debug_payload_logs_deleted, ingest_inbox_deleted
+        SELECT id, started_at, finished_at, raw_events_deleted, grouped_events_deleted, debug_payload_logs_deleted, ingest_inbox_deleted
         FROM cleanup_runs
         ORDER BY finished_at DESC, id DESC
         LIMIT ?
