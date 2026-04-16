@@ -1,148 +1,154 @@
-## Metamodel Editor Backlog
+# Metamodel Editor Backlog
 
-버전: Draft 0.2
+버전: Draft 0.4  
+작성일: 2026-04-16
 
-목적: `Metamodel Editor`의 현재 구현 상태를 기준으로, 이미 완료된 핵심 축과 앞으로의 실제 우선순위를 다시 정리한다.
+목적: 현재 구현 상태를 기준으로 `Metamodel Editor`의 남은 작업을 다시 정리한다.  
+이번 정리의 핵심은 `lifecycle의 주체`를 더 명확히 하는 것이다.
 
-## 1. 현재까지 완료된 핵심 구현
+## 1. 핵심 구조 판단
 
-다음 항목들은 이제 “아이디어”가 아니라 실제 구현 축으로 본다.
+- `Metamodel Version`이 가장 큰 lifecycle 단위다.
+- `Semantic Type`은 그 아래의 핵심 편집 객체이자 aggregate root로 본다.
+- `Property Definition`, `Notation Definition`은 독립 lifecycle 객체가 아니라 `Semantic Type` 내부 구성요소로 본다.
+- `Containment Rule`, `Association Definition`은 개별 CRUD는 가능하지만, lifecycle 주체라기보다 `Metamodel Version` 범위의 관계 정의로 본다.
 
-1. 메타모델 변경 영향도 / diff 보기
-- draft version이 baseline version 대비 무엇이 바뀌었는지 비교할 수 있다.
-- `semantic type`, `property`, `containment`, `association`, `notation`의 `added / changed / removed / unchanged`를 요약한다.
-- 현재 baseline을 참조하는 active `Monitoring View` 영향 수도 확인할 수 있다.
+즉, 앞으로의 lifecycle hardening은 아래 두 축을 중심으로 진행한다.
 
-2. Architecture Editor 연동 1차
+1. `Metamodel Version` lifecycle  
+   `draft -> published -> active -> deprecated`
+2. `Semantic Type` aggregate 관리  
+   clone / disable / safe delete / 내부 property / notation 포함 관리
+
+## 2. 현재까지 1차 구현 완료로 보는 항목
+
+아래 항목은 이제 “아이디어 단계”가 아니라 1차 구현 완료로 본다.
+
+1. 메타모델 diff / 영향도 보기
+- draft version과 baseline version 간 `semantic type`, `property`, `containment`, `association`, `notation` 차이를 비교할 수 있다.
+- baseline을 참조하는 active `Monitoring View` 영향 수와 샘플 목록도 확인할 수 있다.
+
+2. `Architecture Editor` 1차 연동
 - `Architecture Editor`가 view version이 참조하는 metamodel snapshot을 읽어 palette와 생성 가능 항목을 계산한다.
-- 하드코딩된 일부 타입 분기에서 벗어나 `semantic_type_code`, `notation_code`, containment 규칙을 실제로 사용한다.
-- metamodel에 추가된 타입이 editor palette에 반영되는 흐름이 닫혀 있다.
+- `semantic_type_code`, `notation_code`, containment 규칙을 실제로 사용한다.
 
-3. Metamodel Canvas 직접 편집 1차
-- `Metamodel Canvas`에서 semantic type quick-create가 가능하다.
-- containment / association relation을 canvas에서 직접 생성 시작할 수 있다.
-- inspector quick action과 quick-save로 relation과 semantic type을 바로 수정할 수 있다.
-- semantic type 배치 상태를 draft version별로 유지하고 간단한 이동/정렬을 수행할 수 있다.
+3. `Metamodel Canvas` 직접 편집 1차
+- semantic type quick-create
+- containment / association canvas 생성 시작
+- inspector quick action / quick save
+- semantic type 배치 상태 저장과 간단한 위치 이동
 
-4. draft 편집 핵심 CRUD
+4. draft 편집 CRUD
 - semantic type
 - property definition
 - containment rule
 - notation definition
 - association definition
-모두 draft version 기준으로 조회/생성/수정 가능하다.
 
-5. publish 전 검증 1차
+5. publish 전 기본 validation
 - missing default notation
 - invalid default notation
 - containment cycle
 - invalid association reference
 - invalid association edge type
-같은 핵심 구조 오류를 publish 전에 차단한다.
 
-## 2. 현재 시점의 실제 최우선 과제
+## 3. 현재 최우선 과제
 
-이제부터의 우선순위는 “더 많은 편집 기능 추가”보다 “수명주기와 운영 안전성 강화” 쪽으로 옮기는 것이 맞다.
-
-### Priority 1. Metamodel lifecycle hardening
+## Priority 1. Metamodel lifecycle hardening
 
 가장 먼저 다뤄야 할 축이다.
 
-주요 항목:
-- semantic type / property / containment / notation / association의 삭제 흐름
-- soft disable / inactive 처리
-- clone / replace 흐름
-- publish validation 확장
+이번 우선순위에서 중요한 원칙:
+- `property`와 `notation`은 독립 lifecycle 객체처럼 다루지 않는다.
+- 대신 `semantic type aggregate 내부 편집 요소`로 보고 관리 편의 기능을 붙인다.
+- 사용자가 보는 lifecycle는 크게 `version`과 `semantic type` 단위에 집중한다.
+
+주요 작업:
+- semantic type clone / safe delete / active-inactive 정리
+- semantic type 내부 요소(property / notation) 편집 보강
 - draft / published / active / deprecated 버전 운영 UX 보강
+- publish validation 확장
 
-왜 중요한가:
-- 지금은 “편집할 수 있다”는 점은 충분히 확보되었다.
-- 다음은 “안전하게 publish하고 운영할 수 있다”가 중요하다.
-- lifecycle이 약하면 메타모델 편집 기능이 많아질수록 운영 리스크가 커진다.
+메모:
+- notation clone / delete / palette visibility toggle 같은 기능은 필요하다.
+- 다만 이것을 “notation lifecycle”로 설명하지 않고, “semantic type 내부 정의 편집 보강”으로 설명하는 것이 맞다.
 
-### Priority 2. Architecture Editor / Monitoring View 연동 안정화
+## Priority 2. Architecture Editor / Monitoring View 연동 안정화
 
-메타모델 편집의 실효성을 제품 전체에서 더 단단하게 만드는 축이다.
+메타모델 편집의 효과가 실제 제품 동작으로 안정적으로 이어지는지를 다지는 축이다.
 
-주요 항목:
-- metamodel 변경이 `Architecture Editor` palette와 배치 제약에 어디까지 반영되는지 정리
-- published metamodel과 `Monitoring View`의 notation/render 호환성 점검
-- old compatibility path(`node_type`, `edge_type`, fallback 분기) 정리
-- publish 전에 실제 editor/view 영향도를 더 정확히 보여주는 연결 강화
+주요 작업:
+- published metamodel과 `Architecture Editor` palette 동기화 경계 정리
+- `Monitoring View`에서 notation/render 해석 경계 정리
+- compatibility fallback 정리
+- publish 전 영향도와 실제 사용 경로 연결 강화
 
-왜 중요한가:
-- 메타모델은 `Metamodel Editor` 안에서만 예쁘게 돌아가면 의미가 작다.
-- 실제 `Architecture Editor`와 `Monitoring View`에서 같은 정의를 안전하게 소비해야 한다.
+## Priority 3. 권한 / 감사 로그
 
-### Priority 3. 권한 / 감사 로그
+운영 책임과 변경 추적을 위한 축이다.
 
-운영성과 변경 추적을 붙이는 단계다.
+주요 작업:
+- draft 편집 이력
+- publish 이력
+- activate 이력
+- semantic type aggregate 변경 요약 이력
 
-주요 항목:
-- 누가 draft를 만들고 수정했는지
-- 누가 publish 했는지
-- 누가 active 전환을 수행했는지
-- 필요 시 semantic type / notation / containment 변경 이력 요약
+## 4. 중간 우선순위 backlog
 
-왜 중요한가:
-- 메타모델은 시스템 전체에 영향을 주는 중심 정의다.
-- edit / publish / activate 같은 액션은 이후 운영 책임과 연결되므로, 감사 흔적이 중요하다.
+아래 항목은 중요하지만, 현재 상위 3개를 마친 뒤 들어가는 것이 더 적절하다.
 
-## 3. 중간 우선순위 backlog
+### 4.1 Metamodel Canvas UX refinement
+- hover / preview 시각 강화
+- quick action 확대
+- layout / auto placement 개선
+- validation / diff / inspector 연결 강화
 
-아래 항목들은 중요하지만, 현재 시점에서는 위 3개보다 한 단계 뒤에 둔다.
-
-### 3.1 Metamodel Canvas UX refinement
-- hover / preview 시각 강조 강화
-- semantic type와 relation의 quick action 확대
-- canvas 기반 정렬 / 묶기 / 자동 배치 보강
-- canvas에서 선택된 요소와 validation / diff 결과를 더 직접 연결
-
-### 3.2 publish validation 확장
+### 4.2 Validation 확장
 - orphan property
 - inactive type 참조
 - palette group 누락
-- notation/render schema 필수값 누락
-- editor/runtime 충돌 가능 규칙 추가 검증
+- render schema 필수 필드 부족
+- editor/runtime 충돌 가능 규칙
 
 주의:
-- 이 항목은 Priority 1 lifecycle hardening과 일부 겹치므로, 실제 구현 시 함께 묶어서 처리할 수 있다.
+- 이 항목은 Priority 1과 많이 겹친다.
+- 실제 구현 때는 lifecycle hardening 작업 안에 일부 흡수될 수 있다.
 
-### 3.3 버전 운영 UX
-- version 상태와 역할 설명
-- validation 결과와 diff를 더 명확하게 제시
-- publish / activate / deprecated 전환의 영향도 설명 강화
+### 4.3 Version 운영 UX
+- version 상태와 역할 설명 강화
+- validation 결과와 diff를 더 명확히 제시
+- publish / activate / deprecated 전환 영향 설명 강화
 - rollback / clone from published 흐름 시각화
 
-### 3.4 용어 / 메시지 정리
+### 4.4 용어 / 메시지 정리
 - `Monitoring View`
 - `Architecture Editor`
 - `Metamodel Editor`
-기준으로 버튼/상태/메시지 용어를 더 일관되게 맞춘다.
+기준으로 버튼, 상태, 안내 메시지를 더 일관되게 맞춘다.
 
-## 4. 후속 backlog
+## 5. 후속 backlog
 
-아래 항목은 지금 당장보다, MVP 중후반 또는 product 단계에서 더 적절하다.
+아래 항목은 MVP 중후반이나 product 단계에서 더 적절하다.
 
-1. 세밀한 권한 모델
+1. 세분화된 권한 모델
 - read-only editor
 - draft edit 권한
 - publish 권한
 - activate 권한
 
 2. 고급 변경 이력
-- element 단위 before/after diff archive
+- element 단위 before / after diff archive
 - change set 비교
-- version 간 자동 migration helper
+- version 간 migration helper
 
 3. 메타모델 템플릿 / import-export
 - namespace template
-- seed에서 draft 생성
-- JSON export/import
+- seed 기반 draft 생성
+- JSON export / import
 
-## 5. 현재 판단
+## 6. 현재 결론
 
-- 예전 backlog의 상위 3개인 `diff`, `Architecture Editor 연동`, `Canvas 직접 편집`은 1차 목표가 이미 구현되었다.
-- 따라서 지금부터는 새로운 편집 기능을 계속 추가하는 것보다, `lifecycle hardening -> product integration hardening -> audit` 순서로 가는 것이 더 좋다.
-- 각 구현 단계에서는 기능 추가 전에 작은 구조 점검(refactoring 필요 여부 확인)을 먼저 수행한다.
+- 예전 상위 3개였던 `diff`, `Architecture Editor 연동`, `Canvas 직접 편집`은 1차 구현 완료로 본다.
+- 지금부터의 중심은 “편집 기능을 더 많이 붙이는 것”이 아니라 “version과 semantic type aggregate를 더 안전하게 운영할 수 있는 구조를 만드는 것”이다.
+- 특히 `property`와 `notation`은 독립 lifecycle 객체가 아니라 `semantic type` 내부 구성요소라는 원칙을 계속 유지하는 것이 중요하다.
 - 테스트는 계속 `boundary value analysis` 기준을 우선 적용한다.

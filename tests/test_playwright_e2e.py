@@ -450,6 +450,21 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
 
     expect(page.locator("#admin-metamodel-notations-list .admin-item", has_text="Worker Pool Notation Updated").first).to_contain_text("rect")
     expect(page.locator("#admin-metamodel-notations-list .admin-item", has_text="Worker Pool Notation Updated").first).to_contain_text("hidden")
+    page.locator("#admin-metamodel-notations-list .admin-item", has_text="Worker Pool Notation Updated").first.get_by_role("button", name="복제").click()
+    clonedNotation = page.locator("#admin-metamodel-notations-list .admin-item", has_text="Worker Pool Notation Updated Copy").first
+    expect(clonedNotation).to_contain_text("secondary")
+    expect(clonedNotation).to_contain_text("hidden")
+    clonedNotation.get_by_role("button", name="수정").click()
+    expect(page.locator("#metamodel-workspace-inspector")).to_contain_text("Worker Pool Notation Updated Copy")
+    page.locator("#inspector-notation-display-name").fill("Worker Pool Notation Clone")
+    page.locator("#inspector-notation-render-primitive").select_option("rounded_rect")
+    page.locator("#inspector-notation-is-visible-in-palette").check()
+    page.locator("#metamodel-workspace-inspector").get_by_role("button", name="빠른 저장").click()
+    expect(page.locator("#admin-metamodel-notations-list .admin-item", has_text="Worker Pool Notation Clone").first).to_contain_text("palette")
+    expect(page.locator("#metamodel-notation-display-name")).to_have_value("Worker Pool Notation Clone")
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator("#admin-metamodel-notations-list .admin-item", has_text="Worker Pool Notation Clone").first.get_by_role("button", name="삭제").click()
+    expect(page.locator("#admin-metamodel-notations-list")).not_to_contain_text("Worker Pool Notation Clone")
 
     page.locator("#metamodel-association-source-type-id").select_option(label="Monitoring Agent (MonitoringAgent)")
     page.locator("#metamodel-association-target-type-id").select_option(label="Worker Pool Updated (WorkerPool)")

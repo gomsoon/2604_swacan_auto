@@ -412,6 +412,20 @@ def serialize_notation_definition(row) -> dict[str, Any]:
     }
 
 
+def fetch_notation_delete_blockers(notation_id: int) -> dict[str, int]:
+    row = get_db().execute(
+        """
+        SELECT COUNT(*) AS default_reference_count
+        FROM semantic_types
+        WHERE default_notation_id = ?
+        """,
+        (notation_id,),
+    ).fetchone()
+    return {
+        "default_reference_count": row["default_reference_count"],
+    }
+
+
 def validate_json_text_field(value: Any, *, field_name: str, required: bool) -> str | None:
     if value in (None, ""):
         if required:
@@ -2787,3 +2801,123 @@ def update_notation(notation_id: int):
 
     updated = fetch_notation_row(notation_id)
     return {"notation_definition": serialize_notation_definition(updated)}
+
+
+@bp.post("/notations/<int:notation_id>/clone")
+@admin_required
+def clone_notation(notation_id: int):
+    existing = fetch_notation_row(notation_id)
+    if existing is None:
+        return error_response("notation_not_found", "notation definition not found", 404)
+    if existing["metamodel_version_status"] != "draft":
+        return error_response("invalid_state", "only draft notation definitions can be cloned", 409)
+
+    raw_payload = request.get_json(silent=True) or {}
+    try:
+        requested_code = parse_optional_string(raw_payload.get("code"), field_name="code", max_length=100)
+        requested_display_name = parse_optional_string(
+            raw_payload.get("display_name"),
+            field_name="display_name",
+            max_length=120,
+        )
+    except ValueError as exc:
+        return error_response("validation_error", str(exc), 400)
+
+    version_id = existing["metamodel_version_id"]
+    clone_code = requested_code or build_unique_clone_text(
+        existing["code"],
+        max_length=100,
+        exists_fn=lambda candidate: notation_code_exists(version_id, candidate),
+        suffix_builder=lambda index: "_copy" if index == 1 else f"_copy{index}",
+    )
+    if notation_code_exists(version_id, clone_code):
+        return error_response("notation_conflict", "notation code already exists in version", 409)
+
+    clone_display_name = requested_display_name or build_unique_clone_text(
+        existing["display_name"],
+        max_length=120,
+        exists_fn=lambda _candidate: False,
+        suffix_builder=lambda index: " Copy" if index == 1 else f" Copy {index}",
+    )
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    cursor = db_conn.execute(
+        """
+        INSERT INTO notation_definitions (
+            metamodel_version_id, semantic_type_id, palette_group_id, code, display_name, kind,
+            render_primitive, render_schema_json, style_tokens_json,
+            is_default, is_visible_in_palette, sort_order, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+        """,
+        (
+            existing["metamodel_version_id"],
+            existing["semantic_type_id"],
+            existing["palette_group_id"],
+            clone_code,
+            clone_display_name,
+            existing["kind"],
+            existing["render_primitive"],
+            existing["render_schema_json"],
+            existing["style_tokens_json"],
+            int(bool(existing["is_visible_in_palette"])),
+            existing["sort_order"],
+            timestamp,
+            timestamp,
+        ),
+    )
+    db_conn.execute(
+        """
+        UPDATE metamodel_versions
+        SET updated_at = ?
+        WHERE id = ?
+        """,
+        (timestamp, existing["metamodel_version_id"]),
+    )
+    db_conn.commit()
+
+    cloned = fetch_notation_row(int(cursor.lastrowid))
+    return {
+        "notation_definition": serialize_notation_definition(cloned),
+        "clone_summary": {
+            "default_copied_as_secondary": bool(existing["is_default"]),
+        },
+    }, 201
+
+
+@bp.delete("/notations/<int:notation_id>")
+@admin_required
+def delete_notation(notation_id: int):
+    existing = fetch_notation_row(notation_id)
+    if existing is None:
+        return error_response("notation_not_found", "notation definition not found", 404)
+    if existing["metamodel_version_status"] != "draft":
+        return error_response("invalid_state", "only draft notation definitions can be deleted", 409)
+
+    blockers = fetch_notation_delete_blockers(notation_id)
+    if any(blockers.values()):
+        return {
+            "error": {
+                "code": "notation_in_use",
+                "message": "notation definition cannot be deleted while it is used as a semantic type default notation",
+            },
+            "dependency_counts": blockers,
+        }, 409
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    db_conn.execute("DELETE FROM notation_definitions WHERE id = ?", (notation_id,))
+    db_conn.execute(
+        """
+        UPDATE metamodel_versions
+        SET updated_at = ?
+        WHERE id = ?
+        """,
+        (timestamp, existing["metamodel_version_id"]),
+    )
+    db_conn.commit()
+
+    return {
+        "deleted": True,
+        "notation_definition_id": notation_id,
+    }

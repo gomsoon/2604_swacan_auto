@@ -142,6 +142,8 @@ Phase 기준의 큰 방향은 여전히 유효하지만, 현재 구현 상태를
 
 이 순서를 추천하는 이유:
 - 메타모델 편집 기능 자체는 이미 상당 부분 구현되었으므로, 이제는 `무엇을 더 편집할 수 있는가`보다 `안전하게 publish하고 운영할 수 있는가`가 더 중요하다.
+- 이때 lifecycle의 주체는 `Metamodel Version`과 `Semantic Type`으로 보는 것이 더 적절하다.
+- `Property Definition`, `Notation Definition`은 독립 lifecycle 객체가 아니라 `Semantic Type` 내부 구성요소로 보는 편이 구조적으로 더 건강하다.
 - 같은 metamodel 정의가 `Architecture Editor`와 `Monitoring View`에서 일관되게 소비되어야 제품 중심축이 흔들리지 않는다.
 - 메타모델은 시스템 전체에 영향을 주는 정의이므로, edit / publish / activate에 대한 감사 흔적이 점점 중요해진다.
 - alert는 이미 1차 운영 가능 수준까지 올라와 있으므로, 지금은 메타모델 주력축을 먼저 다지는 편이 더 효율적이다.
@@ -151,7 +153,8 @@ Phase 기준의 큰 방향은 여전히 유효하지만, 현재 구현 상태를
 지금 시점에서 가장 자연스러운 다음 작업은 아래와 같다.
 
 1. 메타모델 lifecycle hardening
-- delete / disable / clone / replace 흐름
+- `Metamodel Version`과 `Semantic Type` 중심의 delete / disable / clone / replace 흐름
+- semantic type 내부 property / notation 편집 보강
 - publish validation 확장
 - draft / published / active / deprecated 버전 운영 UX 보강
 

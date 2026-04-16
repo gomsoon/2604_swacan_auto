@@ -1461,6 +1461,137 @@ def test_admin_rejects_invalid_notation_definition_payload_boundaries(seeded_cli
     assert invalid_palette_group_membership.get_json()["error"]["code"] == "validation_error"
 
 
+def test_admin_can_clone_notation_definition_as_secondary(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v14-notation-clone-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for notation clone",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    semantic_type_response = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPool",
+            "display_name": "Worker Pool",
+            "kind": "container",
+            "runtime_kind": "process-group",
+            "description": "Notation clone target",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+    type_id = semantic_type_response.get_json()["semantic_type"]["id"]
+    palette_groups = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/palette-groups").get_json()["items"]
+    process_palette = next(item for item in palette_groups if item["code"] == "processes")
+
+    create_notation = seeded_client.post(
+        f"/api/admin/metamodel/semantic-types/{type_id}/notations",
+        json={
+            "semantic_type_id": type_id,
+            "palette_group_id": process_palette["id"],
+            "code": "workerpool.rounded_rect",
+            "display_name": "Worker Pool Notation",
+            "kind": "node",
+            "render_primitive": "rounded_rect",
+            "sort_order": 10,
+            "render_schema_json": "{\"primitive\":\"rounded_rect\"}",
+            "style_tokens_json": "{\"fill\":\"process-fill\"}",
+            "is_default": True,
+            "is_visible_in_palette": False,
+        },
+    )
+    assert create_notation.status_code == 201
+    notation_id = create_notation.get_json()["notation_definition"]["id"]
+
+    clone_response = seeded_client.post(f"/api/admin/metamodel/notations/{notation_id}/clone")
+
+    assert clone_response.status_code == 201
+    payload = clone_response.get_json()
+    assert payload["notation_definition"]["id"] != notation_id
+    assert payload["notation_definition"]["code"] != "workerpool.rounded_rect"
+    assert payload["notation_definition"]["display_name"].startswith("Worker Pool Notation")
+    assert payload["notation_definition"]["is_default"] is False
+    assert payload["notation_definition"]["is_visible_in_palette"] is False
+    assert payload["clone_summary"]["default_copied_as_secondary"] is True
+
+
+def test_admin_rejects_clone_for_published_notation_definition(seeded_client) -> None:
+    login(seeded_client)
+    published_notations = seeded_client.get("/api/admin/metamodel/semantic-types/103/notations").get_json()["items"]
+    published_notation = next(item for item in published_notations if item["code"] == "process.rounded_rect")
+
+    response = seeded_client.post(f"/api/admin/metamodel/notations/{published_notation['id']}/clone")
+
+    assert response.status_code == 409
+    assert response.get_json()["error"]["code"] == "invalid_state"
+
+
+def test_admin_can_delete_non_default_notation_definition(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v14-notation-delete-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for notation delete",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    semantic_types = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/semantic-types").get_json()["items"]
+    process_type = next(item for item in semantic_types if item["code"] == "SoftwareProcess")
+    notations = seeded_client.get(f"/api/admin/metamodel/semantic-types/{process_type['id']}/notations").get_json()["items"]
+    default_notation = next(item for item in notations if item["is_default"] is True)
+
+    clone_response = seeded_client.post(f"/api/admin/metamodel/notations/{default_notation['id']}/clone")
+    assert clone_response.status_code == 201
+    cloned_id = clone_response.get_json()["notation_definition"]["id"]
+
+    delete_response = seeded_client.delete(f"/api/admin/metamodel/notations/{cloned_id}")
+
+    assert delete_response.status_code == 200
+    assert delete_response.get_json()["deleted"] is True
+    list_response = seeded_client.get(f"/api/admin/metamodel/semantic-types/{process_type['id']}/notations")
+    assert all(item["id"] != cloned_id for item in list_response.get_json()["items"])
+
+
+def test_admin_rejects_delete_for_default_notation_definition(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v14-notation-delete-protected-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for protected notation delete",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    semantic_types = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/semantic-types").get_json()["items"]
+    process_type = next(item for item in semantic_types if item["code"] == "SoftwareProcess")
+    notations = seeded_client.get(f"/api/admin/metamodel/semantic-types/{process_type['id']}/notations").get_json()["items"]
+    default_notation = next(item for item in notations if item["is_default"] is True)
+
+    delete_response = seeded_client.delete(f"/api/admin/metamodel/notations/{default_notation['id']}")
+
+    assert delete_response.status_code == 409
+    payload = delete_response.get_json()
+    assert payload["error"]["code"] == "notation_in_use"
+    assert payload["dependency_counts"]["default_reference_count"] == 1
+
+
 def test_admin_can_list_association_definitions_for_version(seeded_client) -> None:
     login(seeded_client)
 

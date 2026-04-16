@@ -878,6 +878,27 @@ async function openMetamodelEditorFromInspector(action, kind, id) {
             return;
         }
 
+        if (action === "edit-notation-definition") {
+            fillMetamodelNotationForm(item);
+            scrollToMetamodelEditorSection(metamodelNotationSection, metamodelNotationCodeInput);
+            return;
+        }
+
+        if (action === "clone-notation-definition") {
+            await cloneMetamodelNotation(item.id);
+            return;
+        }
+
+        if (action === "toggle-notation-palette-visibility") {
+            await toggleMetamodelNotationPaletteVisibility(item.id, Boolean(item.is_visible_in_palette));
+            return;
+        }
+
+        if (action === "delete-notation-definition") {
+            await deleteMetamodelNotation(item.id);
+            return;
+        }
+
         fillMetamodelNotationForm(item);
         scrollToMetamodelEditorSection(metamodelNotationSection, metamodelNotationCodeInput);
         return;
@@ -918,6 +939,41 @@ async function saveContainmentRuleFromInspector(ruleId) {
     }
     refreshMetamodelWorkspace();
     showBanner("Containment rule을 inspector에서 저장했습니다.", "success");
+}
+
+async function saveNotationFromInspector(notationId) {
+    const existing = metamodelNotations.find((item) => Number(item.id) === Number(notationId));
+    if (!existing) {
+        showBanner("저장할 notation definition을 찾을 수 없습니다.", "error");
+        return;
+    }
+
+    const payload = {
+        semantic_type_id: existing.semantic_type_id,
+        palette_group_id: existing.palette_group_id,
+        code: existing.code,
+        display_name: document.getElementById("inspector-notation-display-name")?.value?.trim(),
+        kind: existing.kind,
+        render_primitive: document.getElementById("inspector-notation-render-primitive")?.value,
+        sort_order: existing.sort_order,
+        render_schema_json: existing.render_schema_json,
+        style_tokens_json: existing.style_tokens_json,
+        is_default: existing.is_default,
+        is_visible_in_palette: Boolean(document.getElementById("inspector-notation-is-visible-in-palette")?.checked),
+    };
+
+    await apiFetch(`/api/admin/metamodel/notations/${notationId}`, {
+        method: "PATCH",
+        body: payload,
+    });
+    await Promise.all([loadMetamodelVersions(), loadMetamodelNotations()]);
+    selectedMetamodelWorkspace = { kind: "notation_definition", id: Number(notationId) };
+    const updatedItem = metamodelNotations.find((item) => Number(item.id) === Number(notationId));
+    if (updatedItem) {
+        fillMetamodelNotationForm(updatedItem);
+    }
+    refreshMetamodelWorkspace();
+    showBanner("Notation definition을 inspector에서 저장했습니다.", "success");
 }
 
 async function saveAssociationFromInspector(associationId) {
@@ -1980,6 +2036,8 @@ function renderMetamodelWorkspaceInspector() {
             <p class="admin-meta">${escapeHtml(item.code)} | ${escapeHtml(item.kind)} | ${escapeHtml(item.semantic_type_code)}</p>
             <div class="toolbar-inline inspector-actions">
                 <button class="button ghost small" type="button" data-inspector-action="edit-notation-definition" data-workspace-kind="notation_definition" data-workspace-id="${escapeHtml(item.id)}">Notation 편집</button>
+                <button class="button ghost small" type="button" data-inspector-action="clone-notation-definition" data-workspace-kind="notation_definition" data-workspace-id="${escapeHtml(item.id)}">복제</button>
+                <button class="button ghost small" type="button" data-inspector-action="toggle-notation-palette-visibility" data-workspace-kind="notation_definition" data-workspace-id="${escapeHtml(item.id)}">${item.is_visible_in_palette ? "숨김" : "표시"}</button>
             </div>
             <div class="summary-metrics">
                 ${renderMetaPills([
@@ -1988,6 +2046,35 @@ function renderMetamodelWorkspaceInspector() {
                     ["sort", item.sort_order ?? 0],
                 ])}
             </div>
+            <div class="inspector-form-grid">
+                <label class="field">
+                    <span>Display Name</span>
+                    <input id="inspector-notation-display-name" type="text" value="${escapeHtml(item.display_name || "")}">
+                </label>
+                <label class="field">
+                    <span>Render Primitive</span>
+                    <select id="inspector-notation-render-primitive">
+                        <option value="rect" ${item.render_primitive === "rect" ? "selected" : ""}>rect</option>
+                        <option value="rounded_rect" ${item.render_primitive === "rounded_rect" ? "selected" : ""}>rounded_rect</option>
+                        <option value="line" ${item.render_primitive === "line" ? "selected" : ""}>line</option>
+                        <option value="badge" ${item.render_primitive === "badge" ? "selected" : ""}>badge</option>
+                        <option value="label" ${item.render_primitive === "label" ? "selected" : ""}>label</option>
+                    </select>
+                </label>
+                <label class="field field-inline-checkbox compact-field">
+                    <input id="inspector-notation-is-visible-in-palette" type="checkbox" ${item.is_visible_in_palette ? "checked" : ""}>
+                    <span>Palette 표시</span>
+                </label>
+            </div>
+            <div class="toolbar-inline inspector-actions">
+                <button class="button primary small" type="button" data-inspector-save="notation_definition" data-workspace-id="${escapeHtml(item.id)}">빠른 저장</button>
+                <button class="button ghost small" type="button" data-inspector-action="delete-notation-definition" data-workspace-kind="notation_definition" data-workspace-id="${escapeHtml(item.id)}" ${item.is_default ? "disabled" : ""}>삭제</button>
+            </div>
+            ${
+                item.is_default
+                    ? '<p class="admin-meta">삭제 보호: semantic type의 default notation으로 사용 중이어서 삭제할 수 없습니다.</p>'
+                    : '<p class="admin-meta">삭제 가능: 현재 default notation으로 사용되지 않습니다.</p>'
+            }
             <div class="metamodel-notation-preview">
                 <h4>Notation Preview</h4>
                 ${buildNotationPreviewSvg(item, semanticType)}
@@ -2483,6 +2570,9 @@ function renderMetamodelNotations(items) {
                             <span class="meta-pill">${item.is_default ? "default" : "secondary"}</span>
                             <span class="meta-pill">${item.is_visible_in_palette ? "palette" : "hidden"}</span>
                             <button class="button ghost small edit-metamodel-notation-button" type="button" data-notation-id="${escapeHtml(item.id)}">수정</button>
+                            <button class="button ghost small clone-metamodel-notation-button" type="button" data-notation-id="${escapeHtml(item.id)}">복제</button>
+                            <button class="button ghost small toggle-metamodel-notation-button" type="button" data-notation-id="${escapeHtml(item.id)}" data-is-visible="${item.is_visible_in_palette ? "true" : "false"}">${item.is_visible_in_palette ? "숨김" : "표시"}</button>
+                            <button class="button ghost small delete-metamodel-notation-button" type="button" data-notation-id="${escapeHtml(item.id)}" ${item.is_default ? "disabled" : ""}>삭제</button>
                         </div>
                     </div>
                     <p class="admin-meta">palette=${escapeHtml(item.palette_group_label || "-")} | sort=${escapeHtml(item.sort_order)}</p>
@@ -3194,6 +3284,78 @@ async function deleteMetamodelSemanticType(typeId) {
     showBanner("semantic type을 삭제했습니다.", "success");
 }
 
+async function cloneMetamodelNotation(notationId) {
+    clearBanner();
+    const payload = await apiFetch(`/api/admin/metamodel/notations/${notationId}/clone`, {
+        method: "POST",
+    });
+    await Promise.all([loadMetamodelVersions(), loadMetamodelNotations()]);
+    await selectMetamodelWorkspaceItem("notation_definition", payload.notation_definition.id);
+    showBanner(
+        payload.clone_summary?.default_copied_as_secondary
+            ? "default notation을 복제했습니다. 복제본은 secondary notation으로 생성되었습니다."
+            : "notation definition을 복제했습니다.",
+        "success"
+    );
+}
+
+async function toggleMetamodelNotationPaletteVisibility(notationId, isCurrentlyVisible) {
+    clearBanner();
+    const existing = metamodelNotations.find((item) => item.id === notationId);
+    if (!existing) {
+        showBanner("표시 상태를 변경할 notation definition을 찾을 수 없습니다.", "error");
+        return;
+    }
+
+    await apiFetch(`/api/admin/metamodel/notations/${notationId}`, {
+        method: "PATCH",
+        body: {
+            semantic_type_id: existing.semantic_type_id,
+            palette_group_id: existing.palette_group_id,
+            code: existing.code,
+            display_name: existing.display_name,
+            kind: existing.kind,
+            render_primitive: existing.render_primitive,
+            sort_order: existing.sort_order,
+            render_schema_json: existing.render_schema_json,
+            style_tokens_json: existing.style_tokens_json,
+            is_default: existing.is_default,
+            is_visible_in_palette: !isCurrentlyVisible,
+        },
+    });
+    await Promise.all([loadMetamodelVersions(), loadMetamodelNotations()]);
+    await selectMetamodelWorkspaceItem("notation_definition", notationId);
+    showBanner(`notation definition을 ${isCurrentlyVisible ? "숨김" : "표시"} 상태로 변경했습니다.`, "success");
+}
+
+async function deleteMetamodelNotation(notationId) {
+    clearBanner();
+    const item = metamodelNotations.find((entry) => entry.id === notationId);
+    if (!item) {
+        showBanner("삭제할 notation definition을 찾을 수 없습니다.", "error");
+        return;
+    }
+    const confirmed = window.confirm(
+        `Notation Definition '${item.display_name}'을(를) 삭제할까요? default notation으로 사용 중이면 삭제되지 않습니다.`
+    );
+    if (!confirmed) {
+        return;
+    }
+
+    await apiFetch(`/api/admin/metamodel/notations/${notationId}`, {
+        method: "DELETE",
+    });
+    if (selectedMetamodelNotationId === notationId) {
+        resetMetamodelNotationForm();
+    }
+    if (selectedMetamodelWorkspace?.kind === "notation_definition" && Number(selectedMetamodelWorkspace.id) === Number(notationId)) {
+        selectedMetamodelWorkspace = null;
+    }
+    await Promise.all([loadMetamodelVersions(), loadMetamodelNotations()]);
+    refreshMetamodelWorkspace();
+    showBanner("notation definition을 삭제했습니다.", "success");
+}
+
 async function saveMetamodelProperty(event) {
     event.preventDefault();
     clearBanner();
@@ -3643,6 +3805,8 @@ metamodelWorkspaceInspector?.addEventListener("click", (event) => {
                 ? saveSemanticTypeFromInspector(workspaceId)
                 : kind === "containment_rule"
                 ? saveContainmentRuleFromInspector(workspaceId)
+                : kind === "notation_definition"
+                    ? saveNotationFromInspector(workspaceId)
                 : kind === "association_definition"
                     ? saveAssociationFromInspector(workspaceId)
                     : null;
@@ -3789,13 +3953,35 @@ metamodelPropertiesList?.addEventListener("click", (event) => {
     fillMetamodelPropertyForm(item);
 });
 metamodelNotationsList?.addEventListener("click", (event) => {
-    const button = event.target instanceof HTMLElement ? event.target.closest(".edit-metamodel-notation-button") : null;
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (!target) {
+        return;
+    }
+    const editButton = target.closest(".edit-metamodel-notation-button");
+    const cloneButton = target.closest(".clone-metamodel-notation-button");
+    const toggleButton = target.closest(".toggle-metamodel-notation-button");
+    const deleteButton = target.closest(".delete-metamodel-notation-button");
+    const button = editButton || cloneButton || toggleButton || deleteButton;
     if (!button) {
         return;
     }
     const notationId = Number(button.dataset.notationId);
     const item = metamodelNotations.find((entry) => entry.id === notationId);
     if (!item) {
+        return;
+    }
+    if (cloneButton) {
+        cloneMetamodelNotation(item.id).catch((error) => showBanner(error.message, "error"));
+        return;
+    }
+    if (toggleButton) {
+        toggleMetamodelNotationPaletteVisibility(item.id, button.dataset.isVisible === "true").catch((error) =>
+            showBanner(error.message, "error")
+        );
+        return;
+    }
+    if (deleteButton) {
+        deleteMetamodelNotation(item.id).catch((error) => showBanner(error.message, "error"));
         return;
     }
     selectMetamodelWorkspaceItem("notation_definition", item.id).catch((error) => showBanner(error.message, "error"));
