@@ -25,6 +25,11 @@ const metamodelWorkspaceSummary = document.getElementById("metamodel-workspace-s
 const metamodelWorkspaceOutline = document.getElementById("metamodel-workspace-outline");
 const metamodelWorkspaceCanvas = document.getElementById("metamodel-workspace-canvas");
 const metamodelWorkspaceInspector = document.getElementById("metamodel-workspace-inspector");
+const metamodelSemanticTypeSection = document.getElementById("metamodel-semantic-type-form")?.closest(".admin-subcard, .card");
+const metamodelPropertySection = document.getElementById("metamodel-property-form")?.closest(".admin-subcard, .card");
+const metamodelContainmentRuleSection = document.getElementById("metamodel-containment-rule-form")?.closest(".admin-subcard, .card");
+const metamodelNotationSection = document.getElementById("metamodel-notation-form")?.closest(".admin-subcard, .card");
+const metamodelAssociationSection = document.getElementById("metamodel-association-form")?.closest(".admin-subcard, .card");
 const alertRulesList = document.getElementById("admin-alert-rules-list");
 const alertRuleCount = document.getElementById("alert-rule-count");
 const alertRulePreviewPanel = document.getElementById("alert-rule-preview-panel");
@@ -179,6 +184,7 @@ let selectedMetamodelNotationId = null;
 let selectedMetamodelAssociationId = null;
 let selectedMetamodelValidation = null;
 let selectedMetamodelWorkspace = null;
+let metamodelEditorFocusTimer = null;
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -216,6 +222,38 @@ function formatBytes(value) {
         return `${(numeric / 1024).toFixed(1)} KiB`;
     }
     return `${numeric} B`;
+}
+
+function setTemporarySectionFocus(section) {
+    if (!section) {
+        return;
+    }
+
+    section.classList.add("is-focus-target");
+    if (metamodelEditorFocusTimer) {
+        window.clearTimeout(metamodelEditorFocusTimer);
+    }
+    metamodelEditorFocusTimer = window.setTimeout(() => {
+        section.classList.remove("is-focus-target");
+        metamodelEditorFocusTimer = null;
+    }, 1800);
+}
+
+function scrollToMetamodelEditorSection(section, input) {
+    if (!section) {
+        return;
+    }
+
+    section.scrollIntoView({ behavior: "smooth", block: "start" });
+    setTemporarySectionFocus(section);
+    if (input && typeof input.focus === "function") {
+        window.setTimeout(() => {
+            input.focus({ preventScroll: true });
+            if (typeof input.select === "function" && input.tagName === "INPUT") {
+                input.select();
+            }
+        }, 160);
+    }
 }
 
 function toOptionalNumberValue(value) {
@@ -1955,9 +1993,44 @@ async function selectMetamodelWorkspaceItem(kind, id) {
     selectedMetamodelWorkspace = { kind, id: Number(id) };
 
     if (kind === "semantic_type") {
+        const item = metamodelSemanticTypes.find((entry) => entry.id === Number(id));
+        if (item) {
+            fillMetamodelSemanticTypeForm(item);
+        }
         metamodelPropertySemanticTypeIdInput.value = String(id);
         metamodelNotationSemanticTypeIdInput.value = String(id);
         await Promise.all([loadMetamodelProperties(), loadMetamodelNotations()]);
+        scrollToMetamodelEditorSection(metamodelSemanticTypeSection, metamodelSemanticTypeCodeInput);
+        return;
+    }
+
+    if (kind === "containment_rule") {
+        const item = metamodelContainmentRules.find((entry) => entry.id === Number(id));
+        if (item) {
+            fillMetamodelContainmentRuleForm(item);
+            refreshMetamodelWorkspace();
+            scrollToMetamodelEditorSection(metamodelContainmentRuleSection, metamodelContainmentParentTypeIdInput);
+        }
+        return;
+    }
+
+    if (kind === "notation_definition") {
+        const item = metamodelNotations.find((entry) => entry.id === Number(id));
+        if (item) {
+            fillMetamodelNotationForm(item);
+            refreshMetamodelWorkspace();
+            scrollToMetamodelEditorSection(metamodelNotationSection, metamodelNotationCodeInput);
+        }
+        return;
+    }
+
+    if (kind === "association_definition") {
+        const item = metamodelAssociations.find((entry) => entry.id === Number(id));
+        if (item) {
+            fillMetamodelAssociationForm(item);
+            refreshMetamodelWorkspace();
+            scrollToMetamodelEditorSection(metamodelAssociationSection, metamodelAssociationCodeInput);
+        }
         return;
     }
 
@@ -2519,17 +2592,7 @@ metamodelSemanticTypesList?.addEventListener("click", (event) => {
     if (!item) {
         return;
     }
-    fillMetamodelSemanticTypeForm(item);
-    selectedMetamodelWorkspace = { kind: "semantic_type", id: item.id };
-    metamodelPropertySemanticTypeIdInput.value = String(item.id);
-    resetMetamodelPropertyForm();
-    renderContainmentSemanticTypeOptions(
-        metamodelContainmentParentTypeIdInput.value || item.id,
-        metamodelContainmentChildTypeIdInput.value
-    );
-    metamodelNotationSemanticTypeIdInput.value = String(item.id);
-    resetMetamodelNotationForm({ preserveSemanticType: true });
-    Promise.all([loadMetamodelProperties(), loadMetamodelNotations()]).catch((error) => showBanner(error.message, "error"));
+    selectMetamodelWorkspaceItem("semantic_type", item.id).catch((error) => showBanner(error.message, "error"));
 });
 metamodelContainmentRulesList?.addEventListener("click", (event) => {
     const button = event.target instanceof HTMLElement ? event.target.closest(".edit-metamodel-containment-rule-button") : null;
@@ -2541,9 +2604,7 @@ metamodelContainmentRulesList?.addEventListener("click", (event) => {
     if (!item) {
         return;
     }
-    fillMetamodelContainmentRuleForm(item);
-    selectedMetamodelWorkspace = { kind: "containment_rule", id: item.id };
-    refreshMetamodelWorkspace();
+    selectMetamodelWorkspaceItem("containment_rule", item.id).catch((error) => showBanner(error.message, "error"));
 });
 metamodelPropertiesList?.addEventListener("click", (event) => {
     const button = event.target instanceof HTMLElement ? event.target.closest(".edit-metamodel-property-button") : null;
@@ -2567,9 +2628,7 @@ metamodelNotationsList?.addEventListener("click", (event) => {
     if (!item) {
         return;
     }
-    fillMetamodelNotationForm(item);
-    selectedMetamodelWorkspace = { kind: "notation_definition", id: item.id };
-    refreshMetamodelWorkspace();
+    selectMetamodelWorkspaceItem("notation_definition", item.id).catch((error) => showBanner(error.message, "error"));
 });
 metamodelAssociationsList?.addEventListener("click", (event) => {
     const button = event.target instanceof HTMLElement ? event.target.closest(".edit-metamodel-association-button") : null;
@@ -2581,9 +2640,7 @@ metamodelAssociationsList?.addEventListener("click", (event) => {
     if (!item) {
         return;
     }
-    fillMetamodelAssociationForm(item);
-    selectedMetamodelWorkspace = { kind: "association_definition", id: item.id };
-    refreshMetamodelWorkspace();
+    selectMetamodelWorkspaceItem("association_definition", item.id).catch((error) => showBanner(error.message, "error"));
 });
 alertRulesList?.addEventListener("click", (event) => {
     const button = event.target instanceof HTMLElement ? event.target.closest(".edit-alert-rule-button") : null;
