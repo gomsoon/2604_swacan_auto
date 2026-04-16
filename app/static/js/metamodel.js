@@ -138,6 +138,18 @@ export function buildSemanticTypesByCode(items = []) {
     return map;
 }
 
+export function buildPropertyDefinitionsByType(items = []) {
+    const map = new Map();
+    for (const item of items) {
+        const semanticTypeCode = item.semantic_type_code;
+        if (!map.has(semanticTypeCode)) {
+            map.set(semanticTypeCode, []);
+        }
+        map.get(semanticTypeCode).push(item);
+    }
+    return map;
+}
+
 function buildFallbackSemanticTypesByCode() {
     return buildSemanticTypesByCode(FALLBACK_SEMANTIC_TYPES);
 }
@@ -166,6 +178,7 @@ export async function loadMetamodelRegistry(versionCode) {
             paletteGroups: fallbackPaletteGroups,
             notationDefinitionsByCode: buildNotationDefinitionsByCode(flattenPaletteNotationItems(fallbackPaletteGroups)),
             semanticTypesByCode: buildFallbackSemanticTypesByCode(),
+            propertyDefinitionsByType: new Map(),
             containmentRules: cloneJson(FALLBACK_CONTAINMENT_RULES),
             associations: cloneJson(FALLBACK_ASSOCIATIONS),
             usedFallback: true,
@@ -194,6 +207,7 @@ export async function loadMetamodelRegistry(versionCode) {
             paletteGroups: palettePayload.palette_groups || [],
             notationDefinitionsByCode: buildNotationDefinitionsByCode(notationPayload.items || []),
             semanticTypesByCode: buildSemanticTypesByCode(semanticTypePayload.items || []),
+            propertyDefinitionsByType: new Map(),
             containmentRules: containmentPayload.items || [],
             associations: associationPayload.items || [],
             usedFallback: false,
@@ -208,6 +222,7 @@ export async function loadMetamodelRegistry(versionCode) {
             paletteGroups: fallbackPaletteGroups,
             notationDefinitionsByCode: buildNotationDefinitionsByCode(flattenPaletteNotationItems(fallbackPaletteGroups)),
             semanticTypesByCode: buildFallbackSemanticTypesByCode(),
+            propertyDefinitionsByType: new Map(),
             containmentRules: cloneJson(FALLBACK_CONTAINMENT_RULES),
             associations: cloneJson(FALLBACK_ASSOCIATIONS),
             usedFallback: true,
@@ -225,6 +240,7 @@ export async function loadViewVersionMetamodel(viewVersionId, fallbackVersionCod
             paletteGroups: payload.metamodel.palette_groups || [],
             notationDefinitionsByCode: buildNotationDefinitionsByCode(payload.metamodel.notations || []),
             semanticTypesByCode: buildSemanticTypesByCode(payload.metamodel.semantic_types || []),
+            propertyDefinitionsByType: buildPropertyDefinitionsByType(payload.metamodel.property_definitions || []),
             containmentRules: payload.metamodel.containment_rules || [],
             associations: payload.metamodel.associations || [],
             usedFallback: false,

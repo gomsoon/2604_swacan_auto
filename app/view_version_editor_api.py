@@ -27,6 +27,14 @@ from .db import get_db
 bp = Blueprint("view_version_editor_api", __name__, url_prefix="/api/view-versions")
 
 NODE_SEMANTIC_KINDS = {"node", "container", "runtime-only"}
+RESERVED_NODE_PROPERTY_CODES = {
+    "display_name",
+    "target_id",
+    "instance_mode",
+    "cardinality_scope",
+    "expected_min",
+    "expected_max",
+}
 
 
 def slugify(value: str) -> str:
@@ -84,6 +92,9 @@ def build_editor_metamodel(version_row) -> dict[str, Any]:
         (item["parent_type_code"], item["child_type_code"])
         for item in snapshot["containment_rules"]
     }
+    property_definitions_by_type: dict[str, list[dict[str, Any]]] = {}
+    for item in snapshot.get("property_definitions", []):
+        property_definitions_by_type.setdefault(item["semantic_type_code"], []).append(item)
     allowed_parent_codes_by_child: dict[str, set[str]] = {}
     for item in snapshot["containment_rules"]:
         allowed_parent_codes_by_child.setdefault(item["child_type_code"], set()).add(item["parent_type_code"])
@@ -94,8 +105,47 @@ def build_editor_metamodel(version_row) -> dict[str, Any]:
         "allowed_node_types": allowed_node_types,
         "allowed_edge_types": allowed_edge_types,
         "containment_pairs": containment_pairs,
+        "property_definitions_by_type": property_definitions_by_type,
         "allowed_parent_codes_by_child": allowed_parent_codes_by_child,
     }
+
+
+def validate_property_value(value_type: str, value: Any) -> bool:
+    if value_type == "string":
+        return isinstance(value, str)
+    if value_type == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if value_type == "number":
+        return (isinstance(value, int) or isinstance(value, float)) and not isinstance(value, bool)
+    if value_type == "boolean":
+        return isinstance(value, bool)
+    if value_type == "json":
+        return True
+    return True
+
+
+def validate_node_properties(node: dict[str, Any], editor_metamodel: dict[str, Any]) -> str | None:
+    semantic_type_code = node.get("semantic_type_code") or node["node_type"]
+    raw_properties = node.get("properties") or {}
+    if not isinstance(raw_properties, dict):
+        return "properties must be an object"
+
+    definitions = {
+        item["code"]: item
+        for item in editor_metamodel["property_definitions_by_type"].get(semantic_type_code, [])
+        if item["is_user_editable"] and not item["is_runtime"] and item["code"] not in RESERVED_NODE_PROPERTY_CODES
+    }
+    unknown_codes = set(raw_properties) - set(definitions)
+    if unknown_codes:
+        return f"unknown property codes: {', '.join(sorted(unknown_codes))}"
+
+    for code, definition in definitions.items():
+        if definition["is_required"] and code not in raw_properties:
+            return f"property '{code}' is required"
+        if code in raw_properties and not validate_property_value(definition["value_type"], raw_properties[code]):
+            return f"property '{code}' does not match value_type '{definition['value_type']}'"
+
+    return None
 
 
 def resolve_node_defaults(editor_metamodel: dict[str, Any], node_type: str) -> dict[str, Any] | None:
@@ -164,6 +214,9 @@ def validate_nodes_against_metamodel(nodes: list[dict[str, Any]], editor_metamod
             return "notation_code does not match node_type"
         if node.get("target_id") and not editor_metamodel["semantic_types_by_code"][defaults["semantic_type_code"]]["allows_runtime_binding"]:
             return "target_id is not allowed for this semantic type"
+        property_error = validate_node_properties(node, editor_metamodel)
+        if property_error:
+            return property_error
 
         if not isinstance(node["id"], int):
             return "node id must be an integer"
@@ -488,6 +541,7 @@ def create_node(version_id: int):
         "notation_code": payload.get("notation_code", node_defaults["notation_code"]),
         "display_name": payload["display_name"],
         "target_id": payload.get("target_id"),
+        "properties": payload.get("properties", {}),
         "layer_order": layer_order,
         "x": payload["x"],
         "y": payload["y"],
@@ -511,7 +565,7 @@ def create_node(version_id: int):
             display_name, target_id, instance_mode, cardinality_scope, expected_min, expected_max,
             layer_order, x, y, width, height, collapsed_state, is_deleted, style_json, properties_json,
             created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, 0, 0, ?, NULL, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
         """,
         (
             version_id,
@@ -528,6 +582,7 @@ def create_node(version_id: int):
             payload["width"],
             payload["height"],
             json.dumps(payload.get("style")) if "style" in payload else None,
+            json.dumps(payload.get("properties", {})),
             timestamp,
             timestamp,
         ),
@@ -587,7 +642,7 @@ def update_node(version_id: int, node_id: int):
         """
         UPDATE view_version_nodes
         SET parent_node_id = ?, display_name = ?, target_id = ?, layer_order = ?, x = ?, y = ?, width = ?, height = ?,
-            style_json = ?, updated_at = ?
+            style_json = ?, properties_json = ?, updated_at = ?
         WHERE id = ? AND view_version_id = ?
         """,
         (
@@ -600,6 +655,7 @@ def update_node(version_id: int, node_id: int):
             merged["width"],
             merged["height"],
             json.dumps(merged.get("style")) if "style" in merged else None,
+            json.dumps(merged.get("properties", {})),
             timestamp,
             node_id,
             version_id,

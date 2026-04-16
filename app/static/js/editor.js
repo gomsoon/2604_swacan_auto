@@ -10,7 +10,11 @@ const versionCodeLabel = document.getElementById("editor-version-code-label");
 const versionStatusLabel = document.getElementById("editor-version-status-label");
 const paletteStatusLabel = document.getElementById("palette-status-label");
 const paletteGroupsRoot = document.getElementById("palette-groups");
+const outlineSummary = document.getElementById("outline-summary");
+const outlineTreeRoot = document.getElementById("editor-outline-tree");
 const nodeForm = document.getElementById("node-form");
+const dynamicPropertiesPanel = document.getElementById("node-dynamic-properties");
+const dynamicPropertiesFields = document.getElementById("node-dynamic-properties-fields");
 const edgeSummary = document.getElementById("edge-summary");
 const edgeIdText = document.getElementById("edge-id-text");
 const edgeLinkText = document.getElementById("edge-link-text");
@@ -28,6 +32,7 @@ const state = {
     metamodelVersionCode: null,
     metamodelVersionId: null,
     semanticTypesByCode: new Map(),
+    propertyDefinitionsByType: new Map(),
     paletteGroups: [],
     containmentRules: [],
     associations: [],
@@ -62,6 +67,15 @@ const formFields = {
     height: document.getElementById("node-height"),
 };
 
+const RESERVED_NODE_PROPERTY_CODES = new Set([
+    "display_name",
+    "target_id",
+    "instance_mode",
+    "cardinality_scope",
+    "expected_min",
+    "expected_max",
+]);
+
 function setStatus(message) {
     statusLabel.textContent = message;
 }
@@ -83,6 +97,12 @@ function getVersionApiBase() {
 
 function getSemanticType(code) {
     return state.semanticTypesByCode.get(code) || null;
+}
+
+function getEditablePropertyDefinitions(nodeTypeCode) {
+    return (state.propertyDefinitionsByType.get(nodeTypeCode) || []).filter(
+        (item) => item.is_user_editable && !item.is_runtime && !RESERVED_NODE_PROPERTY_CODES.has(item.code)
+    );
 }
 
 function isNodeSemanticType(code) {
@@ -248,6 +268,10 @@ function getChildren(parentId) {
     return state.nodes.filter((node) => node.parent_node_id === parentId);
 }
 
+function getRootNodes() {
+    return state.nodes.filter((node) => node.parent_node_id === null);
+}
+
 function getDescendantIds(nodeId) {
     const result = [nodeId];
     for (const child of getChildren(nodeId)) {
@@ -325,6 +349,7 @@ function getNodeCreationAvailability(nodeType) {
 
 function getDefaultNodePayload(nodeType, item = getPaletteItemByType(nodeType)) {
     const semanticType = getSemanticType(nodeType);
+    const propertyDefinitions = getEditablePropertyDefinitions(nodeType);
     const allowedParentTypeCodes = getAllowedParentTypeCodes(nodeType);
     const parentId = findCandidateParentId(nodeType);
     const displayName = item?.display_name || semanticType?.display_name || nodeType;
@@ -339,6 +364,11 @@ function getDefaultNodePayload(nodeType, item = getPaletteItemByType(nodeType)) 
             notation_code: item?.notation_code || semanticType?.default_notation_code || null,
             display_name: displayName,
             target_id: null,
+            properties: Object.fromEntries(
+                propertyDefinitions
+                    .filter((property) => property.default_value !== null && property.default_value !== undefined)
+                    .map((property) => [property.code, property.default_value])
+            ),
             x: 60 + rootCount * 80,
             y: 60 + rootCount * 40,
             width: size.width,
@@ -363,6 +393,11 @@ function getDefaultNodePayload(nodeType, item = getPaletteItemByType(nodeType)) 
         notation_code: item?.notation_code || semanticType?.default_notation_code || null,
         display_name: displayName,
         target_id: semanticType?.allows_runtime_binding ? nextTargetId(runtimePrefix || "node", displayName) : null,
+        properties: Object.fromEntries(
+            propertyDefinitions
+                .filter((property) => property.default_value !== null && property.default_value !== undefined)
+                .map((property) => [property.code, property.default_value])
+        ),
         x: baseX,
         y: baseY,
         width: defaultSize.width,
@@ -448,11 +483,130 @@ function renderPalette() {
     );
 }
 
+function sortNodesForOutline(nodes) {
+    return [...nodes].sort((left, right) => {
+        const leftLayer = Number(left.layer_order || 0);
+        const rightLayer = Number(right.layer_order || 0);
+        if (leftLayer !== rightLayer) {
+            return leftLayer - rightLayer;
+        }
+        return left.id - right.id;
+    });
+}
+
+function countIncidentEdges(nodeId) {
+    return state.edges.filter((edge) => edge.source_node_id === nodeId || edge.target_node_id === nodeId).length;
+}
+
+function renderOutlineNode(node, depth = 0) {
+    const semanticType = getSemanticType(node.semantic_type_code || node.node_type);
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "outline-item";
+    item.dataset.nodeId = String(node.id);
+    item.dataset.depth = String(depth);
+    if (node.id === state.selectedNodeId) {
+        item.classList.add("is-selected");
+    }
+    item.style.setProperty("--outline-depth", String(depth));
+
+    const main = document.createElement("span");
+    main.className = "outline-item-main";
+
+    const name = document.createElement("span");
+    name.className = "outline-item-name";
+    name.textContent = node.display_name || semanticType?.display_name || node.node_type;
+    main.appendChild(name);
+
+    const type = document.createElement("span");
+    type.className = "outline-item-type";
+    type.textContent = semanticType?.display_name || node.node_type;
+    main.appendChild(type);
+
+    const meta = document.createElement("span");
+    meta.className = "outline-item-meta";
+
+    const childCount = getChildren(node.id).length;
+    if (childCount > 0) {
+        const childBadge = document.createElement("span");
+        childBadge.className = "outline-badge";
+        childBadge.textContent = `자식 ${childCount}`;
+        meta.appendChild(childBadge);
+    }
+
+    const edgeCount = countIncidentEdges(node.id);
+    if (edgeCount > 0) {
+        const edgeBadge = document.createElement("span");
+        edgeBadge.className = "outline-badge";
+        edgeBadge.textContent = `관계 ${edgeCount}`;
+        meta.appendChild(edgeBadge);
+    }
+
+    if (node.target_id) {
+        const bindingBadge = document.createElement("span");
+        bindingBadge.className = "outline-badge binding";
+        bindingBadge.textContent = "binding";
+        meta.appendChild(bindingBadge);
+    }
+
+    item.appendChild(main);
+    item.appendChild(meta);
+    item.addEventListener("click", () => {
+        state.selectedNodeId = node.id;
+        state.selectedEdgeId = null;
+        state.connectSourceId = null;
+        render();
+        setStatus(`${node.display_name || node.node_type}을(를) outline에서 선택했습니다.`);
+    });
+    return item;
+}
+
+function renderOutlineBranch(nodes, depth = 0) {
+    const fragment = document.createDocumentFragment();
+    for (const node of sortNodesForOutline(nodes)) {
+        fragment.appendChild(renderOutlineNode(node, depth));
+        const children = getChildren(node.id);
+        if (children.length > 0) {
+            fragment.appendChild(renderOutlineBranch(children, depth + 1));
+        }
+    }
+    return fragment;
+}
+
+function renderOutline() {
+    if (!outlineTreeRoot) {
+        return;
+    }
+
+    outlineTreeRoot.replaceChildren();
+
+    if (outlineSummary) {
+        outlineSummary.textContent = `${state.viewVersionCode || "draft"} · 노드 ${state.nodes.length}개 · 관계선 ${state.edges.length}개`;
+    }
+
+    const root = document.createElement("div");
+    root.className = "outline-root-card";
+
+    const rootTitle = document.createElement("div");
+    rootTitle.className = "outline-root-title";
+    rootTitle.textContent = state.viewName || "Draft View Version";
+    root.appendChild(rootTitle);
+
+    const rootMeta = document.createElement("div");
+    rootMeta.className = "outline-root-meta";
+    rootMeta.textContent = `${state.viewVersionCode || "draft"} / ${state.viewVersionStatus || "-"}`;
+    root.appendChild(rootMeta);
+
+    outlineTreeRoot.appendChild(root);
+    outlineTreeRoot.appendChild(renderOutlineBranch(getRootNodes(), 0));
+}
+
 async function loadPalette(metamodelVersionCode) {
     const registry = await loadViewVersionMetamodel(state.viewVersionId, metamodelVersionCode);
     state.metamodelVersionId = registry.versionId;
     state.metamodelVersionCode = registry.versionCode;
     state.semanticTypesByCode = registry.semanticTypesByCode;
+    state.propertyDefinitionsByType = registry.propertyDefinitionsByType || new Map();
     state.paletteGroups = registry.paletteGroups;
     state.containmentRules = registry.containmentRules;
     state.associations = registry.associations;
@@ -468,6 +622,107 @@ async function loadPalette(metamodelVersionCode) {
         setPaletteStatus("metamodel palette 조회에 실패해 기본 palette를 사용합니다.");
     }
     updateEditorMode();
+}
+
+function createDynamicPropertyField(property, value) {
+    const label = document.createElement("label");
+    label.className = "field";
+    label.dataset.propertyField = property.code;
+
+    const title = document.createElement("span");
+    title.textContent = property.display_name;
+    label.appendChild(title);
+
+    let input;
+    if (property.value_type === "boolean") {
+        input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = Boolean(value);
+    } else if (property.value_type === "json") {
+        input = document.createElement("textarea");
+        input.rows = 3;
+        input.value = value === undefined ? "" : JSON.stringify(value, null, 2);
+    } else {
+        input = document.createElement("input");
+        input.type = property.value_type === "number" || property.value_type === "integer" ? "number" : "text";
+        if (property.value_type === "number") {
+            input.step = "any";
+        }
+        if (property.value_type === "integer") {
+            input.step = "1";
+        }
+        input.value = value ?? "";
+    }
+
+    input.dataset.propertyInputCode = property.code;
+    input.dataset.valueType = property.value_type;
+    label.appendChild(input);
+
+    if (property.description) {
+        const hint = document.createElement("small");
+        hint.className = "field-hint";
+        hint.textContent = property.description;
+        label.appendChild(hint);
+    }
+
+    return label;
+}
+
+function renderDynamicPropertyFields(node) {
+    if (!dynamicPropertiesPanel || !dynamicPropertiesFields) {
+        return;
+    }
+
+    dynamicPropertiesFields.replaceChildren();
+    const propertyDefinitions = getEditablePropertyDefinitions(node.semantic_type_code || node.node_type);
+    if (propertyDefinitions.length === 0) {
+        dynamicPropertiesPanel.hidden = true;
+        return;
+    }
+
+    const currentProperties = node.properties || {};
+    for (const property of propertyDefinitions) {
+        const value = Object.prototype.hasOwnProperty.call(currentProperties, property.code)
+            ? currentProperties[property.code]
+            : property.default_value;
+        dynamicPropertiesFields.appendChild(createDynamicPropertyField(property, value));
+    }
+    dynamicPropertiesPanel.hidden = false;
+}
+
+function collectDynamicProperties(node) {
+    const propertyDefinitions = getEditablePropertyDefinitions(node.semantic_type_code || node.node_type);
+    const nextProperties = {};
+
+    for (const property of propertyDefinitions) {
+        const input = dynamicPropertiesFields?.querySelector(`[data-property-input-code="${property.code}"]`);
+        if (!input) {
+            continue;
+        }
+
+        let value;
+        if (property.value_type === "boolean") {
+            value = Boolean(input.checked);
+        } else if (property.value_type === "json") {
+            const raw = input.value.trim();
+            value = raw === "" ? null : JSON.parse(raw);
+        } else if (property.value_type === "integer") {
+            const raw = input.value.trim();
+            value = raw === "" ? null : Number.parseInt(raw, 10);
+        } else if (property.value_type === "number") {
+            const raw = input.value.trim();
+            value = raw === "" ? null : Number(raw);
+        } else {
+            const raw = input.value.trim();
+            value = raw === "" ? null : raw;
+        }
+
+        if (value !== null) {
+            nextProperties[property.code] = value;
+        }
+    }
+
+    return nextProperties;
 }
 
 function syncSelectionPanel() {
@@ -486,6 +741,7 @@ function syncSelectionPanel() {
         formFields.y.value = node.y;
         formFields.width.value = node.width;
         formFields.height.value = node.height;
+        renderDynamicPropertyFields(node);
         return;
     }
 
@@ -507,6 +763,9 @@ function syncSelectionPanel() {
     selectionKind.textContent = "선택된 항목이 없습니다.";
     nodeForm.hidden = true;
     edgeSummary.hidden = true;
+    if (dynamicPropertiesPanel) {
+        dynamicPropertiesPanel.hidden = true;
+    }
 }
 
 function render() {
@@ -522,6 +781,7 @@ function render() {
         onEdgeClick: handleEdgeClick,
     });
     syncSelectionPanel();
+    renderOutline();
     refreshPaletteInteractivity();
 }
 
@@ -742,6 +1002,7 @@ async function saveSelectedNode(event) {
                 revision: state.revision,
                 display_name: formFields.displayName.value.trim() || node.display_name,
                 target_id: formFields.targetId.value.trim() || null,
+                properties: collectDynamicProperties(node),
                 x: readNumber(formFields.x, node.x),
                 y: readNumber(formFields.y, node.y),
                 width: readNumber(formFields.width, node.width),

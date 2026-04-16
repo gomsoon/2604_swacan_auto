@@ -40,6 +40,19 @@ def fetch_metamodel_version_snapshot(metamodel_version_id: int) -> dict[str, Any
         (metamodel_version_id,),
     ).fetchall()
 
+    property_rows = db_conn.execute(
+        """
+        SELECT pd.id, pd.semantic_type_id, st.code AS semantic_type_code,
+               pd.code, pd.display_name, pd.description, pd.value_type, pd.unit,
+               pd.default_value_json, pd.is_required, pd.is_runtime, pd.is_user_editable, pd.sort_order
+        FROM property_definitions AS pd
+        JOIN semantic_types AS st ON st.id = pd.semantic_type_id
+        WHERE st.metamodel_version_id = ?
+        ORDER BY st.code ASC, pd.sort_order ASC, pd.id ASC
+        """,
+        (metamodel_version_id,),
+    ).fetchall()
+
     containment_rows = db_conn.execute(
         """
         SELECT cr.id, parent.id AS parent_type_id, parent.code AS parent_type_code, parent.display_name AS parent_type_display_name,
@@ -160,6 +173,24 @@ def fetch_metamodel_version_snapshot(metamodel_version_id: int) -> dict[str, Any
                 "is_active": bool(row["is_active"]),
             }
             for row in semantic_rows
+        ],
+        "property_definitions": [
+            {
+                "id": row["id"],
+                "semantic_type_id": row["semantic_type_id"],
+                "semantic_type_code": row["semantic_type_code"],
+                "code": row["code"],
+                "display_name": row["display_name"],
+                "description": row["description"],
+                "value_type": row["value_type"],
+                "unit": row["unit"],
+                "default_value": parse_json_or_none(row["default_value_json"]),
+                "is_required": bool(row["is_required"]),
+                "is_runtime": bool(row["is_runtime"]),
+                "is_user_editable": bool(row["is_user_editable"]),
+                "sort_order": row["sort_order"],
+            }
+            for row in property_rows
         ],
         "containment_rules": [
             {

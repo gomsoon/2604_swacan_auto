@@ -278,6 +278,22 @@ INSERT INTO property_definitions (
     '2026-04-15T09:00:00.000+09:00'
 ),
 (
+    1008,
+    103,
+    'service_tier',
+    'Service Tier',
+    'Logical service tier for the process',
+    'string',
+    NULL,
+    '"standard"',
+    0,
+    0,
+    1,
+    30,
+    '2026-04-15T09:00:00.000+09:00',
+    '2026-04-15T09:00:00.000+09:00'
+),
+(
     1005,
     104,
     'display_name',
@@ -326,7 +342,7 @@ INSERT INTO property_definitions (
     '2026-04-15T09:00:00.000+09:00'
 ),
 (
-    1008,
+    1009,
     105,
     'label',
     'Label',

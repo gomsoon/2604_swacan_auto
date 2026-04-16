@@ -72,6 +72,7 @@ def test_editor_page_renders_after_login(seeded_client) -> None:
     assert "Demo View".encode("utf-8") in response.data
     assert "SVG".encode("utf-8") in response.data
     assert "Palette".encode("utf-8") in response.data
+    assert "View Outline".encode("utf-8") in response.data
 
 
 def test_monitor_page_renders_after_login(seeded_client) -> None:

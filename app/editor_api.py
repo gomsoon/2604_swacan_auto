@@ -28,6 +28,7 @@ NODE_MUTABLE_FIELDS = {
     "parent_node_id",
     "display_name",
     "target_id",
+    "properties",
     "layer_order",
     "x",
     "y",

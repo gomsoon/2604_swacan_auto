@@ -260,6 +260,44 @@ def test_update_version_node_updates_layout_and_revision(seeded_client) -> None:
     assert payload["revision"] == draft_payload["version"]["revision"] + 1
 
 
+def test_update_version_node_persists_custom_properties(seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+    process_node = next(node for node in draft_payload["nodes"] if node["node_type"] == "SoftwareProcess")
+
+    response = seeded_client.patch(
+        f"/api/view-versions/{version_id}/nodes/{process_node['id']}",
+        json={
+            "revision": draft_payload["version"]["revision"],
+            "properties": {"service_tier": "gold"},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["node"]["properties"]["service_tier"] == "gold"
+
+
+def test_update_version_node_rejects_unknown_custom_property_code(seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+    process_node = next(node for node in draft_payload["nodes"] if node["node_type"] == "SoftwareProcess")
+
+    response = seeded_client.patch(
+        f"/api/view-versions/{version_id}/nodes/{process_node['id']}",
+        json={
+            "revision": draft_payload["version"]["revision"],
+            "properties": {"unknown_property": "x"},
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+    assert response.get_json()["error"]["message"] == "unknown property codes: unknown_property"
+
+
 def test_update_version_node_creates_or_removes_primary_binding(seeded_app, seeded_client) -> None:
     login(seeded_client)
     draft_payload = create_draft(seeded_client)

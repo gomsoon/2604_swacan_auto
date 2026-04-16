@@ -9,6 +9,7 @@
 참고 문서:
 - [minimal-e2e-signoff.md](C:/2604_swacan_auto/docs/minimal-e2e-signoff.md)
 - [metamodel-notation-db-design-draft.md](C:/2604_swacan_auto/docs/metamodel-notation-db-design-draft.md)
+- [architecture-editor-layout-draft.md](C:/2604_swacan_auto/docs/architecture-editor-layout-draft.md)
 - [terminology-guidelines.md](C:/2604_swacan_auto/docs/terminology-guidelines.md)
 - Git tag: `minimal-e2e-v1`
 
@@ -162,6 +163,7 @@ Phase 기준의 큰 방향은 여전히 유효하지만, 현재 구현 상태를
 - metamodel 변경이 editor와 monitor에 실제로 어떻게 반영되는지 경계를 더 명확히 고정
 - compatibility fallback 정리
 - publish 전 영향도와 실제 사용 경로를 더 강하게 연결
+- Architecture Editor를 `View Outline Tree + Architecture Canvas + Inspector` 작업공간으로 안정화
 
 3. 권한 / 감사 로그
 - draft edit

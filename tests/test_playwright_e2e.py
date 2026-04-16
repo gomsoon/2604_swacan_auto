@@ -88,7 +88,17 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     process_target_id = page.locator("#node-target-id").input_value()
     page.locator("#node-display-name").fill("Worker Alpha")
     page.get_by_role("button", name="선택 항목 저장").click()
-    expect(page.locator('text="Worker Alpha"')).to_be_visible()
+    expect(page.locator('#editor-outline-tree .outline-item-name', has_text="Worker Alpha")).to_be_visible()
+    expect(page.locator('g.diagram-node[data-node-type="SoftwareProcess"] text.node-label', has_text="Worker Alpha")).to_be_visible()
+    expect(page.locator("#editor-outline-tree")).to_contain_text("Worker Alpha")
+
+    page.locator('#editor-outline-tree .outline-item', has_text="Worker Alpha").click()
+    expect(page.locator("#selection-kind")).to_contain_text("Software Process")
+    expect(page.locator("#node-display-name")).to_have_value("Worker Alpha")
+    expect(page.locator("#node-dynamic-properties")).to_be_visible()
+    page.locator('#node-dynamic-properties [data-property-input-code="service_tier"]').fill("gold")
+    page.get_by_role("button", name="선택 항목 저장").click()
+    expect(page.locator('#node-dynamic-properties [data-property-input-code="service_tier"]')).to_have_value("gold")
 
     expect(page.get_by_role("button", name="통신선 시작")).to_be_visible()
     page.get_by_role("button", name="통신선 시작").click()
