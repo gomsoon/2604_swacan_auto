@@ -9,6 +9,7 @@
 참고 문서:
 - [minimal-e2e-signoff.md](C:/2604_swacan_auto/docs/minimal-e2e-signoff.md)
 - [metamodel-notation-db-design-draft.md](C:/2604_swacan_auto/docs/metamodel-notation-db-design-draft.md)
+- [terminology-guidelines.md](C:/2604_swacan_auto/docs/terminology-guidelines.md)
 - Git tag: `minimal-e2e-v1`
 
 ## 1. 현재 기준점 요약
@@ -29,7 +30,14 @@
 - agent와 runtime 파이프라인은 이미 닫힌 흐름을 유지하면서 운영성과 효율을 높이는 방향으로 확장한다.
 - 운영 안정성을 위해 `draft 편집본` 과 `active operational view` 는 분리하고, publish 기반 snapshot 전환 구조를 채택한다.
 
-## 3. MVP 주요 단계
+## 3. 용어 정리
+
+- runtime 상태를 읽는 운영 화면은 `Monitoring View`로 부른다.
+- draft 아키텍처를 편집하는 화면은 `Architecture Editor`로 부른다.
+- metamodel draft를 편집하는 화면은 `Metamodel Editor`로 부른다.
+- 데이터 모델의 `Logical View`, `View Version`과 화면 이름인 `Monitoring View`는 구분된 개념으로 사용한다.
+
+## 4. MVP 주요 단계
 
 ### Phase 1. 메타모델 기반 표현 강화
 목표:
@@ -122,7 +130,7 @@
 - 운영자가 주요 상태를 적은 클릭으로 파악할 수 있다.
 - editor가 실제 설계 도구로 사용 가능한 수준으로 다듬어진다.
 
-## 4. 현재 시점의 우선순위
+## 5. 현재 시점의 우선순위
 
 가장 먼저 추천하는 순서는 다음과 같다.
 
@@ -138,7 +146,7 @@
 - 같은 runtime 대상을 여러 view가 공유할 수 있도록 runtime identity를 view snapshot에서 분리해야 event/alert 설계가 안정된다.
 - agent 고도화도 중요하지만, backend와 frontend가 같은 metamodel 축과 runtime identity 축을 공유한 뒤에 확장하는 편이 더 안정적이다.
 
-## 5. 현재 바로 이어갈 추천 작업
+## 6. 현재 바로 이어갈 추천 작업
 
 지금 시점에서 가장 자연스러운 다음 작업은 아래와 같다.
 
@@ -147,21 +155,21 @@
 3. metamodel draft 검증과 publish 전환 조건 정리
 4. alert backlog는 `archive/action log 정리`, `suppression`, `rule dry-run preview`를 후속 과제로 유지
 
-## 6. 주요 리스크
+## 7. 주요 리스크
 
-### 6.1 메타모델 범위 확장 리스크
+### 7.1 메타모델 범위 확장 리스크
 - metamodel/notation registry를 지나치게 범용적으로 설계하면 MVP 범위를 빠르게 벗어날 수 있다.
 - primitive whitelist와 선언형 schema 범위를 엄격히 관리해야 한다.
 
-### 6.2 runtime과 metamodel의 연결 리스크
+### 7.2 runtime과 metamodel의 연결 리스크
 - metamodel이 너무 앞서가고 persisted view, runtime binding이 뒤따르지 못하면 실제 제품 일관성이 흔들릴 수 있다.
 - 따라서 `registry -> view persistence -> renderer` 순서로 단계적으로 묶어야 한다.
 
-### 6.3 agent 효율화 리스크
+### 7.3 agent 효율화 리스크
 - systemd/cgroup, pidfd, 고급 Linux 기능은 가치가 크지만 환경 의존성이 있다.
 - MVP에서는 구조를 열어두되, 단계적으로 적용해야 한다.
 
-## 7. 요약
+## 8. 요약
 
 - minimal E2E는 완료되었고, 현재는 MVP 구조 확장을 시작하기에 적절한 상태다.
 - MVP의 중심축은 `메타모델/notation registry를 실제 제품 구조의 기준으로 만드는 것`이다.

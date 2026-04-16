@@ -8,6 +8,7 @@
 
 참고 문서:
 - [mvp-transition-roadmap.md](C:/2604_swacan_auto/docs/mvp-transition-roadmap.md)
+- [terminology-guidelines.md](C:/2604_swacan_auto/docs/terminology-guidelines.md)
 - [backend-detailed-requirements.md](C:/2604_swacan_auto/docs/backend-detailed-requirements.md)
 - [frontend-detailed-requirements.md](C:/2604_swacan_auto/docs/frontend-detailed-requirements.md)
 - [software-architecture-runtime-monitoring-mvp-plan.md](C:/2604_swacan_auto/docs/software-architecture-runtime-monitoring-mvp-plan.md)
@@ -49,6 +50,12 @@
 - frontend는 `어떻게 그릴 것인가`를 구현한다.
 - backend는 arbitrary UI 코드를 저장하지 않고, 선언형 schema만 저장한다.
 - frontend는 허용된 primitive 집합 안에서만 registry를 해석한다.
+
+### 2.4 용어 적용 메모
+- runtime 상태를 읽는 운영 화면은 `Monitoring View`로 본다.
+- 아키텍처 draft를 수정하는 화면은 `Architecture Editor`로 본다.
+- semantic type, containment, notation을 수정하는 화면은 `Metamodel Editor`로 본다.
+- Metamodel Editor는 좌측 목록, 중앙 구조 canvas/preview, 우측 inspector를 갖는 편집 workspace를 기본 형태로 삼는다.
 
 ## 3. 계층 구조
 
