@@ -293,7 +293,7 @@ function renderMetamodelWorkspaceModeControls() {
     metamodelWorkspaceCreateAssociationModeButton?.classList.toggle("is-active", isAssociation);
 }
 
-function openContainmentCreateFromCanvas(parentTypeId, childTypeId) {
+async function openContainmentCreateFromCanvas(parentTypeId, childTypeId) {
     const existingRule = metamodelContainmentRules.find(
         (item) =>
             Number(item.parent_type_id) === Number(parentTypeId) &&
@@ -302,40 +302,53 @@ function openContainmentCreateFromCanvas(parentTypeId, childTypeId) {
     );
 
     if (existingRule) {
+        selectedMetamodelWorkspace = { kind: "containment_rule", id: existingRule.id };
         fillMetamodelContainmentRuleForm(existingRule);
+        refreshMetamodelWorkspace();
         scrollToMetamodelEditorSection(metamodelContainmentRuleSection, metamodelContainmentParentTypeIdInput);
         showBanner("이미 존재하는 containment rule을 편집 모드로 열었습니다.", "success");
         return;
     }
 
-    renderContainmentVersionOptions(metamodelDraftVersionSelect.value);
-    resetMetamodelContainmentRuleForm();
-    if (metamodelDraftVersionSelect.value) {
-        metamodelContainmentRuleVersionIdInput.value = metamodelDraftVersionSelect.value;
+    const versionId = Number(metamodelDraftVersionSelect.value);
+    const payload = {
+        parent_type_id: Number(parentTypeId),
+        child_type_id: Number(childTypeId),
+        min_count: 0,
+        max_count: null,
+        cardinality_scope: "group_total",
+        is_required: false,
+    };
+    const createdPayload = await apiFetch(`/api/admin/metamodel/versions/${versionId}/containment-rules`, {
+        method: "POST",
+        body: payload,
+    });
+    await Promise.all([loadMetamodelVersions(), loadMetamodelContainmentRules()]);
+    const created = createdPayload.containment_rule;
+    if (created) {
+        selectedMetamodelWorkspace = { kind: "containment_rule", id: created.id };
+        fillMetamodelContainmentRuleForm(created);
+        refreshMetamodelWorkspace();
     }
-    renderContainmentSemanticTypeOptions(parentTypeId, childTypeId);
-    metamodelContainmentMinCountInput.value = "0";
-    metamodelContainmentMaxCountInput.value = "";
-    metamodelContainmentCardinalityScopeInput.value = "group_total";
-    metamodelContainmentIsRequiredInput.checked = false;
     scrollToMetamodelEditorSection(metamodelContainmentRuleSection, metamodelContainmentParentTypeIdInput);
+    showBanner("Containment rule을 canvas에서 생성했습니다.", "success");
 }
 
-function openAssociationCreateFromCanvas(sourceTypeId, targetTypeId) {
+async function openAssociationCreateFromCanvas(sourceTypeId, targetTypeId) {
     const existingAssociation = metamodelAssociations.find(
         (item) =>
             Number(item.source_type_id) === Number(sourceTypeId) &&
             Number(item.target_type_id) === Number(targetTypeId)
     );
     if (existingAssociation) {
+        selectedMetamodelWorkspace = { kind: "association_definition", id: existingAssociation.id };
         fillMetamodelAssociationForm(existingAssociation);
+        refreshMetamodelWorkspace();
         scrollToMetamodelEditorSection(metamodelAssociationSection, metamodelAssociationCodeInput);
         showBanner("이미 존재하는 association definition을 편집 모드로 열었습니다.", "success");
         return;
     }
 
-    resetMetamodelAssociationForm();
-    renderMetamodelAssociationTypeOptions(sourceTypeId, targetTypeId);
     const sourceType = metamodelSemanticTypes.find((item) => Number(item.id) === Number(sourceTypeId));
     const targetType = metamodelSemanticTypes.find((item) => Number(item.id) === Number(targetTypeId));
     const edgeType = metamodelSemanticTypes.find((item) => item.kind === "edge" && item.is_active);
@@ -347,17 +360,34 @@ function openAssociationCreateFromCanvas(sourceTypeId, targetTypeId) {
             .toLowerCase();
 
     if (sourceType && targetType) {
-        metamodelAssociationCodeInput.value = `${normalizeCodeToken(sourceType.code)}_to_${normalizeCodeToken(targetType.code)}`;
-        metamodelAssociationDisplayNameInput.value = `${sourceType.display_name} -> ${targetType.display_name}`;
-        metamodelAssociationMultiplicitySourceInput.value = "1";
-        metamodelAssociationMultiplicityTargetInput.value = "0..n";
-        metamodelAssociationDescriptionInput.value = `${sourceType.display_name}에서 ${targetType.display_name}로 향하는 association`;
+        const versionId = Number(metamodelDraftVersionSelect.value);
+        const payload = {
+            source_type_id: Number(sourceTypeId),
+            target_type_id: Number(targetTypeId),
+            code: `${normalizeCodeToken(sourceType.code)}_to_${normalizeCodeToken(targetType.code)}`,
+            display_name: `${sourceType.display_name} -> ${targetType.display_name}`,
+            direction: "directed",
+            multiplicity_source: "1",
+            multiplicity_target: "0..n",
+            description: `${sourceType.display_name}에서 ${targetType.display_name}로 향하는 association`,
+            semantics_json: edgeType
+                ? JSON.stringify({ default_edge_type: edgeType.code }, null, 2)
+                : null,
+        };
+        const createdPayload = await apiFetch(`/api/admin/metamodel/versions/${versionId}/associations`, {
+            method: "POST",
+            body: payload,
+        });
+        await Promise.all([loadMetamodelVersions(), loadMetamodelAssociations()]);
+        const created = createdPayload.association_definition;
+        if (created) {
+            selectedMetamodelWorkspace = { kind: "association_definition", id: created.id };
+            fillMetamodelAssociationForm(created);
+            refreshMetamodelWorkspace();
+        }
+        showBanner("Association definition을 canvas에서 생성했습니다.", "success");
         if (edgeType) {
-            metamodelAssociationSemanticsJsonInput.value = JSON.stringify(
-                { default_edge_type: edgeType.code },
-                null,
-                2
-            );
+            metamodelAssociationSemanticsJsonInput.value = JSON.stringify({ default_edge_type: edgeType.code }, null, 2);
         }
     }
     scrollToMetamodelEditorSection(metamodelAssociationSection, metamodelAssociationCodeInput);
@@ -2202,12 +2232,11 @@ async function selectMetamodelWorkspaceItem(kind, id) {
         }
 
         if (metamodelWorkspaceInteractionMode === "create_containment") {
-            openContainmentCreateFromCanvas(metamodelWorkspacePendingTypeId, numericId);
+            await openContainmentCreateFromCanvas(metamodelWorkspacePendingTypeId, numericId);
         } else if (metamodelWorkspaceInteractionMode === "create_association") {
-            openAssociationCreateFromCanvas(metamodelWorkspacePendingTypeId, numericId);
+            await openAssociationCreateFromCanvas(metamodelWorkspacePendingTypeId, numericId);
         }
 
-        selectedMetamodelWorkspace = { kind: "semantic_type", id: numericId };
         setMetamodelWorkspaceInteractionMode("select");
         refreshMetamodelWorkspace();
         return;
