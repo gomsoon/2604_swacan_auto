@@ -380,6 +380,36 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
 
     expect(page.locator("#admin-metamodel-containment-rules-list .admin-item", has_text="Worker Pool Updated").first).to_contain_text("max=8")
 
+    page.locator("#metamodel-notation-semantic-type-id").select_option(label="Worker Pool Updated (WorkerPool)")
+    page.locator("#metamodel-notation-palette-group-id").select_option(label="Processes (processes)")
+    page.locator("#metamodel-notation-code").fill("workerpool.rounded_rect")
+    page.locator("#metamodel-notation-display-name").fill("Worker Pool Notation")
+    page.locator("#metamodel-notation-kind").select_option("node")
+    page.locator("#metamodel-notation-render-primitive").select_option("rounded_rect")
+    page.locator("#metamodel-notation-sort-order").fill("10")
+    page.locator("#metamodel-notation-render-schema-json").fill('{"primitive":"rounded_rect","default_size":{"width":220,"height":88},"label_slots":[{"code":"title","source":"display_name"}],"anchors":["top","right","bottom","left"]}')
+    page.locator("#metamodel-notation-style-tokens-json").fill('{"fill":"process-fill","stroke":"process-stroke","label":"process-label"}')
+    page.locator("#metamodel-notation-is-default").check()
+    page.locator("#metamodel-notation-is-visible-in-palette").check()
+    page.locator("#save-metamodel-notation-button").click()
+
+    createdNotation = page.locator("#admin-metamodel-notations-list .admin-item", has_text="Worker Pool Notation").first
+    expect(createdNotation).to_contain_text("workerpool.rounded_rect")
+    expect(createdNotation).to_contain_text("rounded_rect")
+    expect(createdNotation).to_contain_text("default")
+
+    createdNotation.get_by_role("button", name="수정").click()
+    expect(page.locator("#metamodel-notation-form-mode")).to_contain_text("edit")
+    page.locator("#metamodel-notation-display-name").fill("Worker Pool Notation Updated")
+    page.locator("#metamodel-notation-render-primitive").select_option("rect")
+    page.locator("#metamodel-notation-sort-order").fill("9999")
+    page.locator("#metamodel-notation-render-schema-json").fill('{"primitive":"rect","default_size":{"width":180,"height":72}}')
+    page.locator("#metamodel-notation-is-visible-in-palette").uncheck()
+    page.locator("#save-metamodel-notation-button").click()
+
+    expect(page.locator("#admin-metamodel-notations-list .admin-item", has_text="Worker Pool Notation Updated").first).to_contain_text("rect")
+    expect(page.locator("#admin-metamodel-notations-list .admin-item", has_text="Worker Pool Notation Updated").first).to_contain_text("hidden")
+
     createdVersion.locator(".publish-metamodel-button").click()
 
     expect(page.locator(".admin-item", has_text="core-v2-ui-draft").first).to_contain_text("published")

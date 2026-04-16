@@ -15,6 +15,8 @@ ALLOWED_VERSION_STATUSES = {"draft", "published", "deprecated"}
 ALLOWED_SEMANTIC_TYPE_KINDS = {"node", "edge", "container", "runtime-only"}
 ALLOWED_PROPERTY_VALUE_TYPES = {"string", "integer", "number", "boolean", "enum", "json"}
 ALLOWED_CARDINALITY_SCOPES = {"group_total", "per_member"}
+ALLOWED_NOTATION_KINDS = {"node", "edge"}
+ALLOWED_RENDER_PRIMITIVES = {"rect", "rounded_rect", "line", "badge", "label"}
 
 
 def now_iso() -> str:
@@ -244,6 +246,178 @@ def serialize_containment_rule(row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+
+
+def fetch_notation_row(notation_id: int):
+    return get_db().execute(
+        """
+        SELECT nd.id, nd.metamodel_version_id, nd.semantic_type_id, nd.palette_group_id, nd.code, nd.display_name,
+               nd.kind, nd.render_primitive, nd.render_schema_json, nd.style_tokens_json,
+               nd.is_default, nd.is_visible_in_palette, nd.sort_order, nd.created_at, nd.updated_at,
+               st.code AS semantic_type_code,
+               st.display_name AS semantic_type_display_name,
+               st.kind AS semantic_type_kind,
+               pg.code AS palette_group_code,
+               pg.label AS palette_group_label,
+               mv.status AS metamodel_version_status,
+               mv.version_code AS metamodel_version_code,
+               ns.code AS namespace_code
+        FROM notation_definitions AS nd
+        JOIN semantic_types AS st ON st.id = nd.semantic_type_id
+        JOIN metamodel_versions AS mv ON mv.id = nd.metamodel_version_id
+        JOIN metamodel_namespaces AS ns ON ns.id = mv.namespace_id
+        LEFT JOIN palette_groups AS pg ON pg.id = nd.palette_group_id
+        WHERE nd.id = ?
+        """,
+        (notation_id,),
+    ).fetchone()
+
+
+def serialize_notation_definition(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "metamodel_version_id": row["metamodel_version_id"],
+        "metamodel_version_code": row["metamodel_version_code"],
+        "namespace_code": row["namespace_code"],
+        "semantic_type_id": row["semantic_type_id"],
+        "semantic_type_code": row["semantic_type_code"],
+        "semantic_type_display_name": row["semantic_type_display_name"],
+        "palette_group_id": row["palette_group_id"],
+        "palette_group_code": row["palette_group_code"],
+        "palette_group_label": row["palette_group_label"],
+        "code": row["code"],
+        "display_name": row["display_name"],
+        "kind": row["kind"],
+        "render_primitive": row["render_primitive"],
+        "render_schema_json": row["render_schema_json"],
+        "render_schema": parse_json_or_none(row["render_schema_json"]),
+        "style_tokens_json": row["style_tokens_json"],
+        "style_tokens": parse_json_or_none(row["style_tokens_json"]),
+        "is_default": bool(row["is_default"]),
+        "is_visible_in_palette": bool(row["is_visible_in_palette"]),
+        "sort_order": row["sort_order"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def validate_json_text_field(value: Any, *, field_name: str, required: bool) -> str | None:
+    if value in (None, ""):
+        if required:
+            raise ValueError(f"{field_name} is required")
+        return None
+    try:
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized:
+                if required:
+                    raise ValueError(f"{field_name} is required")
+                return None
+            parsed = json.loads(normalized)
+        else:
+            parsed = value
+        return json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{field_name} must be valid JSON") from exc
+
+
+def validate_notation_payload(data: dict[str, Any], *, partial: bool = False) -> tuple[dict[str, Any] | None, Any | None]:
+    payload = dict(data)
+    try:
+        if not partial or "code" in payload:
+            code = parse_optional_string(payload.get("code"), field_name="code", max_length=100)
+            if not code:
+                return None, error_response("validation_error", "code is required", 400)
+            payload["code"] = code
+
+        if not partial or "display_name" in payload:
+            display_name = parse_optional_string(payload.get("display_name"), field_name="display_name", max_length=120)
+            if not display_name:
+                return None, error_response("validation_error", "display_name is required", 400)
+            payload["display_name"] = display_name
+
+        if not partial or "kind" in payload:
+            kind = payload.get("kind")
+            if kind not in ALLOWED_NOTATION_KINDS:
+                return None, error_response("validation_error", "kind is invalid", 400)
+            payload["kind"] = kind
+
+        if not partial or "render_primitive" in payload:
+            render_primitive = payload.get("render_primitive")
+            if render_primitive not in ALLOWED_RENDER_PRIMITIVES:
+                return None, error_response("validation_error", "render_primitive is invalid", 400)
+            payload["render_primitive"] = render_primitive
+
+        if not partial or "semantic_type_id" in payload:
+            semantic_type_id = payload.get("semantic_type_id")
+            if isinstance(semantic_type_id, bool) or not isinstance(semantic_type_id, int) or semantic_type_id <= 0:
+                return None, error_response("validation_error", "semantic_type_id must be a positive integer", 400)
+            payload["semantic_type_id"] = semantic_type_id
+
+        if "palette_group_id" in payload and payload.get("palette_group_id") not in (None, ""):
+            palette_group_id = payload.get("palette_group_id")
+            if isinstance(palette_group_id, bool) or not isinstance(palette_group_id, int) or palette_group_id <= 0:
+                return None, error_response("validation_error", "palette_group_id must be a positive integer or null", 400)
+            payload["palette_group_id"] = palette_group_id
+        elif "palette_group_id" in payload:
+            payload["palette_group_id"] = None
+
+        if "render_schema_json" in payload or not partial:
+            payload["render_schema_json"] = validate_json_text_field(
+                payload.get("render_schema_json"),
+                field_name="render_schema_json",
+                required=True,
+            )
+        if "style_tokens_json" in payload:
+            payload["style_tokens_json"] = validate_json_text_field(
+                payload.get("style_tokens_json"),
+                field_name="style_tokens_json",
+                required=False,
+            )
+        elif not partial:
+            payload["style_tokens_json"] = validate_json_text_field(
+                payload.get("style_tokens_json"),
+                field_name="style_tokens_json",
+                required=False,
+            )
+    except ValueError as exc:
+        return None, error_response("validation_error", str(exc), 400)
+
+    for bool_field in ("is_default", "is_visible_in_palette"):
+        if not partial or bool_field in payload:
+            value = payload.get(bool_field)
+            if not isinstance(value, bool):
+                return None, error_response("validation_error", f"{bool_field} must be a boolean", 400)
+            payload[bool_field] = value
+
+    if not partial or "sort_order" in payload:
+        sort_order = payload.get("sort_order")
+        if isinstance(sort_order, bool) or not isinstance(sort_order, int):
+            return None, error_response("validation_error", "sort_order must be an integer", 400)
+        if sort_order < 0 or sort_order > 9999:
+            return None, error_response("validation_error", "sort_order must be between 0 and 9999", 400)
+        payload["sort_order"] = sort_order
+
+    return payload, None
+
+
+def update_default_notation(*, semantic_type_id: int, notation_id: int | None, db_conn) -> None:
+    db_conn.execute(
+        """
+        UPDATE notation_definitions
+        SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END
+        WHERE semantic_type_id = ?
+        """,
+        (notation_id, semantic_type_id),
+    )
+    db_conn.execute(
+        """
+        UPDATE semantic_types
+        SET default_notation_id = ?
+        WHERE id = ?
+        """,
+        (notation_id, semantic_type_id),
+    )
 
 
 def validate_semantic_type_payload(data: dict[str, Any], *, partial: bool = False) -> tuple[dict[str, Any] | None, Any | None]:
@@ -1242,3 +1416,268 @@ def update_containment_rule(rule_id: int):
 
     updated = fetch_containment_rule_row(rule_id)
     return {"containment_rule": serialize_containment_rule(updated)}
+
+
+@bp.get("/versions/<int:version_id>/palette-groups")
+@admin_required
+def list_palette_groups(version_id: int):
+    version = fetch_version(version_id)
+    if version is None:
+        return error_response("metamodel_not_found", "metamodel version not found", 404)
+
+    rows = get_db().execute(
+        """
+        SELECT id, metamodel_version_id, code, label, sort_order, created_at, updated_at
+        FROM palette_groups
+        WHERE metamodel_version_id = ?
+        ORDER BY sort_order ASC, code ASC, id ASC
+        """,
+        (version_id,),
+    ).fetchall()
+    return {
+        "version": serialize_version(version),
+        "items": [
+            {
+                "id": row["id"],
+                "metamodel_version_id": row["metamodel_version_id"],
+                "code": row["code"],
+                "label": row["label"],
+                "sort_order": row["sort_order"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ],
+    }
+
+
+@bp.get("/semantic-types/<int:type_id>/notations")
+@admin_required
+def list_notations(type_id: int):
+    semantic_type = fetch_semantic_type_row(type_id)
+    if semantic_type is None:
+        return error_response("semantic_type_not_found", "semantic type not found", 404)
+
+    rows = get_db().execute(
+        """
+        SELECT nd.id, nd.metamodel_version_id, nd.semantic_type_id, nd.palette_group_id, nd.code, nd.display_name,
+               nd.kind, nd.render_primitive, nd.render_schema_json, nd.style_tokens_json,
+               nd.is_default, nd.is_visible_in_palette, nd.sort_order, nd.created_at, nd.updated_at,
+               st.code AS semantic_type_code,
+               st.display_name AS semantic_type_display_name,
+               st.kind AS semantic_type_kind,
+               pg.code AS palette_group_code,
+               pg.label AS palette_group_label,
+               mv.status AS metamodel_version_status,
+               mv.version_code AS metamodel_version_code,
+               ns.code AS namespace_code
+        FROM notation_definitions AS nd
+        JOIN semantic_types AS st ON st.id = nd.semantic_type_id
+        JOIN metamodel_versions AS mv ON mv.id = nd.metamodel_version_id
+        JOIN metamodel_namespaces AS ns ON ns.id = mv.namespace_id
+        LEFT JOIN palette_groups AS pg ON pg.id = nd.palette_group_id
+        WHERE nd.semantic_type_id = ?
+        ORDER BY nd.sort_order ASC, nd.code ASC, nd.id ASC
+        """,
+        (type_id,),
+    ).fetchall()
+
+    return {
+        "semantic_type": serialize_semantic_type(semantic_type),
+        "items": [serialize_notation_definition(row) for row in rows],
+    }
+
+
+@bp.post("/semantic-types/<int:type_id>/notations")
+@admin_required
+def create_notation(type_id: int):
+    semantic_type = fetch_semantic_type_row(type_id)
+    if semantic_type is None:
+        return error_response("semantic_type_not_found", "semantic type not found", 404)
+    if semantic_type["metamodel_version_status"] != "draft":
+        return error_response("invalid_state", "only draft semantic types can be edited", 409)
+
+    payload, error = validate_notation_payload(request.get_json(silent=True) or {}, partial=False)
+    if error:
+        return error
+    if payload["semantic_type_id"] != type_id:
+        return error_response("validation_error", "semantic_type_id must match the selected semantic type", 400)
+    if semantic_type["kind"] == "edge" and payload["kind"] != "edge":
+        return error_response("validation_error", "edge semantic type requires edge notation kind", 400)
+    if semantic_type["kind"] != "edge" and payload["kind"] != "node":
+        return error_response("validation_error", "non-edge semantic type requires node notation kind", 400)
+
+    if payload.get("palette_group_id") is not None:
+        palette_group = get_db().execute(
+            "SELECT 1 FROM palette_groups WHERE id = ? AND metamodel_version_id = ?",
+            (payload["palette_group_id"], semantic_type["metamodel_version_id"]),
+        ).fetchone()
+        if palette_group is None:
+            return error_response("validation_error", "palette_group_id must belong to the selected version", 400)
+
+    conflict = get_db().execute(
+        """
+        SELECT 1
+        FROM notation_definitions
+        WHERE metamodel_version_id = ? AND code = ?
+        """,
+        (semantic_type["metamodel_version_id"], payload["code"]),
+    ).fetchone()
+    if conflict is not None:
+        return error_response("notation_conflict", "notation code already exists in version", 409)
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    cursor = db_conn.execute(
+        """
+        INSERT INTO notation_definitions (
+            metamodel_version_id, semantic_type_id, palette_group_id, code, display_name, kind,
+            render_primitive, render_schema_json, style_tokens_json,
+            is_default, is_visible_in_palette, sort_order, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            semantic_type["metamodel_version_id"],
+            type_id,
+            payload.get("palette_group_id"),
+            payload["code"],
+            payload["display_name"],
+            payload["kind"],
+            payload["render_primitive"],
+            payload["render_schema_json"],
+            payload.get("style_tokens_json"),
+            int(payload["is_default"]),
+            int(payload["is_visible_in_palette"]),
+            payload["sort_order"],
+            timestamp,
+            timestamp,
+        ),
+    )
+    notation_id = int(cursor.lastrowid)
+    if payload["is_default"]:
+        update_default_notation(semantic_type_id=type_id, notation_id=notation_id, db_conn=db_conn)
+
+    db_conn.execute(
+        """
+        UPDATE metamodel_versions
+        SET updated_at = ?
+        WHERE id = ?
+        """,
+        (timestamp, semantic_type["metamodel_version_id"]),
+    )
+    db_conn.commit()
+
+    created = fetch_notation_row(notation_id)
+    return {
+        "semantic_type": serialize_semantic_type(semantic_type),
+        "notation_definition": serialize_notation_definition(created),
+    }, 201
+
+
+@bp.patch("/notations/<int:notation_id>")
+@admin_required
+def update_notation(notation_id: int):
+    existing = fetch_notation_row(notation_id)
+    if existing is None:
+        return error_response("notation_not_found", "notation definition not found", 404)
+    if existing["metamodel_version_status"] != "draft":
+        return error_response("invalid_state", "only draft notation definitions can be edited", 409)
+
+    current_payload = {
+        "semantic_type_id": existing["semantic_type_id"],
+        "palette_group_id": existing["palette_group_id"],
+        "code": existing["code"],
+        "display_name": existing["display_name"],
+        "kind": existing["kind"],
+        "render_primitive": existing["render_primitive"],
+        "render_schema_json": existing["render_schema_json"],
+        "style_tokens_json": existing["style_tokens_json"],
+        "is_default": bool(existing["is_default"]),
+        "is_visible_in_palette": bool(existing["is_visible_in_palette"]),
+        "sort_order": existing["sort_order"],
+    }
+    current_payload.update(request.get_json(silent=True) or {})
+    payload, error = validate_notation_payload(current_payload, partial=False)
+    if error:
+        return error
+
+    semantic_type = fetch_semantic_type_row(payload["semantic_type_id"])
+    if semantic_type is None or semantic_type["metamodel_version_id"] != existing["metamodel_version_id"]:
+        return error_response("validation_error", "semantic_type_id must belong to the selected version", 400)
+    if semantic_type["kind"] == "edge" and payload["kind"] != "edge":
+        return error_response("validation_error", "edge semantic type requires edge notation kind", 400)
+    if semantic_type["kind"] != "edge" and payload["kind"] != "node":
+        return error_response("validation_error", "non-edge semantic type requires node notation kind", 400)
+
+    if payload.get("palette_group_id") is not None:
+        palette_group = get_db().execute(
+            "SELECT 1 FROM palette_groups WHERE id = ? AND metamodel_version_id = ?",
+            (payload["palette_group_id"], existing["metamodel_version_id"]),
+        ).fetchone()
+        if palette_group is None:
+            return error_response("validation_error", "palette_group_id must belong to the selected version", 400)
+
+    conflict = get_db().execute(
+        """
+        SELECT 1
+        FROM notation_definitions
+        WHERE metamodel_version_id = ? AND code = ? AND id != ?
+        """,
+        (existing["metamodel_version_id"], payload["code"], notation_id),
+    ).fetchone()
+    if conflict is not None:
+        return error_response("notation_conflict", "notation code already exists in version", 409)
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    db_conn.execute(
+        """
+        UPDATE notation_definitions
+        SET semantic_type_id = ?,
+            palette_group_id = ?,
+            code = ?,
+            display_name = ?,
+            kind = ?,
+            render_primitive = ?,
+            render_schema_json = ?,
+            style_tokens_json = ?,
+            is_default = ?,
+            is_visible_in_palette = ?,
+            sort_order = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            payload["semantic_type_id"],
+            payload.get("palette_group_id"),
+            payload["code"],
+            payload["display_name"],
+            payload["kind"],
+            payload["render_primitive"],
+            payload["render_schema_json"],
+            payload.get("style_tokens_json"),
+            int(payload["is_default"]),
+            int(payload["is_visible_in_palette"]),
+            payload["sort_order"],
+            timestamp,
+            notation_id,
+        ),
+    )
+
+    if payload["is_default"]:
+        update_default_notation(semantic_type_id=payload["semantic_type_id"], notation_id=notation_id, db_conn=db_conn)
+    elif existing["is_default"] and existing["semantic_type_id"] == payload["semantic_type_id"]:
+        update_default_notation(semantic_type_id=payload["semantic_type_id"], notation_id=None, db_conn=db_conn)
+
+    db_conn.execute(
+        """
+        UPDATE metamodel_versions
+        SET updated_at = ?
+        WHERE id = ?
+        """,
+        (timestamp, existing["metamodel_version_id"]),
+    )
+    db_conn.commit()
+
+    updated = fetch_notation_row(notation_id)
+    return {"notation_definition": serialize_notation_definition(updated)}

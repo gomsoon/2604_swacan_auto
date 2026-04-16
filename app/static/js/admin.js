@@ -16,6 +16,8 @@ const metamodelPropertiesList = document.getElementById("admin-metamodel-propert
 const metamodelPropertyCount = document.getElementById("metamodel-property-count");
 const metamodelContainmentRulesList = document.getElementById("admin-metamodel-containment-rules-list");
 const metamodelContainmentRuleCount = document.getElementById("metamodel-containment-rule-count");
+const metamodelNotationsList = document.getElementById("admin-metamodel-notations-list");
+const metamodelNotationCount = document.getElementById("metamodel-notation-count");
 const alertRulesList = document.getElementById("admin-alert-rules-list");
 const alertRuleCount = document.getElementById("alert-rule-count");
 const alertRulePreviewPanel = document.getElementById("alert-rule-preview-panel");
@@ -40,6 +42,7 @@ const refreshMetamodelVersionsButton = document.getElementById("refresh-metamode
 const refreshMetamodelSemanticTypesButton = document.getElementById("refresh-metamodel-semantic-types-button");
 const refreshMetamodelPropertiesButton = document.getElementById("refresh-metamodel-properties-button");
 const refreshMetamodelContainmentRulesButton = document.getElementById("refresh-metamodel-containment-rules-button");
+const refreshMetamodelNotationsButton = document.getElementById("refresh-metamodel-notations-button");
 const refreshAlertRulesButton = document.getElementById("refresh-alert-rules-button");
 
 const ingestStatusFilter = document.getElementById("ingest-status-filter");
@@ -93,6 +96,22 @@ const metamodelContainmentMinCountInput = document.getElementById("metamodel-con
 const metamodelContainmentMaxCountInput = document.getElementById("metamodel-containment-max-count");
 const metamodelContainmentCardinalityScopeInput = document.getElementById("metamodel-containment-cardinality-scope");
 const metamodelContainmentIsRequiredInput = document.getElementById("metamodel-containment-is-required");
+const metamodelNotationForm = document.getElementById("metamodel-notation-form");
+const metamodelNotationFormTitle = document.getElementById("metamodel-notation-form-title");
+const metamodelNotationFormMode = document.getElementById("metamodel-notation-form-mode");
+const metamodelNotationFormResetButton = document.getElementById("metamodel-notation-form-reset");
+const metamodelNotationIdInput = document.getElementById("metamodel-notation-id");
+const metamodelNotationSemanticTypeIdInput = document.getElementById("metamodel-notation-semantic-type-id");
+const metamodelNotationPaletteGroupIdInput = document.getElementById("metamodel-notation-palette-group-id");
+const metamodelNotationCodeInput = document.getElementById("metamodel-notation-code");
+const metamodelNotationDisplayNameInput = document.getElementById("metamodel-notation-display-name");
+const metamodelNotationKindInput = document.getElementById("metamodel-notation-kind");
+const metamodelNotationRenderPrimitiveInput = document.getElementById("metamodel-notation-render-primitive");
+const metamodelNotationSortOrderInput = document.getElementById("metamodel-notation-sort-order");
+const metamodelNotationRenderSchemaJsonInput = document.getElementById("metamodel-notation-render-schema-json");
+const metamodelNotationStyleTokensJsonInput = document.getElementById("metamodel-notation-style-tokens-json");
+const metamodelNotationIsDefaultInput = document.getElementById("metamodel-notation-is-default");
+const metamodelNotationIsVisibleInPaletteInput = document.getElementById("metamodel-notation-is-visible-in-palette");
 const alertRuleForm = document.getElementById("alert-rule-form");
 const alertRuleFormTitle = document.getElementById("alert-rule-form-title");
 const alertRuleFormMode = document.getElementById("alert-rule-form-mode");
@@ -119,6 +138,8 @@ let metamodelVersions = [];
 let metamodelSemanticTypes = [];
 let metamodelProperties = [];
 let metamodelContainmentRules = [];
+let metamodelPaletteGroups = [];
+let metamodelNotations = [];
 let alertRules = [];
 let monitoredObjects = [];
 let selectedAlertRuleId = null;
@@ -131,6 +152,7 @@ let selectedRawEventId = null;
 let selectedMetamodelSemanticTypeId = null;
 let selectedMetamodelPropertyId = null;
 let selectedMetamodelContainmentRuleId = null;
+let selectedMetamodelNotationId = null;
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -726,6 +748,39 @@ function renderContainmentSemanticTypeOptions(selectedParentId = "", selectedChi
     }
 }
 
+function renderMetamodelNotationSemanticTypeOptions(selectedId = "") {
+    const options = metamodelSemanticTypes
+        .map(
+            (item) => `
+                <option value="${escapeHtml(item.id)}" ${String(item.id) === String(selectedId) ? "selected" : ""}>
+                    ${escapeHtml(item.display_name)} (${escapeHtml(item.code)})
+                </option>
+            `
+        )
+        .join("");
+
+    metamodelNotationSemanticTypeIdInput.innerHTML = options
+        ? options
+        : '<option value="">선택 가능한 semantic type이 없습니다.</option>';
+}
+
+function renderMetamodelPaletteGroupOptions(selectedId = "") {
+    const options = metamodelPaletteGroups
+        .map(
+            (item) => `
+                <option value="${escapeHtml(item.id)}" ${String(item.id) === String(selectedId) ? "selected" : ""}>
+                    ${escapeHtml(item.label)} (${escapeHtml(item.code)})
+                </option>
+            `
+        )
+        .join("");
+
+    metamodelNotationPaletteGroupIdInput.innerHTML = `
+        <option value="">없음</option>
+        ${options}
+    `;
+}
+
 function fillMetamodelSemanticTypeForm(item) {
     metamodelSemanticTypeIdInput.value = String(item.id);
     metamodelDraftVersionSelect.value = String(item.metamodel_version_id);
@@ -769,6 +824,23 @@ function resetMetamodelContainmentRuleForm() {
     renderContainmentSemanticTypeOptions();
 }
 
+function resetMetamodelNotationForm({ preserveSemanticType = true } = {}) {
+    const currentSemanticTypeId = preserveSemanticType ? metamodelNotationSemanticTypeIdInput.value : "";
+    const currentPaletteGroupId = metamodelNotationPaletteGroupIdInput.value;
+    metamodelNotationForm.reset();
+    metamodelNotationIdInput.value = "";
+    metamodelNotationKindInput.value = "node";
+    metamodelNotationRenderPrimitiveInput.value = "rounded_rect";
+    metamodelNotationSortOrderInput.value = "0";
+    metamodelNotationIsDefaultInput.checked = false;
+    metamodelNotationIsVisibleInPaletteInput.checked = true;
+    metamodelNotationFormTitle.textContent = "Notation Definition 생성";
+    metamodelNotationFormMode.textContent = "create";
+    selectedMetamodelNotationId = null;
+    renderMetamodelNotationSemanticTypeOptions(currentSemanticTypeId);
+    renderMetamodelPaletteGroupOptions(currentPaletteGroupId);
+}
+
 function fillMetamodelPropertyForm(item) {
     metamodelPropertyIdInput.value = String(item.id);
     metamodelPropertySemanticTypeIdInput.value = String(item.semantic_type_id);
@@ -800,6 +872,24 @@ function fillMetamodelContainmentRuleForm(item) {
     selectedMetamodelContainmentRuleId = item.id;
 }
 
+function fillMetamodelNotationForm(item) {
+    metamodelNotationIdInput.value = String(item.id);
+    renderMetamodelNotationSemanticTypeOptions(item.semantic_type_id);
+    renderMetamodelPaletteGroupOptions(item.palette_group_id ?? "");
+    metamodelNotationCodeInput.value = item.code || "";
+    metamodelNotationDisplayNameInput.value = item.display_name || "";
+    metamodelNotationKindInput.value = item.kind || "node";
+    metamodelNotationRenderPrimitiveInput.value = item.render_primitive || "rounded_rect";
+    metamodelNotationSortOrderInput.value = String(item.sort_order ?? 0);
+    metamodelNotationRenderSchemaJsonInput.value = item.render_schema_json || "";
+    metamodelNotationStyleTokensJsonInput.value = item.style_tokens_json || "";
+    metamodelNotationIsDefaultInput.checked = Boolean(item.is_default);
+    metamodelNotationIsVisibleInPaletteInput.checked = Boolean(item.is_visible_in_palette);
+    metamodelNotationFormTitle.textContent = `Notation Definition 수정 #${item.id}`;
+    metamodelNotationFormMode.textContent = "edit";
+    selectedMetamodelNotationId = item.id;
+}
+
 function renderMetamodelSemanticTypes(items) {
     metamodelSemanticTypes = items;
     metamodelSemanticTypeCount.textContent = `${items.length}개`;
@@ -811,6 +901,9 @@ function renderMetamodelSemanticTypes(items) {
     renderContainmentSemanticTypeOptions(
         metamodelContainmentParentTypeIdInput.value,
         metamodelContainmentChildTypeIdInput.value
+    );
+    renderMetamodelNotationSemanticTypeOptions(
+        metamodelNotationSemanticTypeIdInput.value || nextSemanticTypeId
     );
     if (selectedMetamodelSemanticTypeId && !items.some((item) => item.id === selectedMetamodelSemanticTypeId)) {
         selectedMetamodelSemanticTypeId = null;
@@ -869,6 +962,38 @@ function renderMetamodelContainmentRules(items) {
                         </div>
                     </div>
                     <p class="admin-meta">min=${escapeHtml(item.min_count ?? "-")} | max=${escapeHtml(item.max_count ?? "-")}</p>
+                </article>
+            `
+        )
+        .join("");
+}
+
+function renderMetamodelNotations(items) {
+    metamodelNotations = items;
+    metamodelNotationCount.textContent = `${items.length}개`;
+
+    if (items.length === 0) {
+        metamodelNotationsList.innerHTML = '<p class="section-copy">선택한 semantic type에 notation definition이 없습니다.</p>';
+        return;
+    }
+
+    metamodelNotationsList.innerHTML = items
+        .map(
+            (item) => `
+                <article class="admin-item ${item.is_visible_in_palette ? "" : "is-disabled"}">
+                    <div class="section-header">
+                        <div>
+                            <h3>${escapeHtml(item.display_name)}</h3>
+                            <p class="admin-meta">${escapeHtml(item.code)} | ${escapeHtml(item.kind)} | ${escapeHtml(item.render_primitive)}</p>
+                        </div>
+                        <div class="toolbar-inline">
+                            <span class="meta-pill">${item.is_default ? "default" : "secondary"}</span>
+                            <span class="meta-pill">${item.is_visible_in_palette ? "palette" : "hidden"}</span>
+                            <button class="button ghost small edit-metamodel-notation-button" type="button" data-notation-id="${escapeHtml(item.id)}">수정</button>
+                        </div>
+                    </div>
+                    <p class="admin-meta">palette=${escapeHtml(item.palette_group_label || "-")} | sort=${escapeHtml(item.sort_order)}</p>
+                    <p class="admin-meta">schema=${escapeHtml(item.render_schema_json || "-")}</p>
                 </article>
             `
         )
@@ -1155,6 +1280,7 @@ async function loadMetamodelSemanticTypes() {
         metamodelSemanticTypes = [];
         renderMetamodelSemanticTypes([]);
         renderMetamodelProperties([]);
+        renderMetamodelNotations([]);
         return;
     }
     const payload = await apiFetch(`/api/admin/metamodel/versions/${versionId}/semantic-types`);
@@ -1181,6 +1307,29 @@ async function loadMetamodelContainmentRules() {
     }
     const payload = await apiFetch(`/api/admin/metamodel/versions/${versionId}/containment-rules`);
     renderMetamodelContainmentRules(payload.items);
+}
+
+async function loadMetamodelPaletteGroups() {
+    const versionId = metamodelDraftVersionSelect.value;
+    if (!versionId) {
+        metamodelPaletteGroups = [];
+        renderMetamodelPaletteGroupOptions("");
+        return;
+    }
+    const payload = await apiFetch(`/api/admin/metamodel/versions/${versionId}/palette-groups`);
+    metamodelPaletteGroups = payload.items;
+    renderMetamodelPaletteGroupOptions(metamodelNotationPaletteGroupIdInput.value);
+}
+
+async function loadMetamodelNotations() {
+    const semanticTypeId = metamodelNotationSemanticTypeIdInput.value;
+    if (!semanticTypeId) {
+        metamodelNotations = [];
+        renderMetamodelNotations([]);
+        return;
+    }
+    const payload = await apiFetch(`/api/admin/metamodel/semantic-types/${semanticTypeId}/notations`);
+    renderMetamodelNotations(payload.items);
 }
 
 async function loadMonitoredObjects() {
@@ -1259,8 +1408,12 @@ async function createMetamodelVersion(event) {
         metamodelVersionForm.reset();
         await Promise.all([loadMetamodelVersions(), loadMetamodelSemanticTypes()]);
         await loadMetamodelProperties();
+        await loadMetamodelPaletteGroups();
+        await loadMetamodelNotations();
         resetMetamodelSemanticTypeForm();
         resetMetamodelPropertyForm();
+        resetMetamodelContainmentRuleForm();
+        resetMetamodelNotationForm({ preserveSemanticType: false });
         showBanner("메타모델 draft 버전을 생성했습니다.", "success");
     } catch (error) {
         showBanner(error.message, "error");
@@ -1276,8 +1429,13 @@ async function publishMetamodelVersion(versionId) {
         });
         await Promise.all([loadMetamodelVersions(), loadMetamodelSemanticTypes()]);
         await loadMetamodelProperties();
+        await loadMetamodelContainmentRules();
+        await loadMetamodelPaletteGroups();
+        await loadMetamodelNotations();
         resetMetamodelSemanticTypeForm();
         resetMetamodelPropertyForm();
+        resetMetamodelContainmentRuleForm();
+        resetMetamodelNotationForm({ preserveSemanticType: false });
         showBanner("메타모델 버전을 publish했습니다.", "success");
     } catch (error) {
         showBanner(error.message, "error");
@@ -1324,8 +1482,10 @@ async function saveMetamodelSemanticType(event) {
         await Promise.all([loadMetamodelVersions(), loadMetamodelSemanticTypes()]);
         if (semanticTypeId) {
             metamodelPropertySemanticTypeIdInput.value = String(semanticTypeId);
+            metamodelNotationSemanticTypeIdInput.value = String(semanticTypeId);
         }
         await loadMetamodelProperties();
+        await loadMetamodelNotations();
         resetMetamodelSemanticTypeForm();
     } catch (error) {
         showBanner(error.message, "error");
@@ -1415,6 +1575,53 @@ async function saveMetamodelContainmentRule(event) {
 
         await Promise.all([loadMetamodelVersions(), loadMetamodelContainmentRules()]);
         resetMetamodelContainmentRuleForm();
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
+}
+
+async function saveMetamodelNotation(event) {
+    event.preventDefault();
+    clearBanner();
+
+    const semanticTypeId = Number(metamodelNotationSemanticTypeIdInput.value);
+    if (!semanticTypeId) {
+        showBanner("편집할 semantic type을 먼저 선택하세요.", "error");
+        return;
+    }
+
+    const notationId = metamodelNotationIdInput.value ? Number(metamodelNotationIdInput.value) : null;
+    const payload = {
+        semantic_type_id: semanticTypeId,
+        palette_group_id: toOptionalNumberValue(metamodelNotationPaletteGroupIdInput.value),
+        code: metamodelNotationCodeInput.value.trim(),
+        display_name: metamodelNotationDisplayNameInput.value.trim(),
+        kind: metamodelNotationKindInput.value,
+        render_primitive: metamodelNotationRenderPrimitiveInput.value,
+        sort_order: Number.parseInt(metamodelNotationSortOrderInput.value || "0", 10),
+        render_schema_json: metamodelNotationRenderSchemaJsonInput.value.trim(),
+        style_tokens_json: metamodelNotationStyleTokensJsonInput.value.trim() || null,
+        is_default: metamodelNotationIsDefaultInput.checked,
+        is_visible_in_palette: metamodelNotationIsVisibleInPaletteInput.checked,
+    };
+
+    try {
+        if (notationId) {
+            await apiFetch(`/api/admin/metamodel/notations/${notationId}`, {
+                method: "PATCH",
+                body: payload,
+            });
+            showBanner("notation definition을 수정했습니다.", "success");
+        } else {
+            await apiFetch(`/api/admin/metamodel/semantic-types/${semanticTypeId}/notations`, {
+                method: "POST",
+                body: payload,
+            });
+            showBanner("notation definition을 생성했습니다.", "success");
+        }
+
+        await Promise.all([loadMetamodelVersions(), loadMetamodelNotations()]);
+        resetMetamodelNotationForm();
     } catch (error) {
         showBanner(error.message, "error");
     }
@@ -1523,6 +1730,8 @@ async function refreshAll() {
         ]);
         await loadMetamodelProperties();
         await loadMetamodelContainmentRules();
+        await loadMetamodelPaletteGroups();
+        await loadMetamodelNotations();
     } catch (error) {
         showBanner(error.message, "error");
     }
@@ -1542,11 +1751,13 @@ refreshMetamodelSemanticTypesButton?.addEventListener("click", () => {
         .then(async () => {
             await loadMetamodelProperties();
             await loadMetamodelContainmentRules();
+            await loadMetamodelNotations();
         })
         .catch((error) => showBanner(error.message, "error"));
 });
 refreshMetamodelPropertiesButton?.addEventListener("click", loadMetamodelProperties);
 refreshMetamodelContainmentRulesButton?.addEventListener("click", loadMetamodelContainmentRules);
+refreshMetamodelNotationsButton?.addEventListener("click", loadMetamodelNotations);
 refreshAlertRulesButton?.addEventListener("click", loadAlertRules);
 alertRuleScopeFilter?.addEventListener("change", loadAlertRules);
 alertRuleStateFilter?.addEventListener("change", loadAlertRules);
@@ -1581,10 +1792,13 @@ metamodelDraftVersionSelect?.addEventListener("change", () => {
     resetMetamodelSemanticTypeForm();
     resetMetamodelPropertyForm({ preserveSemanticType: false });
     resetMetamodelContainmentRuleForm();
+    resetMetamodelNotationForm({ preserveSemanticType: false });
     loadMetamodelSemanticTypes()
         .then(async () => {
             await loadMetamodelProperties();
             await loadMetamodelContainmentRules();
+            await loadMetamodelPaletteGroups();
+            await loadMetamodelNotations();
         })
         .catch((error) => showBanner(error.message, "error"));
 });
@@ -1594,12 +1808,18 @@ metamodelPropertyForm?.addEventListener("submit", saveMetamodelProperty);
 metamodelPropertyFormResetButton?.addEventListener("click", () => resetMetamodelPropertyForm());
 metamodelContainmentRuleForm?.addEventListener("submit", saveMetamodelContainmentRule);
 metamodelContainmentRuleFormResetButton?.addEventListener("click", resetMetamodelContainmentRuleForm);
+metamodelNotationForm?.addEventListener("submit", saveMetamodelNotation);
+metamodelNotationFormResetButton?.addEventListener("click", () => resetMetamodelNotationForm());
 metamodelContainmentRuleVersionIdInput?.addEventListener("change", () => {
     loadMetamodelContainmentRules().catch((error) => showBanner(error.message, "error"));
 });
 metamodelPropertySemanticTypeIdInput?.addEventListener("change", () => {
     resetMetamodelPropertyForm();
     loadMetamodelProperties().catch((error) => showBanner(error.message, "error"));
+});
+metamodelNotationSemanticTypeIdInput?.addEventListener("change", () => {
+    resetMetamodelNotationForm({ preserveSemanticType: true });
+    loadMetamodelNotations().catch((error) => showBanner(error.message, "error"));
 });
 alertRuleForm?.addEventListener("submit", saveAlertRule);
 alertRuleFormResetButton?.addEventListener("click", resetAlertRuleForm);
@@ -1634,7 +1854,9 @@ metamodelSemanticTypesList?.addEventListener("click", (event) => {
         metamodelContainmentParentTypeIdInput.value || item.id,
         metamodelContainmentChildTypeIdInput.value
     );
-    loadMetamodelProperties().catch((error) => showBanner(error.message, "error"));
+    metamodelNotationSemanticTypeIdInput.value = String(item.id);
+    resetMetamodelNotationForm({ preserveSemanticType: true });
+    Promise.all([loadMetamodelProperties(), loadMetamodelNotations()]).catch((error) => showBanner(error.message, "error"));
 });
 metamodelContainmentRulesList?.addEventListener("click", (event) => {
     const button = event.target instanceof HTMLElement ? event.target.closest(".edit-metamodel-containment-rule-button") : null;
@@ -1659,6 +1881,18 @@ metamodelPropertiesList?.addEventListener("click", (event) => {
         return;
     }
     fillMetamodelPropertyForm(item);
+});
+metamodelNotationsList?.addEventListener("click", (event) => {
+    const button = event.target instanceof HTMLElement ? event.target.closest(".edit-metamodel-notation-button") : null;
+    if (!button) {
+        return;
+    }
+    const notationId = Number(button.dataset.notationId);
+    const item = metamodelNotations.find((entry) => entry.id === notationId);
+    if (!item) {
+        return;
+    }
+    fillMetamodelNotationForm(item);
 });
 alertRulesList?.addEventListener("click", (event) => {
     const button = event.target instanceof HTMLElement ? event.target.closest(".edit-alert-rule-button") : null;
@@ -1747,4 +1981,5 @@ debugDirectionFilter?.addEventListener("change", loadDebug);
 resetAlertRuleForm();
 resetMetamodelPropertyForm({ preserveSemanticType: false });
 resetMetamodelContainmentRuleForm();
+resetMetamodelNotationForm({ preserveSemanticType: false });
 refreshAll();

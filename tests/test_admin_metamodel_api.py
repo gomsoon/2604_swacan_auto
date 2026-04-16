@@ -733,3 +733,315 @@ def test_admin_rejects_invalid_containment_rule_payload_boundaries(seeded_client
     assert invalid_scope.get_json()["error"]["code"] == "validation_error"
     assert invalid_type_membership.status_code == 400
     assert invalid_type_membership.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_can_list_notation_definitions_for_semantic_type(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/metamodel/semantic-types/103/notations")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["semantic_type"]["code"] == "SoftwareProcess"
+    assert any(item["code"] == "process.rounded_rect" for item in payload["items"])
+    notation = next(item for item in payload["items"] if item["code"] == "process.rounded_rect")
+    assert notation["render_primitive"] == "rounded_rect"
+
+
+def test_admin_can_create_notation_definition_in_draft_semantic_type(seeded_app, seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v12-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for notation definition create",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    semantic_type_response = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPool",
+            "display_name": "Worker Pool",
+            "kind": "container",
+            "runtime_kind": "process-group",
+            "description": "Notation target",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+    assert semantic_type_response.status_code == 201
+    type_id = semantic_type_response.get_json()["semantic_type"]["id"]
+
+    palette_groups = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/palette-groups").get_json()["items"]
+    process_palette = next(item for item in palette_groups if item["code"] == "processes")
+
+    response = seeded_client.post(
+        f"/api/admin/metamodel/semantic-types/{type_id}/notations",
+        json={
+            "semantic_type_id": type_id,
+            "palette_group_id": process_palette["id"],
+            "code": "workerpool.rounded_rect",
+            "display_name": "Worker Pool Notation",
+            "kind": "node",
+            "render_primitive": "rounded_rect",
+            "sort_order": 10,
+            "render_schema_json": "{\"primitive\":\"rounded_rect\",\"default_size\":{\"width\":220,\"height\":88}}",
+            "style_tokens_json": "{\"fill\":\"process-fill\",\"stroke\":\"process-stroke\"}",
+            "is_default": True,
+            "is_visible_in_palette": True,
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert payload["notation_definition"]["code"] == "workerpool.rounded_rect"
+    assert payload["notation_definition"]["palette_group_code"] == "processes"
+    assert payload["notation_definition"]["is_default"] is True
+    assert payload["notation_definition"]["render_schema"]["primitive"] == "rounded_rect"
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        notation_row = db_conn.execute(
+            """
+            SELECT code, render_primitive, is_default
+            FROM notation_definitions
+            WHERE semantic_type_id = ? AND code = ?
+            """,
+            (type_id, "workerpool.rounded_rect"),
+        ).fetchone()
+        semantic_type_row = db_conn.execute(
+            "SELECT default_notation_id FROM semantic_types WHERE id = ?",
+            (type_id,),
+        ).fetchone()
+        assert notation_row["render_primitive"] == "rounded_rect"
+        assert notation_row["is_default"] == 1
+        assert semantic_type_row["default_notation_id"] is not None
+
+
+def test_admin_rejects_notation_create_for_published_semantic_type(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/metamodel/semantic-types/103/notations",
+        json={
+            "semantic_type_id": 103,
+            "palette_group_id": 2,
+            "code": "process.alt",
+            "display_name": "Process Alt",
+            "kind": "node",
+            "render_primitive": "rounded_rect",
+            "sort_order": 50,
+            "render_schema_json": "{\"primitive\":\"rounded_rect\"}",
+            "style_tokens_json": "{\"fill\":\"process-fill\"}",
+            "is_default": False,
+            "is_visible_in_palette": True,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["error"]["code"] == "invalid_state"
+
+
+def test_admin_can_update_notation_definition_with_boundary_values(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v13-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for notation update",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    semantic_type_response = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPool",
+            "display_name": "Worker Pool",
+            "kind": "container",
+            "runtime_kind": "process-group",
+            "description": "Notation update target",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+    type_id = semantic_type_response.get_json()["semantic_type"]["id"]
+    palette_groups = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/palette-groups").get_json()["items"]
+    process_palette = next(item for item in palette_groups if item["code"] == "processes")
+
+    create_notation = seeded_client.post(
+        f"/api/admin/metamodel/semantic-types/{type_id}/notations",
+        json={
+            "semantic_type_id": type_id,
+            "palette_group_id": process_palette["id"],
+            "code": "workerpool.rounded_rect",
+            "display_name": "Worker Pool Notation",
+            "kind": "node",
+            "render_primitive": "rounded_rect",
+            "sort_order": 10,
+            "render_schema_json": "{\"primitive\":\"rounded_rect\"}",
+            "style_tokens_json": "{\"fill\":\"process-fill\"}",
+            "is_default": True,
+            "is_visible_in_palette": True,
+        },
+    )
+    assert create_notation.status_code == 201
+    notation_id = create_notation.get_json()["notation_definition"]["id"]
+
+    ok_response = seeded_client.patch(
+        f"/api/admin/metamodel/notations/{notation_id}",
+        json={
+            "semantic_type_id": type_id,
+            "palette_group_id": process_palette["id"],
+            "code": "workerpool.rounded_rect.alt",
+            "display_name": "Worker Pool Notation Updated",
+            "kind": "node",
+            "render_primitive": "rect",
+            "sort_order": 9999,
+            "render_schema_json": "{\"primitive\":\"rect\",\"default_size\":{\"width\":180,\"height\":72}}",
+            "style_tokens_json": "{\"fill\":\"process-fill\",\"stroke\":\"process-stroke\",\"label\":\"process-label\"}",
+            "is_default": False,
+            "is_visible_in_palette": False,
+        },
+    )
+    too_high_sort_order = seeded_client.patch(
+        f"/api/admin/metamodel/notations/{notation_id}",
+        json={
+            "semantic_type_id": type_id,
+            "palette_group_id": process_palette["id"],
+            "code": "workerpool.rounded_rect.alt",
+            "display_name": "Worker Pool Notation Updated",
+            "kind": "node",
+            "render_primitive": "rect",
+            "sort_order": 10000,
+            "render_schema_json": "{\"primitive\":\"rect\"}",
+            "style_tokens_json": "{\"fill\":\"process-fill\"}",
+            "is_default": False,
+            "is_visible_in_palette": False,
+        },
+    )
+
+    assert ok_response.status_code == 200
+    ok_payload = ok_response.get_json()["notation_definition"]
+    assert ok_payload["code"] == "workerpool.rounded_rect.alt"
+    assert ok_payload["sort_order"] == 9999
+    assert ok_payload["render_primitive"] == "rect"
+    assert ok_payload["is_visible_in_palette"] is False
+    assert too_high_sort_order.status_code == 400
+    assert too_high_sort_order.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_rejects_invalid_notation_definition_payload_boundaries(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v14-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for notation validation",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    semantic_type_response = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPool",
+            "display_name": "Worker Pool",
+            "kind": "container",
+            "runtime_kind": "process-group",
+            "description": "Notation validation target",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+    type_id = semantic_type_response.get_json()["semantic_type"]["id"]
+    palette_groups = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/palette-groups").get_json()["items"]
+    process_palette = next(item for item in palette_groups if item["code"] == "processes")
+
+    invalid_render_primitive = seeded_client.post(
+        f"/api/admin/metamodel/semantic-types/{type_id}/notations",
+        json={
+            "semantic_type_id": type_id,
+            "palette_group_id": process_palette["id"],
+            "code": "workerpool.bad.primitive",
+            "display_name": "Worker Pool Bad Primitive",
+            "kind": "node",
+            "render_primitive": "ellipse",
+            "sort_order": 1,
+            "render_schema_json": "{\"primitive\":\"ellipse\"}",
+            "style_tokens_json": "{\"fill\":\"process-fill\"}",
+            "is_default": False,
+            "is_visible_in_palette": True,
+        },
+    )
+    invalid_schema_json = seeded_client.post(
+        f"/api/admin/metamodel/semantic-types/{type_id}/notations",
+        json={
+            "semantic_type_id": type_id,
+            "palette_group_id": process_palette["id"],
+            "code": "workerpool.bad.schema",
+            "display_name": "Worker Pool Bad Schema",
+            "kind": "node",
+            "render_primitive": "rounded_rect",
+            "sort_order": 1,
+            "render_schema_json": "{bad-json}",
+            "style_tokens_json": "{\"fill\":\"process-fill\"}",
+            "is_default": False,
+            "is_visible_in_palette": True,
+        },
+    )
+    invalid_kind_for_node_type = seeded_client.post(
+        f"/api/admin/metamodel/semantic-types/{type_id}/notations",
+        json={
+            "semantic_type_id": type_id,
+            "palette_group_id": process_palette["id"],
+            "code": "workerpool.edge.kind",
+            "display_name": "Worker Pool Edge Kind",
+            "kind": "edge",
+            "render_primitive": "line",
+            "sort_order": 1,
+            "render_schema_json": "{\"primitive\":\"line\"}",
+            "style_tokens_json": "{\"stroke\":\"process-stroke\"}",
+            "is_default": False,
+            "is_visible_in_palette": True,
+        },
+    )
+    invalid_palette_group_membership = seeded_client.post(
+        f"/api/admin/metamodel/semantic-types/{type_id}/notations",
+        json={
+            "semantic_type_id": type_id,
+            "palette_group_id": 1,
+            "code": "workerpool.bad.palette",
+            "display_name": "Worker Pool Bad Palette",
+            "kind": "node",
+            "render_primitive": "rounded_rect",
+            "sort_order": 1,
+            "render_schema_json": "{\"primitive\":\"rounded_rect\"}",
+            "style_tokens_json": "{\"fill\":\"process-fill\"}",
+            "is_default": False,
+            "is_visible_in_palette": True,
+        },
+    )
+
+    assert invalid_render_primitive.status_code == 400
+    assert invalid_render_primitive.get_json()["error"]["code"] == "validation_error"
+    assert invalid_schema_json.status_code == 400
+    assert invalid_schema_json.get_json()["error"]["code"] == "validation_error"
+    assert invalid_kind_for_node_type.status_code == 400
+    assert invalid_kind_for_node_type.get_json()["error"]["code"] == "validation_error"
+    assert invalid_palette_group_membership.status_code == 400
+    assert invalid_palette_group_membership.get_json()["error"]["code"] == "validation_error"
