@@ -862,6 +862,12 @@ a {
     gap: 10px;
 }
 
+.inspector-actions {
+    margin-top: 12px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
 .metamodel-notation-preview svg {
     width: 100%;
     height: auto;

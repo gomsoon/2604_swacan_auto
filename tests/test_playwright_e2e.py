@@ -444,10 +444,14 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     expect(page.locator("#metamodel-workspace-inspector")).to_contain_text("Default Notation Preview")
     expect(page.locator("#metamodel-semantic-type-form-mode")).to_contain_text("edit")
     expect(page.locator("#metamodel-semantic-type-display-name")).to_have_value("Worker Pool Updated")
+    page.locator("#metamodel-workspace-inspector").get_by_role("button", name="새 Property").click()
+    expect(page.locator("#metamodel-property-form-mode")).to_contain_text("create")
+    expect(page.locator("#metamodel-property-semantic-type-id option:checked")).to_contain_text("Worker Pool Updated (WorkerPool)")
 
     page.locator('#metamodel-workspace-outline [data-workspace-kind="association_definition"]', has_text="Monitors Worker Pool Updated").click()
     expect(page.locator("#metamodel-workspace-inspector")).to_contain_text("Monitors Worker Pool Updated")
     expect(page.locator("#metamodel-workspace-inspector")).to_contain_text("undirected")
+    page.locator("#metamodel-workspace-inspector").get_by_role("button", name="Association 편집").click()
     expect(page.locator("#metamodel-association-form-mode")).to_contain_text("edit")
     expect(page.locator("#metamodel-association-display-name")).to_have_value("Monitors Worker Pool Updated")
 

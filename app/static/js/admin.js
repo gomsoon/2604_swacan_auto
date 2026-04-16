@@ -256,6 +256,75 @@ function scrollToMetamodelEditorSection(section, input) {
     }
 }
 
+function openMetamodelEditorFromInspector(action, kind, id) {
+    const numericId = Number(id);
+    if (!numericId) {
+        return;
+    }
+
+    if (kind === "semantic_type") {
+        const item = metamodelSemanticTypes.find((entry) => entry.id === numericId);
+        if (!item) {
+            return;
+        }
+
+        if (action === "edit-semantic-type") {
+            fillMetamodelSemanticTypeForm(item);
+            scrollToMetamodelEditorSection(metamodelSemanticTypeSection, metamodelSemanticTypeCodeInput);
+            return;
+        }
+
+        if (action === "create-property") {
+            metamodelPropertySemanticTypeIdInput.value = String(item.id);
+            resetMetamodelPropertyForm();
+            metamodelPropertySemanticTypeIdInput.value = String(item.id);
+            scrollToMetamodelEditorSection(metamodelPropertySection, metamodelPropertyCodeInput);
+            return;
+        }
+
+        if (action === "create-notation") {
+            metamodelNotationSemanticTypeIdInput.value = String(item.id);
+            resetMetamodelNotationForm({ preserveSemanticType: true });
+            metamodelNotationSemanticTypeIdInput.value = String(item.id);
+            scrollToMetamodelEditorSection(metamodelNotationSection, metamodelNotationCodeInput);
+        }
+
+        return;
+    }
+
+    if (kind === "containment_rule") {
+        const item = metamodelContainmentRules.find((entry) => entry.id === numericId);
+        if (!item) {
+            return;
+        }
+
+        fillMetamodelContainmentRuleForm(item);
+        scrollToMetamodelEditorSection(metamodelContainmentRuleSection, metamodelContainmentParentTypeIdInput);
+        return;
+    }
+
+    if (kind === "notation_definition") {
+        const item = metamodelNotations.find((entry) => entry.id === numericId);
+        if (!item) {
+            return;
+        }
+
+        fillMetamodelNotationForm(item);
+        scrollToMetamodelEditorSection(metamodelNotationSection, metamodelNotationCodeInput);
+        return;
+    }
+
+    if (kind === "association_definition") {
+        const item = metamodelAssociations.find((entry) => entry.id === numericId);
+        if (!item) {
+            return;
+        }
+
+        fillMetamodelAssociationForm(item);
+        scrollToMetamodelEditorSection(metamodelAssociationSection, metamodelAssociationCodeInput);
+    }
+}
+
 function toOptionalNumberValue(value) {
     if (value === "" || value === null || value === undefined) {
         return null;
@@ -963,6 +1032,11 @@ function renderMetamodelWorkspaceInspector() {
                 <span class="meta-pill">${escapeHtml(item.kind)}</span>
             </div>
             <p class="admin-meta">${escapeHtml(item.code)} | runtime ${escapeHtml(item.runtime_kind || "-")}</p>
+            <div class="toolbar-inline inspector-actions">
+                <button class="button ghost small" type="button" data-inspector-action="edit-semantic-type" data-workspace-kind="semantic_type" data-workspace-id="${escapeHtml(item.id)}">Semantic Type 편집</button>
+                <button class="button ghost small" type="button" data-inspector-action="create-property" data-workspace-kind="semantic_type" data-workspace-id="${escapeHtml(item.id)}">새 Property</button>
+                <button class="button ghost small" type="button" data-inspector-action="create-notation" data-workspace-kind="semantic_type" data-workspace-id="${escapeHtml(item.id)}">새 Notation</button>
+            </div>
             <div class="summary-metrics">
                 ${renderMetaPills([
                     ["property", propertyCount],
@@ -999,6 +1073,9 @@ function renderMetamodelWorkspaceInspector() {
                 <span class="meta-pill">${escapeHtml(item.cardinality_scope)}</span>
             </div>
             <p class="admin-meta">${escapeHtml(item.parent_type_code)} -> ${escapeHtml(item.child_type_code)}</p>
+            <div class="toolbar-inline inspector-actions">
+                <button class="button ghost small" type="button" data-inspector-action="edit-containment-rule" data-workspace-kind="containment_rule" data-workspace-id="${escapeHtml(item.id)}">Containment 편집</button>
+            </div>
             <div class="summary-metrics">
                 ${renderMetaPills([
                     ["min", item.min_count ?? "-"],
@@ -1022,6 +1099,9 @@ function renderMetamodelWorkspaceInspector() {
                 <span class="meta-pill">${escapeHtml(item.direction)}</span>
             </div>
             <p class="admin-meta">${escapeHtml(item.code)} | ${escapeHtml(item.source_type_code)} -> ${escapeHtml(item.target_type_code)}</p>
+            <div class="toolbar-inline inspector-actions">
+                <button class="button ghost small" type="button" data-inspector-action="edit-association-definition" data-workspace-kind="association_definition" data-workspace-id="${escapeHtml(item.id)}">Association 편집</button>
+            </div>
             <div class="summary-metrics">
                 ${renderMetaPills([
                     ["source", item.multiplicity_source || "-"],
@@ -1051,6 +1131,9 @@ function renderMetamodelWorkspaceInspector() {
                 <span class="meta-pill">${escapeHtml(item.render_primitive)}</span>
             </div>
             <p class="admin-meta">${escapeHtml(item.code)} | ${escapeHtml(item.kind)} | ${escapeHtml(item.semantic_type_code)}</p>
+            <div class="toolbar-inline inspector-actions">
+                <button class="button ghost small" type="button" data-inspector-action="edit-notation-definition" data-workspace-kind="notation_definition" data-workspace-id="${escapeHtml(item.id)}">Notation 편집</button>
+            </div>
             <div class="summary-metrics">
                 ${renderMetaPills([
                     ["default", item.is_default ? "yes" : "no"],
@@ -2548,6 +2631,18 @@ metamodelWorkspaceCanvas?.addEventListener("click", (event) => {
         return;
     }
     selectMetamodelWorkspaceItem(item.dataset.workspaceKind, item.dataset.workspaceId).catch((error) => showBanner(error.message, "error"));
+});
+metamodelWorkspaceInspector?.addEventListener("click", (event) => {
+    const button = event.target instanceof Element ? event.target.closest("[data-inspector-action][data-workspace-kind][data-workspace-id]") : null;
+    if (!button) {
+        return;
+    }
+
+    openMetamodelEditorFromInspector(
+        button.dataset.inspectorAction,
+        button.dataset.workspaceKind,
+        button.dataset.workspaceId
+    );
 });
 alertRuleForm?.addEventListener("submit", saveAlertRule);
 alertRuleFormResetButton?.addEventListener("click", resetAlertRuleForm);
