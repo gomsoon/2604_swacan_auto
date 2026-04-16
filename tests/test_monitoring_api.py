@@ -345,6 +345,24 @@ def test_events_prefers_monitored_object_binding_over_changed_active_target_id(s
 
 def test_alerts_return_open_monitored_object_alerts_for_active_view(seeded_app, seeded_client) -> None:
     seed_monitoring_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET source_rule_id = ?, acknowledged_at = ?, acknowledged_by_user_id = ?, ack_note = ?, updated_at = ?
+            WHERE monitored_object_id = ?
+            """,
+            (
+                1501,
+                "2026-04-10T10:21:30.000+09:00",
+                1,
+                "운영자가 확인함",
+                "2026-04-10T10:21:30.000+09:00",
+                1302,
+            ),
+        )
+        db_conn.commit()
     login(seeded_client)
 
     response = seeded_client.get("/api/views/1/alerts?limit=10")
@@ -355,6 +373,12 @@ def test_alerts_return_open_monitored_object_alerts_for_active_view(seeded_app, 
     assert payload["items"][0]["monitored_object_id"] == 1302
     assert payload["items"][0]["alert_code"] == "process.down"
     assert payload["items"][0]["repeat_count"] == 1
+    assert payload["items"][0]["source_rule_id"] == 1501
+    assert payload["items"][0]["source_rule_metric_key"] == "cpu_usage"
+    assert payload["items"][0]["source_rule_target_label"] == "SoftwareProcess"
+    assert payload["items"][0]["is_acknowledged"] is True
+    assert payload["items"][0]["acknowledged_by_username"] == "admin"
+    assert payload["items"][0]["ack_note"] == "운영자가 확인함"
 
 
 def test_alerts_prefer_monitored_object_binding_over_changed_active_target_id(seeded_app, seeded_client) -> None:

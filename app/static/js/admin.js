@@ -55,12 +55,15 @@ const alertRuleWarningThresholdInput = document.getElementById("alert-rule-warni
 const alertRuleCriticalThresholdInput = document.getElementById("alert-rule-critical-threshold");
 const alertRuleDescriptionInput = document.getElementById("alert-rule-description");
 const alertRuleEnabledInput = document.getElementById("alert-rule-enabled");
+const alertRuleObjectTypeFilter = document.getElementById("alert-rule-object-type-filter");
 const alertRuleScopeFilter = document.getElementById("alert-rule-scope-filter");
 const alertRuleStateFilter = document.getElementById("alert-rule-state-filter");
 const alertRuleEnabledFilter = document.getElementById("alert-rule-enabled-filter");
+const alertAckFilter = document.getElementById("alert-ack-filter");
 
 let metamodelVersions = [];
 let alertRules = [];
+let monitoredObjects = [];
 let selectedAlertRuleId = null;
 let selectedAlertRulePreview = null;
 let groupedEvents = [];
@@ -395,11 +398,19 @@ function renderAlerts(items) {
                         <div class="toolbar-inline">
                             <span class="meta-pill">${escapeHtml(item.alert_code)}</span>
                             <span class="meta-pill">${escapeHtml(item.severity)}</span>
+                            ${item.is_acknowledged ? '<span class="meta-pill">ACK</span>' : ""}
+                            <button class="button ghost small toggle-alert-ack-button" type="button" data-alert-id="${escapeHtml(item.id)}" data-acknowledged="${item.is_acknowledged ? "true" : "false"}" data-ack-note="${escapeHtml(item.ack_note || "")}">${item.is_acknowledged ? "ACK 해제" : "ACK"}</button>
                         </div>
                     </div>
                     <p class="admin-meta">object=${escapeHtml(item.monitored_object_id)} | binding=${escapeHtml(item.runtime_binding_key || "-")} | type=${escapeHtml(item.semantic_type_code || "-")}</p>
+                    <p class="admin-meta">rule=${escapeHtml(item.source_rule_metric_key || item.alert_code)} | target=${escapeHtml(item.source_rule_target_label || "-")}</p>
                     <p class="admin-meta">반복 ${escapeHtml(item.repeat_count)}회 | 최근 ${escapeHtml(formatTimestamp(item.last_occurred_at))}</p>
                     <p class="admin-meta">${escapeHtml(item.latest_message || "메시지 없음")}</p>
+                    ${
+                        item.is_acknowledged
+                            ? `<p class="admin-meta">ACK ${escapeHtml(item.acknowledged_by_username || "-")} | ${escapeHtml(formatTimestamp(item.acknowledged_at))}${item.ack_note ? ` | ${escapeHtml(item.ack_note)}` : ""}</p>`
+                            : '<p class="admin-meta">ACK 대기 중</p>'
+                    }
                 </article>
             `
         )
@@ -514,6 +525,32 @@ function renderMetamodelVersions(items) {
         .join("");
 }
 
+function renderMonitoredObjectOptions(selectedId = "") {
+    const optionItems = monitoredObjects.map(
+        (item) => `
+            <option value="${escapeHtml(item.id)}" ${String(item.id) === String(selectedId) ? "selected" : ""}>
+                ${escapeHtml(item.display_name)} [${escapeHtml(item.object_type)}] · view ${escapeHtml(item.active_view_count)} · node ${escapeHtml(item.active_node_count)}
+            </option>
+        `
+    );
+
+    alertRuleMonitoredObjectIdInput.innerHTML = `
+        <option value="">선택하세요</option>
+        ${optionItems.join("")}
+    `;
+
+    const objectTypes = [...new Set(monitoredObjects.map((item) => item.object_type))].sort();
+    const currentObjectTypeFilter = alertRuleObjectTypeFilter.value;
+    alertRuleObjectTypeFilter.innerHTML = `
+        <option value="">전체</option>
+        ${objectTypes
+            .map(
+                (item) => `<option value="${escapeHtml(item)}" ${item === currentObjectTypeFilter ? "selected" : ""}>${escapeHtml(item)}</option>`
+            )
+            .join("")}
+    `;
+}
+
 function toggleAlertRuleScopeFields() {
     const isObjectType = alertRuleScopeTypeSelect.value === "object_type";
     alertRuleObjectTypeInput.disabled = !isObjectType;
@@ -530,6 +567,7 @@ function resetAlertRuleForm() {
     alertRuleFormTitle.textContent = "Alert Rule 생성";
     alertRuleFormMode.textContent = "create";
     toggleAlertRuleScopeFields();
+    renderMonitoredObjectOptions();
 }
 
 function fillAlertRuleForm(rule) {
@@ -537,7 +575,7 @@ function fillAlertRuleForm(rule) {
     alertRuleScopeTypeSelect.value = rule.scope_type;
     alertRuleStateTypeSelect.value = rule.state_type;
     alertRuleObjectTypeInput.value = rule.object_type || "";
-    alertRuleMonitoredObjectIdInput.value = rule.monitored_object_id ?? "";
+    renderMonitoredObjectOptions(rule.monitored_object_id ?? "");
     alertRuleMetricKeyInput.value = rule.metric_key || "";
     alertRuleComparisonSelect.value = rule.comparison;
     alertRuleWarningThresholdInput.value = rule.warning_threshold ?? "";
@@ -575,7 +613,7 @@ function renderAlertRules(items) {
                         </div>
                     </div>
                     <p class="admin-meta">warning=${escapeHtml(rule.warning_threshold ?? "-")} | critical=${escapeHtml(rule.critical_threshold ?? "-")}</p>
-                    <p class="admin-meta">object_type=${escapeHtml(rule.object_type || "-")} | monitored_object_id=${escapeHtml(rule.monitored_object_id ?? "-")}</p>
+                    <p class="admin-meta">target=${escapeHtml(rule.target_display_name || rule.object_type || "-")} | binding=${escapeHtml(rule.target_runtime_binding_key || "-")} | monitored_object_id=${escapeHtml(rule.monitored_object_id ?? "-")}</p>
                     <p class="admin-meta">${escapeHtml(rule.description || "설명 없음")}</p>
                 </article>
             `
@@ -623,6 +661,7 @@ function renderAlertRulePreviewPanel() {
                             </div>
                             <p class="admin-meta">object=${escapeHtml(item.monitored_object_id)} | type=${escapeHtml(item.object_type)}</p>
                             <p class="admin-meta">binding=${escapeHtml(item.runtime_binding_key || "-")}</p>
+                            <p class="admin-meta">active view ${escapeHtml(item.active_view_count)} | active node ${escapeHtml(item.active_node_count)}</p>
                         </article>
                     `
                 )
@@ -672,7 +711,11 @@ async function loadEvents() {
 }
 
 async function loadAlerts() {
-    const payload = await apiFetch("/api/admin/alerts?limit=10&status=open");
+    const params = new URLSearchParams({ limit: "10", status: "open" });
+    if (alertAckFilter.value) {
+        params.set("is_acknowledged", alertAckFilter.value);
+    }
+    const payload = await apiFetch(`/api/admin/alerts?${params.toString()}`);
     renderAlerts(payload.items);
 }
 
@@ -695,6 +738,12 @@ async function loadMetamodelVersions() {
     renderMetamodelVersions(payload.items);
 }
 
+async function loadMonitoredObjects() {
+    const payload = await apiFetch("/api/admin/monitored-objects?limit=100");
+    monitoredObjects = payload.items;
+    renderMonitoredObjectOptions(alertRuleMonitoredObjectIdInput.value);
+}
+
 async function loadAlertRules() {
     const params = new URLSearchParams();
     if (alertRuleScopeFilter.value) {
@@ -705,6 +754,9 @@ async function loadAlertRules() {
     }
     if (alertRuleEnabledFilter.value) {
         params.set("is_enabled", alertRuleEnabledFilter.value);
+    }
+    if (alertRuleObjectTypeFilter.value) {
+        params.set("object_type", alertRuleObjectTypeFilter.value);
     }
     const query = params.toString();
     const payload = await apiFetch(`/api/admin/alert-rules${query ? `?${query}` : ""}`);
@@ -821,11 +873,27 @@ async function saveAlertRule(event) {
     }
 }
 
+async function updateAlertAcknowledgement(alertId, acknowledged, currentNote) {
+    const ackNote = acknowledged ? window.prompt("ACK 메모를 입력하세요.", currentNote || "") : "";
+    if (acknowledged && ackNote === null) {
+        return;
+    }
+
+    await apiFetch(`/api/admin/alerts/${alertId}`, {
+        method: "PATCH",
+        body: {
+            acknowledged,
+            ack_note: acknowledged ? ackNote : null,
+        },
+    });
+}
+
 async function refreshAll() {
     clearBanner();
     try {
         await Promise.all([
             loadMetamodelVersions(),
+            loadMonitoredObjects(),
             loadAlertRules(),
             loadSummary(),
             loadIngest(),
@@ -852,6 +920,8 @@ refreshAlertRulesButton?.addEventListener("click", loadAlertRules);
 alertRuleScopeFilter?.addEventListener("change", loadAlertRules);
 alertRuleStateFilter?.addEventListener("change", loadAlertRules);
 alertRuleEnabledFilter?.addEventListener("change", loadAlertRules);
+alertRuleObjectTypeFilter?.addEventListener("change", loadAlertRules);
+alertAckFilter?.addEventListener("change", loadAlerts);
 eventsList?.addEventListener("click", async (event) => {
     const card = event.target instanceof Element ? event.target.closest("[data-grouped-event-id]") : null;
     if (!card) {
@@ -922,6 +992,23 @@ alertRulesList?.addEventListener("click", (event) => {
         .then(async () => {
             await Promise.all([loadAlertRules(), loadSummary()]);
             showBanner(`alert rule을 ${isEnabled ? "비활성화" : "활성화"}했습니다.`, "success");
+        })
+        .catch((error) => showBanner(error.message, "error"));
+});
+
+alertsList?.addEventListener("click", (event) => {
+    const button = event.target instanceof HTMLElement ? event.target.closest(".toggle-alert-ack-button") : null;
+    if (!button) {
+        return;
+    }
+
+    const alertId = Number(button.dataset.alertId);
+    const acknowledged = button.dataset.acknowledged !== "true";
+    const currentNote = button.dataset.ackNote || "";
+    updateAlertAcknowledgement(alertId, acknowledged, currentNote)
+        .then(async () => {
+            await Promise.all([loadAlerts(), loadSummary()]);
+            showBanner(`alert를 ${acknowledged ? "ACK" : "ACK 해제"}했습니다.`, "success");
         })
         .catch((error) => showBanner(error.message, "error"));
 });

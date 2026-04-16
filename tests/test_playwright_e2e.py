@@ -269,7 +269,33 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
 
 
 def test_playwright_admin_page(page: Page, live_server) -> None:
-    base_url, _seeded_app = live_server
+    base_url, seeded_app = live_server
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO alert_instances (
+                monitored_object_id, alert_code, source_rule_id, severity, status, first_occurred_at,
+                last_occurred_at, repeat_count, latest_message, metadata_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1303,
+                "agent.warning",
+                1502,
+                "warning",
+                "open",
+                "2026-04-12T21:00:00.000+09:00",
+                "2026-04-12T21:00:00.000+09:00",
+                1,
+                "Agent queue backlog",
+                json.dumps({"metric_key": "outbox_queue_depth"}),
+                "2026-04-12T21:00:00.000+09:00",
+                "2026-04-12T21:00:00.000+09:00",
+            ),
+        )
+        db_conn.commit()
 
     browser_login(page, base_url)
     page.goto(f"{base_url}/admin")
@@ -324,6 +350,16 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     page.locator("#alert-rule-enabled-filter").select_option("true")
     expect(page.locator("#admin-alert-rules-list")).not_to_contain_text("fd_count")
     page.locator("#alert-rule-enabled-filter").select_option("")
+
+    alertCard = page.locator("#admin-alerts-list .admin-item", has_text="agent.warning").first
+    expect(alertCard).to_contain_text("Agent queue backlog")
+    page.once("dialog", lambda dialog: dialog.accept("운영 확인"))
+    alertCard.get_by_role("button", name="ACK").click()
+    expect(page.locator("#admin-alerts-list")).to_contain_text("운영 확인")
+    page.locator("#alert-ack-filter").select_option("true")
+    expect(page.locator("#admin-alerts-list")).to_contain_text("agent.warning")
+    expect(page.locator("#admin-alerts-list")).to_contain_text("ACK")
+    page.locator("#alert-ack-filter").select_option("")
 
     expect(page.locator("#admin-ingest-list")).to_contain_text("표시할 ingest batch가 없습니다.")
     expect(page.locator("#admin-latest-state-list")).to_contain_text("조건에 맞는 latest state가 없습니다.")

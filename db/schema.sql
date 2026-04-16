@@ -317,8 +317,12 @@ CREATE TABLE IF NOT EXISTS alert_instances (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     monitored_object_id INTEGER NOT NULL,
     alert_code TEXT NOT NULL,
+    source_rule_id INTEGER,
     severity TEXT NOT NULL,
     status TEXT NOT NULL,
+    acknowledged_at TEXT,
+    acknowledged_by_user_id INTEGER,
+    ack_note TEXT,
     first_occurred_at TEXT NOT NULL,
     last_occurred_at TEXT NOT NULL,
     repeat_count INTEGER NOT NULL DEFAULT 1,
@@ -326,7 +330,9 @@ CREATE TABLE IF NOT EXISTS alert_instances (
     metadata_json TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    FOREIGN KEY (monitored_object_id) REFERENCES monitored_objects(id) ON DELETE CASCADE
+    FOREIGN KEY (monitored_object_id) REFERENCES monitored_objects(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_rule_id) REFERENCES alert_rules(id) ON DELETE SET NULL,
+    FOREIGN KEY (acknowledged_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS alert_rules (
@@ -531,6 +537,9 @@ CREATE INDEX IF NOT EXISTS idx_node_bindings_view_version_node
 
 CREATE INDEX IF NOT EXISTS idx_alert_rules_scope_state
     ON alert_rules(scope_type, state_type, is_enabled);
+
+CREATE INDEX IF NOT EXISTS idx_alert_instances_source_rule_status
+    ON alert_instances(source_rule_id, status);
 
 CREATE INDEX IF NOT EXISTS idx_node_bindings_monitored_object
     ON node_bindings(monitored_object_id);

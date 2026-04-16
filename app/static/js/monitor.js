@@ -301,6 +301,12 @@ function renderAlerts() {
                 <h3>${escapeHtml(alert.alert_code)}</h3>
                 <p>${escapeHtml(alert.latest_message || "메시지 없음")}</p>
                 <p>object ${escapeHtml(alert.monitored_object_id)} | ${escapeHtml(alert.severity)} | 반복 ${escapeHtml(alert.repeat_count)}회</p>
+                <p>rule ${escapeHtml(alert.source_rule_metric_key || "-")} | target ${escapeHtml(alert.source_rule_target_label || "-")}</p>
+                ${
+                    alert.is_acknowledged
+                        ? `<p>ACK ${escapeHtml(alert.acknowledged_by_username || "-")} | ${escapeHtml(formatTimestamp(alert.acknowledged_at))}${alert.ack_note ? ` | ${escapeHtml(alert.ack_note)}` : ""}</p>`
+                        : '<p>ACK 대기 중</p>'
+                }
                 <p>${escapeHtml(formatTimestamp(alert.last_occurred_at))}</p>
             </article>
         `

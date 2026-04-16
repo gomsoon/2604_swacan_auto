@@ -594,6 +594,24 @@ def test_admin_cleanup_runs_returns_recent_history(seeded_app, seeded_client) ->
 
 def test_admin_alerts_returns_open_alerts(seeded_app, seeded_client) -> None:
     seed_admin_dashboard_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET source_rule_id = ?, acknowledged_at = ?, acknowledged_by_user_id = ?, ack_note = ?, updated_at = ?
+            WHERE monitored_object_id = ?
+            """,
+            (
+                1502,
+                "2026-04-12T11:04:30.000+09:00",
+                1,
+                "운영자가 확인함",
+                "2026-04-12T11:04:30.000+09:00",
+                1303,
+            ),
+        )
+        db_conn.commit()
     login(seeded_client)
 
     response = seeded_client.get("/api/admin/alerts?limit=10&status=open")
@@ -604,6 +622,11 @@ def test_admin_alerts_returns_open_alerts(seeded_app, seeded_client) -> None:
     assert payload["items"][0]["monitored_object_id"] == 1303
     assert payload["items"][0]["alert_code"] == "agent.warning"
     assert payload["items"][0]["runtime_binding_key"] == "agent_local"
+    assert payload["items"][0]["source_rule_id"] == 1502
+    assert payload["items"][0]["source_rule_metric_key"] == "outbox_queue_depth"
+    assert payload["items"][0]["source_rule_target_label"] == "MonitoringAgent"
+    assert payload["items"][0]["is_acknowledged"] is True
+    assert payload["items"][0]["ack_note"] == "운영자가 확인함"
 
 
 def test_admin_alerts_reject_invalid_status_filter(seeded_client) -> None:
@@ -613,6 +636,147 @@ def test_admin_alerts_reject_invalid_status_filter(seeded_client) -> None:
 
     assert response.status_code == 400
     assert response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_alerts_support_acknowledged_filter(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET acknowledged_at = ?, acknowledged_by_user_id = ?, ack_note = ?, updated_at = ?
+            WHERE monitored_object_id = ?
+            """,
+            (
+                "2026-04-12T11:04:30.000+09:00",
+                1,
+                "점검 예정",
+                "2026-04-12T11:04:30.000+09:00",
+                1303,
+            ),
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    acknowledged_response = seeded_client.get("/api/admin/alerts?status=open&is_acknowledged=true")
+    unacknowledged_response = seeded_client.get("/api/admin/alerts?status=open&is_acknowledged=false")
+
+    assert acknowledged_response.status_code == 200
+    assert len(acknowledged_response.get_json()["items"]) == 1
+    assert acknowledged_response.get_json()["items"][0]["is_acknowledged"] is True
+
+    assert unacknowledged_response.status_code == 200
+    assert unacknowledged_response.get_json()["items"] == []
+
+
+def test_admin_alerts_reject_invalid_acknowledged_filter(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/alerts?status=open&is_acknowledged=maybe")
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_acknowledge_alert_accepts_boundary_note_length(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    login(seeded_client)
+    ack_note = "a" * 500
+
+    response = seeded_client.patch(
+        "/api/admin/alerts/1",
+        json={"acknowledged": True, "ack_note": ack_note},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()["alert"]
+    assert payload["is_acknowledged"] is True
+    assert payload["ack_note"] == ack_note
+    assert payload["acknowledged_by_username"] == "admin"
+
+
+def test_admin_acknowledge_alert_rejects_too_long_note(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    login(seeded_client)
+
+    response = seeded_client.patch(
+        "/api/admin/alerts/1",
+        json={"acknowledged": True, "ack_note": "a" * 501},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_acknowledge_alert_rejects_invalid_acknowledged_type(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    login(seeded_client)
+
+    response = seeded_client.patch(
+        "/api/admin/alerts/1",
+        json={"acknowledged": "true"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_acknowledge_alert_rejects_resolved_alert(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET status = 'resolved', updated_at = ?
+            WHERE id = 1
+            """,
+            ("2026-04-12T11:05:00.000+09:00",),
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.patch(
+        "/api/admin/alerts/1",
+        json={"acknowledged": True, "ack_note": "늦게 확인"},
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["error"]["code"] == "invalid_state"
+
+
+def test_admin_unacknowledge_alert_clears_ack_fields(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET acknowledged_at = ?, acknowledged_by_user_id = ?, ack_note = ?, updated_at = ?
+            WHERE id = 1
+            """,
+            (
+                "2026-04-12T11:04:30.000+09:00",
+                1,
+                "기존 메모",
+                "2026-04-12T11:04:30.000+09:00",
+            ),
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.patch(
+        "/api/admin/alerts/1",
+        json={"acknowledged": False},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()["alert"]
+    assert payload["is_acknowledged"] is False
+    assert payload["acknowledged_at"] is None
+    assert payload["acknowledged_by_user_id"] is None
+    assert payload["ack_note"] is None
 
 
 def test_admin_alert_rules_lists_seeded_rules(seeded_client) -> None:
@@ -641,6 +805,18 @@ def test_admin_alert_rules_support_filters(seeded_client) -> None:
     assert payload["items"][0]["metric_key"] == "cpu_usage"
 
 
+def test_admin_alert_rules_support_object_type_filter(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/alert-rules?object_type=MonitoringAgent")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["metric_key"] == "outbox_queue_depth"
+    assert payload["items"][0]["target_display_name"] is None
+
+
 def test_admin_alert_rules_reject_invalid_filter_boundary(seeded_client) -> None:
     login(seeded_client)
 
@@ -665,6 +841,8 @@ def test_admin_alert_rule_targets_preview_returns_matching_objects(seeded_client
     assert len(payload["items"]) == 1
     assert payload["items"][0]["display_name"] == "App Process"
     assert payload["items"][0]["object_type"] == "SoftwareProcess"
+    assert payload["items"][0]["active_view_count"] == 1
+    assert payload["items"][0]["active_node_count"] == 1
 
 
 def test_admin_alert_rule_targets_preview_accepts_boundary_limits(seeded_client) -> None:
@@ -691,6 +869,46 @@ def test_admin_alert_rule_targets_preview_rejects_invalid_limits_and_missing_rul
     assert over_response.status_code == 400
     assert invalid_response.status_code == 400
     assert missing_response.status_code == 404
+
+
+def test_admin_monitored_objects_support_filters_and_counts(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/monitored-objects?limit=10&object_type=MonitoringAgent&query=Local")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["display_name"] == "Local Agent"
+    assert payload["items"][0]["active_view_count"] == 1
+    assert payload["items"][0]["active_node_count"] == 1
+    assert payload["items"][0]["open_alert_count"] == 1
+
+
+def test_admin_monitored_objects_accept_boundary_limits(seeded_client) -> None:
+    login(seeded_client)
+
+    low_response = seeded_client.get("/api/admin/monitored-objects?limit=1")
+    high_response = seeded_client.get("/api/admin/monitored-objects?limit=100")
+
+    assert low_response.status_code == 200
+    assert high_response.status_code == 200
+    assert len(low_response.get_json()["items"]) == 1
+    assert len(high_response.get_json()["items"]) == 4
+
+
+def test_admin_monitored_objects_reject_out_of_range_limits(seeded_client) -> None:
+    login(seeded_client)
+
+    zero_response = seeded_client.get("/api/admin/monitored-objects?limit=0")
+    over_response = seeded_client.get("/api/admin/monitored-objects?limit=101")
+    invalid_response = seeded_client.get("/api/admin/monitored-objects?limit=abc")
+
+    assert zero_response.status_code == 400
+    assert over_response.status_code == 400
+    assert invalid_response.status_code == 400
+    assert invalid_response.get_json()["error"]["code"] == "validation_error"
 
 
 def test_admin_create_alert_rule_accepts_valid_object_type_rule(seeded_client) -> None:

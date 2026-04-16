@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import Any
 
-from flask import Blueprint, current_app, request
+from flask import Blueprint, current_app, g, request
 
 from .auth import admin_required, error_response
 from .db import get_db
@@ -20,6 +20,7 @@ ALLOWED_STATE_TYPES = {"agent", "host", "process"}
 ALLOWED_STATE_STATUSES = {"up", "warning", "down"}
 ALLOWED_ALERT_SCOPE_TYPES = {"object_type", "monitored_object"}
 ALLOWED_ALERT_COMPARISONS = {"gte", "lte"}
+ALERT_INSTANCE_STATUSES = {"open", "resolved"}
 
 
 def now_iso() -> str:
@@ -202,8 +203,17 @@ def serialize_alert_instance(row) -> dict[str, Any]:
         "semantic_type_code": row["semantic_type_code"],
         "display_name": row["display_name"],
         "alert_code": row["alert_code"],
+        "source_rule_id": row["source_rule_id"],
+        "source_rule_metric_key": row["source_rule_metric_key"],
+        "source_rule_scope_type": row["source_rule_scope_type"],
+        "source_rule_target_label": row["source_rule_target_label"],
         "severity": row["severity"],
         "status": row["status"],
+        "is_acknowledged": bool(row["acknowledged_at"]),
+        "acknowledged_at": row["acknowledged_at"],
+        "acknowledged_by_user_id": row["acknowledged_by_user_id"],
+        "acknowledged_by_username": row["acknowledged_by_username"],
+        "ack_note": row["ack_note"],
         "first_occurred_at": row["first_occurred_at"],
         "last_occurred_at": row["last_occurred_at"],
         "repeat_count": row["repeat_count"],
@@ -220,6 +230,8 @@ def serialize_alert_rule(row) -> dict[str, Any]:
         "scope_type": row["scope_type"],
         "object_type": row["object_type"],
         "monitored_object_id": row["monitored_object_id"],
+        "target_display_name": row["target_display_name"],
+        "target_runtime_binding_key": row["target_runtime_binding_key"],
         "state_type": row["state_type"],
         "metric_key": row["metric_key"],
         "comparison": row["comparison"],
@@ -229,6 +241,18 @@ def serialize_alert_rule(row) -> dict[str, Any]:
         "description": row["description"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+    }
+
+
+def serialize_monitored_object(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "object_type": row["object_type"],
+        "display_name": row["display_name"],
+        "runtime_binding_key": row["runtime_binding_key"],
+        "active_view_count": row["active_view_count"],
+        "active_node_count": row["active_node_count"],
+        "open_alert_count": row["open_alert_count"],
     }
 
 
@@ -247,6 +271,19 @@ def parse_optional_bool(value) -> bool:
     if value in {0, 1}:
         return bool(value)
     raise ValueError("is_enabled must be a boolean")
+
+
+def parse_optional_string(value: Any, *, field_name: str, max_length: int | None = None) -> str | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string")
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if max_length is not None and len(normalized) > max_length:
+        raise ValueError(f"{field_name} must be at most {max_length} characters")
+    return normalized
 
 
 def parse_boolean_query_param(value: str | None, *, field_name: str) -> tuple[bool | None, Any | None]:
@@ -648,26 +685,44 @@ def list_alert_instances():
         return error
 
     status = request.args.get("status", "open")
-    if status not in {"open", "resolved"}:
+    if status not in ALERT_INSTANCE_STATUSES:
         return error_response("validation_error", "invalid status filter", 400)
 
     severity = request.args.get("severity")
     if severity and severity not in {"critical", "warning", "normal", "info"}:
         return error_response("validation_error", "invalid severity filter", 400)
 
+    is_acknowledged, ack_error = parse_boolean_query_param(
+        request.args.get("is_acknowledged"),
+        field_name="is_acknowledged",
+    )
+    if ack_error:
+        return ack_error
+
     clauses = ["alerts.status = ?"]
     params: list[Any] = [status]
     if severity:
         clauses.append("alerts.severity = ?")
         params.append(severity)
+    if is_acknowledged is True:
+        clauses.append("alerts.acknowledged_at IS NOT NULL")
+    elif is_acknowledged is False:
+        clauses.append("alerts.acknowledged_at IS NULL")
 
     sql = """
         SELECT alerts.id, alerts.monitored_object_id, mo.runtime_binding_key, mo.object_type AS semantic_type_code,
                mo.display_name, alerts.alert_code, alerts.severity, alerts.status,
+               alerts.source_rule_id, rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
+               COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
+               alerts.acknowledged_at, alerts.acknowledged_by_user_id, ack_user.username AS acknowledged_by_username,
+               alerts.ack_note,
                alerts.first_occurred_at, alerts.last_occurred_at, alerts.repeat_count,
                alerts.latest_message, alerts.metadata_json
         FROM alert_instances AS alerts
         JOIN monitored_objects AS mo ON mo.id = alerts.monitored_object_id
+        LEFT JOIN alert_rules AS rules ON rules.id = alerts.source_rule_id
+        LEFT JOIN monitored_objects AS rule_mo ON rule_mo.id = rules.monitored_object_id
+        LEFT JOIN users AS ack_user ON ack_user.id = alerts.acknowledged_by_user_id
         WHERE {where_clause}
         ORDER BY
             CASE alerts.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
@@ -681,6 +736,77 @@ def list_alert_instances():
     return {"items": [serialize_alert_instance(row) for row in rows]}
 
 
+@bp.patch("/alerts/<int:alert_id>")
+@admin_required
+def update_alert_instance(alert_id: int):
+    db_conn = get_db()
+    existing = db_conn.execute(
+        """
+        SELECT id, status, acknowledged_at, acknowledged_by_user_id, ack_note
+        FROM alert_instances
+        WHERE id = ?
+        """,
+        (alert_id,),
+    ).fetchone()
+    if existing is None:
+        return error_response("not_found", "alert not found", 404)
+
+    data = request.get_json(silent=True) or {}
+    if "acknowledged" not in data:
+        return error_response("validation_error", "acknowledged is required", 400)
+
+    try:
+        acknowledged = parse_optional_bool(data.get("acknowledged"))
+        ack_note = parse_optional_string(data.get("ack_note"), field_name="ack_note", max_length=500)
+    except ValueError as exc:
+        return error_response("validation_error", str(exc), 400)
+
+    if existing["status"] == "resolved":
+        return error_response("invalid_state", "resolved alert cannot be acknowledged", 409)
+
+    timestamp = now_iso()
+    if acknowledged:
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET acknowledged_at = ?, acknowledged_by_user_id = ?, ack_note = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (timestamp, g.user["id"], ack_note, timestamp, alert_id),
+        )
+    else:
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET acknowledged_at = NULL, acknowledged_by_user_id = NULL, ack_note = NULL, updated_at = ?
+            WHERE id = ?
+            """,
+            (timestamp, alert_id),
+        )
+    db_conn.commit()
+
+    row = db_conn.execute(
+        """
+        SELECT alerts.id, alerts.monitored_object_id, mo.runtime_binding_key, mo.object_type AS semantic_type_code,
+               mo.display_name, alerts.alert_code, alerts.severity, alerts.status,
+               alerts.source_rule_id, rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
+               COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
+               alerts.acknowledged_at, alerts.acknowledged_by_user_id, ack_user.username AS acknowledged_by_username,
+               alerts.ack_note,
+               alerts.first_occurred_at, alerts.last_occurred_at, alerts.repeat_count,
+               alerts.latest_message, alerts.metadata_json
+        FROM alert_instances AS alerts
+        JOIN monitored_objects AS mo ON mo.id = alerts.monitored_object_id
+        LEFT JOIN alert_rules AS rules ON rules.id = alerts.source_rule_id
+        LEFT JOIN monitored_objects AS rule_mo ON rule_mo.id = rules.monitored_object_id
+        LEFT JOIN users AS ack_user ON ack_user.id = alerts.acknowledged_by_user_id
+        WHERE alerts.id = ?
+        """,
+        (alert_id,),
+    ).fetchone()
+    return {"alert": serialize_alert_instance(row)}
+
+
 @bp.get("/alert-rules")
 @admin_required
 def list_alert_rules():
@@ -692,6 +818,8 @@ def list_alert_rules():
     if state_type and state_type not in ALLOWED_STATE_TYPES:
         return error_response("validation_error", "state_type is invalid", 400)
 
+    object_type = request.args.get("object_type")
+
     is_enabled, enabled_error = parse_boolean_query_param(request.args.get("is_enabled"), field_name="is_enabled")
     if enabled_error:
         return enabled_error
@@ -699,26 +827,90 @@ def list_alert_rules():
     clauses: list[str] = []
     params: list[Any] = []
     if scope_type:
-        clauses.append("scope_type = ?")
+        clauses.append("rules.scope_type = ?")
         params.append(scope_type)
     if state_type:
-        clauses.append("state_type = ?")
+        clauses.append("rules.state_type = ?")
         params.append(state_type)
+    if object_type:
+        clauses.append("COALESCE(rules.object_type, mo.object_type) = ?")
+        params.append(object_type)
     if is_enabled is not None:
-        clauses.append("is_enabled = ?")
+        clauses.append("rules.is_enabled = ?")
         params.append(int(is_enabled))
 
     sql = """
-        SELECT id, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
-               warning_threshold, critical_threshold, is_enabled, description, created_at, updated_at
-        FROM alert_rules
+        SELECT rules.id, rules.scope_type, rules.object_type, rules.monitored_object_id, rules.state_type, rules.metric_key, rules.comparison,
+               rules.warning_threshold, rules.critical_threshold, rules.is_enabled, rules.description, rules.created_at, rules.updated_at,
+               mo.display_name AS target_display_name, mo.runtime_binding_key AS target_runtime_binding_key
+        FROM alert_rules AS rules
+        LEFT JOIN monitored_objects AS mo ON mo.id = rules.monitored_object_id
     """
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY is_enabled DESC, state_type ASC, id ASC"
+    sql += " ORDER BY rules.is_enabled DESC, rules.state_type ASC, rules.id ASC"
 
     rows = get_db().execute(sql, tuple(params)).fetchall()
     return {"items": [serialize_alert_rule(row) for row in rows]}
+
+
+@bp.get("/monitored-objects")
+@admin_required
+def list_monitored_objects():
+    limit, error = parse_limit()
+    if error:
+        return error
+
+    object_type = request.args.get("object_type")
+    query = request.args.get("query")
+
+    clauses: list[str] = []
+    params: list[Any] = []
+    if object_type:
+        clauses.append("mo.object_type = ?")
+        params.append(object_type)
+    if query:
+        clauses.append("(mo.display_name LIKE ? OR COALESCE(mo.runtime_binding_key, '') LIKE ?)")
+        pattern = f"%{query.strip()}%"
+        params.extend([pattern, pattern])
+
+    sql = """
+        SELECT
+            mo.id,
+            mo.object_type,
+            mo.display_name,
+            mo.runtime_binding_key,
+            (
+                SELECT COUNT(DISTINCT vv.view_id)
+                FROM node_bindings AS nb
+                JOIN view_version_nodes AS vn ON vn.id = nb.view_version_node_id
+                JOIN view_versions AS vv ON vv.id = vn.view_version_id
+                WHERE nb.monitored_object_id = mo.id
+                  AND vv.status = 'active'
+            ) AS active_view_count,
+            (
+                SELECT COUNT(*)
+                FROM node_bindings AS nb
+                JOIN view_version_nodes AS vn ON vn.id = nb.view_version_node_id
+                JOIN view_versions AS vv ON vv.id = vn.view_version_id
+                WHERE nb.monitored_object_id = mo.id
+                  AND vv.status = 'active'
+            ) AS active_node_count,
+            (
+                SELECT COUNT(*)
+                FROM alert_instances AS alerts
+                WHERE alerts.monitored_object_id = mo.id
+                  AND alerts.status = 'open'
+            ) AS open_alert_count
+        FROM monitored_objects AS mo
+    """
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY mo.display_name ASC, mo.id ASC LIMIT ?"
+    params.append(limit)
+
+    rows = get_db().execute(sql, tuple(params)).fetchall()
+    return {"items": [serialize_monitored_object(row) for row in rows]}
 
 
 @bp.get("/alert-rules/<int:rule_id>/targets-preview")
@@ -730,10 +922,12 @@ def get_alert_rule_targets_preview(rule_id: int):
 
     row = get_db().execute(
         """
-        SELECT id, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
-               warning_threshold, critical_threshold, is_enabled, description, created_at, updated_at
-        FROM alert_rules
-        WHERE id = ?
+        SELECT rules.id, rules.scope_type, rules.object_type, rules.monitored_object_id, rules.state_type, rules.metric_key, rules.comparison,
+               rules.warning_threshold, rules.critical_threshold, rules.is_enabled, rules.description, rules.created_at, rules.updated_at,
+               mo.display_name AS target_display_name, mo.runtime_binding_key AS target_runtime_binding_key
+        FROM alert_rules AS rules
+        LEFT JOIN monitored_objects AS mo ON mo.id = rules.monitored_object_id
+        WHERE rules.id = ?
         """,
         (rule_id,),
     ).fetchone()
@@ -758,6 +952,22 @@ def get_alert_rule_targets_preview(rule_id: int):
             mo.runtime_binding_key,
             mo.object_type,
             (
+                SELECT COUNT(DISTINCT vv.view_id)
+                FROM node_bindings AS nb
+                JOIN view_version_nodes AS vn ON vn.id = nb.view_version_node_id
+                JOIN view_versions AS vv ON vv.id = vn.view_version_id
+                WHERE nb.monitored_object_id = mo.id
+                  AND vv.status = 'active'
+            ) AS active_view_count,
+            (
+                SELECT COUNT(*)
+                FROM node_bindings AS nb
+                JOIN view_version_nodes AS vn ON vn.id = nb.view_version_node_id
+                JOIN view_versions AS vv ON vv.id = vn.view_version_id
+                WHERE nb.monitored_object_id = mo.id
+                  AND vv.status = 'active'
+            ) AS active_node_count,
+            (
                 SELECT COUNT(*)
                 FROM alert_instances AS alerts
                 WHERE alerts.monitored_object_id = mo.id
@@ -779,6 +989,8 @@ def get_alert_rule_targets_preview(rule_id: int):
                 "display_name": preview_row["display_name"],
                 "runtime_binding_key": preview_row["runtime_binding_key"],
                 "object_type": preview_row["object_type"],
+                "active_view_count": preview_row["active_view_count"],
+                "active_node_count": preview_row["active_node_count"],
                 "open_alert_count": preview_row["open_alert_count"],
             }
             for preview_row in preview_rows
@@ -821,10 +1033,12 @@ def create_alert_rule():
     db_conn.commit()
     row = db_conn.execute(
         """
-        SELECT id, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
-               warning_threshold, critical_threshold, is_enabled, description, created_at, updated_at
-        FROM alert_rules
-        WHERE id = ?
+        SELECT rules.id, rules.scope_type, rules.object_type, rules.monitored_object_id, rules.state_type, rules.metric_key, rules.comparison,
+               rules.warning_threshold, rules.critical_threshold, rules.is_enabled, rules.description, rules.created_at, rules.updated_at,
+               mo.display_name AS target_display_name, mo.runtime_binding_key AS target_runtime_binding_key
+        FROM alert_rules AS rules
+        LEFT JOIN monitored_objects AS mo ON mo.id = rules.monitored_object_id
+        WHERE rules.id = ?
         """,
         (cursor.lastrowid,),
     ).fetchone()
@@ -837,10 +1051,12 @@ def update_alert_rule(rule_id: int):
     db_conn = get_db()
     existing = db_conn.execute(
         """
-        SELECT id, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
-               warning_threshold, critical_threshold, is_enabled, description, created_at, updated_at
-        FROM alert_rules
-        WHERE id = ?
+        SELECT rules.id, rules.scope_type, rules.object_type, rules.monitored_object_id, rules.state_type, rules.metric_key, rules.comparison,
+               rules.warning_threshold, rules.critical_threshold, rules.is_enabled, rules.description, rules.created_at, rules.updated_at,
+               mo.display_name AS target_display_name, mo.runtime_binding_key AS target_runtime_binding_key
+        FROM alert_rules AS rules
+        LEFT JOIN monitored_objects AS mo ON mo.id = rules.monitored_object_id
+        WHERE rules.id = ?
         """,
         (rule_id,),
     ).fetchone()
@@ -881,10 +1097,12 @@ def update_alert_rule(rule_id: int):
     db_conn.commit()
     row = db_conn.execute(
         """
-        SELECT id, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
-               warning_threshold, critical_threshold, is_enabled, description, created_at, updated_at
-        FROM alert_rules
-        WHERE id = ?
+        SELECT rules.id, rules.scope_type, rules.object_type, rules.monitored_object_id, rules.state_type, rules.metric_key, rules.comparison,
+               rules.warning_threshold, rules.critical_threshold, rules.is_enabled, rules.description, rules.created_at, rules.updated_at,
+               mo.display_name AS target_display_name, mo.runtime_binding_key AS target_runtime_binding_key
+        FROM alert_rules AS rules
+        LEFT JOIN monitored_objects AS mo ON mo.id = rules.monitored_object_id
+        WHERE rules.id = ?
         """,
         (rule_id,),
     ).fetchone()

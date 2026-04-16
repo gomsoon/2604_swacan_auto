@@ -374,20 +374,21 @@ def sync_threshold_alerts(
         if existing is None:
             db_conn.execute(
                 """
-                INSERT INTO alert_instances (
-                    monitored_object_id, alert_code, severity, status,
-                    first_occurred_at, last_occurred_at, repeat_count,
-                    latest_message, metadata_json, created_at, updated_at
-                ) VALUES (?, ?, ?, 'open', ?, ?, 1, ?, ?, ?, ?)
-                """,
-                (
-                    monitored_object_id,
-                    alert_code,
-                    level,
-                    occurred_at,
-                    occurred_at,
-                    latest_message,
-                    metadata_json,
+            INSERT INTO alert_instances (
+                monitored_object_id, alert_code, source_rule_id, severity, status,
+                first_occurred_at, last_occurred_at, repeat_count,
+                latest_message, metadata_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 'open', ?, ?, 1, ?, ?, ?, ?)
+            """,
+            (
+                monitored_object_id,
+                alert_code,
+                rule["id"],
+                level,
+                occurred_at,
+                occurred_at,
+                latest_message,
+                metadata_json,
                     received_at,
                     received_at,
                 ),
@@ -397,7 +398,8 @@ def sync_threshold_alerts(
         db_conn.execute(
             """
             UPDATE alert_instances
-            SET severity = ?,
+            SET source_rule_id = ?,
+                severity = ?,
                 last_occurred_at = ?,
                 repeat_count = repeat_count + 1,
                 latest_message = ?,
@@ -406,6 +408,7 @@ def sync_threshold_alerts(
             WHERE id = ?
             """,
             (
+                rule["id"],
                 level,
                 occurred_at,
                 latest_message,

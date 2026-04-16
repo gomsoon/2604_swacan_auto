@@ -132,8 +132,15 @@ def serialize_alert_instance(alert_row) -> dict[str, Any]:
         "id": alert_row["id"],
         "monitored_object_id": alert_row["monitored_object_id"],
         "alert_code": alert_row["alert_code"],
+        "source_rule_id": alert_row["source_rule_id"],
+        "source_rule_metric_key": alert_row["source_rule_metric_key"],
+        "source_rule_target_label": alert_row["source_rule_target_label"],
         "severity": alert_row["severity"],
         "status": alert_row["status"],
+        "is_acknowledged": bool(alert_row["acknowledged_at"]),
+        "acknowledged_at": alert_row["acknowledged_at"],
+        "acknowledged_by_username": alert_row["acknowledged_by_username"],
+        "ack_note": alert_row["ack_note"],
         "first_occurred_at": alert_row["first_occurred_at"],
         "last_occurred_at": alert_row["last_occurred_at"],
         "repeat_count": alert_row["repeat_count"],
@@ -649,15 +656,23 @@ def get_view_alerts(view_id: int):
     placeholders = ", ".join("?" for _ in monitored_object_ids)
     rows = get_db().execute(
         f"""
-        SELECT id, monitored_object_id, alert_code, severity, status, first_occurred_at,
-               last_occurred_at, repeat_count, latest_message, metadata_json
-        FROM alert_instances
-        WHERE monitored_object_id IN ({placeholders})
-          AND status = ?
+        SELECT alerts.id, alerts.monitored_object_id, alerts.alert_code, alerts.source_rule_id,
+               rules.metric_key AS source_rule_metric_key,
+               COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
+               alerts.severity, alerts.status, alerts.acknowledged_at,
+               ack_user.username AS acknowledged_by_username, alerts.ack_note,
+               alerts.first_occurred_at, alerts.last_occurred_at, alerts.repeat_count,
+               alerts.latest_message, alerts.metadata_json
+        FROM alert_instances AS alerts
+        LEFT JOIN alert_rules AS rules ON rules.id = alerts.source_rule_id
+        LEFT JOIN monitored_objects AS rule_mo ON rule_mo.id = rules.monitored_object_id
+        LEFT JOIN users AS ack_user ON ack_user.id = alerts.acknowledged_by_user_id
+        WHERE alerts.monitored_object_id IN ({placeholders})
+          AND alerts.status = ?
         ORDER BY
-            CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
-            last_occurred_at DESC,
-            id DESC
+            CASE alerts.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+            alerts.last_occurred_at DESC,
+            alerts.id DESC
         LIMIT ?
         """,
         tuple(monitored_object_ids) + (status_filter, limit),
