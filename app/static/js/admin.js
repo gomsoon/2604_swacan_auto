@@ -466,6 +466,41 @@ async function createSemanticTypeFromCanvasQuick() {
     showBanner("Semantic type을 canvas에서 생성했습니다.", "success");
 }
 
+async function saveSemanticTypeFromInspector(semanticTypeId) {
+    const payload = {
+        code: document.getElementById("inspector-semantic-type-code")?.value?.trim(),
+        display_name: document.getElementById("inspector-semantic-type-display-name")?.value?.trim(),
+        kind: document.getElementById("inspector-semantic-type-kind")?.value,
+        runtime_kind: document.getElementById("inspector-semantic-type-runtime-kind")?.value?.trim() || null,
+        description: document.getElementById("inspector-semantic-type-description")?.value?.trim() || null,
+        is_groupable: Boolean(document.getElementById("inspector-semantic-type-groupable")?.checked),
+        allows_runtime_binding: Boolean(document.getElementById("inspector-semantic-type-runtime-binding")?.checked),
+        is_active: Boolean(document.getElementById("inspector-semantic-type-active")?.checked),
+    };
+
+    await apiFetch(`/api/admin/metamodel/semantic-types/${semanticTypeId}`, {
+        method: "PATCH",
+        body: payload,
+    });
+    await Promise.all([
+        loadMetamodelVersions(),
+        loadMetamodelSemanticTypes(),
+        loadMetamodelProperties(),
+        loadMetamodelContainmentRules(),
+        loadMetamodelNotations(),
+        loadMetamodelAssociations(),
+    ]);
+    selectedMetamodelWorkspace = { kind: "semantic_type", id: Number(semanticTypeId) };
+    const updatedItem = metamodelSemanticTypes.find((item) => Number(item.id) === Number(semanticTypeId));
+    if (updatedItem) {
+        fillMetamodelSemanticTypeForm(updatedItem);
+        metamodelPropertySemanticTypeIdInput.value = String(updatedItem.id);
+        metamodelNotationSemanticTypeIdInput.value = String(updatedItem.id);
+    }
+    refreshMetamodelWorkspace();
+    showBanner("Semantic type을 inspector에서 저장했습니다.", "success");
+}
+
 function openMetamodelEditorFromInspector(action, kind, id) {
     const numericId = Number(id);
     if (!numericId) {
@@ -1297,7 +1332,46 @@ function renderMetamodelWorkspaceInspector() {
                     ["assoc in", targetAssocCount],
                 ])}
             </div>
+            <div class="inspector-form-grid">
+                <label class="field">
+                    <span>Code</span>
+                    <input id="inspector-semantic-type-code" type="text" value="${escapeHtml(item.code || "")}">
+                </label>
+                <label class="field">
+                    <span>Display Name</span>
+                    <input id="inspector-semantic-type-display-name" type="text" value="${escapeHtml(item.display_name || "")}">
+                </label>
+                <label class="field compact-field">
+                    <span>Kind</span>
+                    <select id="inspector-semantic-type-kind">
+                        <option value="node" ${item.kind === "node" ? "selected" : ""}>node</option>
+                        <option value="edge" ${item.kind === "edge" ? "selected" : ""}>edge</option>
+                        <option value="container" ${item.kind === "container" ? "selected" : ""}>container</option>
+                        <option value="runtime-only" ${item.kind === "runtime-only" ? "selected" : ""}>runtime-only</option>
+                    </select>
+                </label>
+                <label class="field compact-field">
+                    <span>Runtime Kind</span>
+                    <input id="inspector-semantic-type-runtime-kind" type="text" value="${escapeHtml(item.runtime_kind || "")}">
+                </label>
+                <label class="field">
+                    <span>Description</span>
+                    <textarea id="inspector-semantic-type-description" rows="3">${escapeHtml(item.description || "")}</textarea>
+                </label>
+                <label class="field checkbox-field inspector-inline-checkbox">
+                    <span><input id="inspector-semantic-type-groupable" type="checkbox" ${item.is_groupable ? "checked" : ""}> groupable</span>
+                </label>
+                <label class="field checkbox-field inspector-inline-checkbox">
+                    <span><input id="inspector-semantic-type-runtime-binding" type="checkbox" ${item.allows_runtime_binding ? "checked" : ""}> runtime binding</span>
+                </label>
+                <label class="field checkbox-field inspector-inline-checkbox">
+                    <span><input id="inspector-semantic-type-active" type="checkbox" ${item.is_active ? "checked" : ""}> active</span>
+                </label>
+            </div>
             <p class="admin-meta">${escapeHtml(item.description || "설명 없음")}</p>
+            <div class="toolbar-inline inspector-actions">
+                <button class="button primary small" type="button" data-inspector-save="semantic_type" data-workspace-id="${escapeHtml(item.id)}">빠른 저장</button>
+            </div>
             ${
                 defaultNotation
                     ? `<div class="metamodel-notation-preview">
@@ -2971,7 +3045,9 @@ metamodelWorkspaceInspector?.addEventListener("click", (event) => {
 
         const kind = saveButton.dataset.inspectorSave;
         const promise =
-            kind === "containment_rule"
+            kind === "semantic_type"
+                ? saveSemanticTypeFromInspector(workspaceId)
+                : kind === "containment_rule"
                 ? saveContainmentRuleFromInspector(workspaceId)
                 : kind === "association_definition"
                     ? saveAssociationFromInspector(workspaceId)
