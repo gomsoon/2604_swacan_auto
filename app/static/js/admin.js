@@ -264,6 +264,30 @@ function scrollToMetamodelEditorSection(section, input) {
     }
 }
 
+function focusMetamodelWorkspaceInspectorInput(inputId) {
+    if (!metamodelWorkspaceInspector) {
+        return;
+    }
+
+    setTemporarySectionFocus(metamodelWorkspaceInspector);
+    metamodelWorkspaceInspector.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    if (!inputId) {
+        return;
+    }
+
+    window.setTimeout(() => {
+        const input = document.getElementById(inputId);
+        if (!input || typeof input.focus !== "function") {
+            return;
+        }
+        input.focus({ preventScroll: true });
+        if (typeof input.select === "function" && input.tagName === "INPUT") {
+            input.select();
+        }
+    }, 180);
+}
+
 function setMetamodelWorkspaceInteractionMode(mode) {
     metamodelWorkspaceInteractionMode = mode;
     metamodelWorkspacePendingTypeId = null;
@@ -461,8 +485,8 @@ async function createSemanticTypeFromCanvasQuick() {
         metamodelPropertySemanticTypeIdInput.value = String(created.id);
         metamodelNotationSemanticTypeIdInput.value = String(created.id);
         refreshMetamodelWorkspace();
+        focusMetamodelWorkspaceInspectorInput("inspector-semantic-type-display-name");
     }
-    scrollToMetamodelEditorSection(metamodelSemanticTypeSection, metamodelSemanticTypeCodeInput);
     showBanner("Semantic type을 canvas에서 생성했습니다.", "success");
 }
 
