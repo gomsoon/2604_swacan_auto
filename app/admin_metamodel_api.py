@@ -13,6 +13,7 @@ bp = Blueprint("admin_metamodel_api", __name__, url_prefix="/api/admin/metamodel
 
 ALLOWED_VERSION_STATUSES = {"draft", "published", "deprecated"}
 ALLOWED_SEMANTIC_TYPE_KINDS = {"node", "edge", "container", "runtime-only"}
+ALLOWED_PROPERTY_VALUE_TYPES = {"string", "integer", "number", "boolean", "enum", "json"}
 
 
 def now_iso() -> str:
@@ -137,6 +138,69 @@ def serialize_semantic_type(row) -> dict[str, Any]:
     }
 
 
+def fetch_property_row(property_id: int):
+    return get_db().execute(
+        """
+        SELECT pd.id, pd.semantic_type_id, pd.code, pd.display_name, pd.description, pd.value_type, pd.unit,
+               pd.default_value_json, pd.is_required, pd.is_runtime, pd.is_user_editable, pd.sort_order,
+               pd.created_at, pd.updated_at,
+               st.code AS semantic_type_code,
+               st.display_name AS semantic_type_display_name,
+               st.metamodel_version_id,
+               mv.status AS metamodel_version_status,
+               mv.version_code AS metamodel_version_code,
+               ns.code AS namespace_code
+        FROM property_definitions AS pd
+        JOIN semantic_types AS st ON st.id = pd.semantic_type_id
+        JOIN metamodel_versions AS mv ON mv.id = st.metamodel_version_id
+        JOIN metamodel_namespaces AS ns ON ns.id = mv.namespace_id
+        WHERE pd.id = ?
+        """,
+        (property_id,),
+    ).fetchone()
+
+
+def normalize_default_value_json(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    try:
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized:
+                return None
+            parsed = json.loads(normalized)
+        else:
+            parsed = value
+        return json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("default_value_json must be valid JSON") from exc
+
+
+def serialize_property_definition(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "semantic_type_id": row["semantic_type_id"],
+        "semantic_type_code": row["semantic_type_code"],
+        "semantic_type_display_name": row["semantic_type_display_name"],
+        "metamodel_version_id": row["metamodel_version_id"],
+        "metamodel_version_code": row["metamodel_version_code"],
+        "namespace_code": row["namespace_code"],
+        "code": row["code"],
+        "display_name": row["display_name"],
+        "description": row["description"],
+        "value_type": row["value_type"],
+        "unit": row["unit"],
+        "default_value_json": row["default_value_json"],
+        "default_value": parse_json_or_none(row["default_value_json"]),
+        "is_required": bool(row["is_required"]),
+        "is_runtime": bool(row["is_runtime"]),
+        "is_user_editable": bool(row["is_user_editable"]),
+        "sort_order": row["sort_order"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
 def validate_semantic_type_payload(data: dict[str, Any], *, partial: bool = False) -> tuple[dict[str, Any] | None, Any | None]:
     payload = dict(data)
     try:
@@ -170,6 +234,54 @@ def validate_semantic_type_payload(data: dict[str, Any], *, partial: bool = Fals
             if not isinstance(value, bool):
                 return None, error_response("validation_error", f"{bool_field} must be a boolean", 400)
             payload[bool_field] = value
+
+    return payload, None
+
+
+def validate_property_payload(data: dict[str, Any], *, partial: bool = False) -> tuple[dict[str, Any] | None, Any | None]:
+    payload = dict(data)
+    try:
+        if not partial or "code" in payload:
+            code = parse_optional_string(payload.get("code"), field_name="code", max_length=100)
+            if not code:
+                return None, error_response("validation_error", "code is required", 400)
+            payload["code"] = code
+
+        if not partial or "display_name" in payload:
+            display_name = parse_optional_string(payload.get("display_name"), field_name="display_name", max_length=120)
+            if not display_name:
+                return None, error_response("validation_error", "display_name is required", 400)
+            payload["display_name"] = display_name
+
+        if not partial or "value_type" in payload:
+            value_type = payload.get("value_type")
+            if value_type not in ALLOWED_PROPERTY_VALUE_TYPES:
+                return None, error_response("validation_error", "value_type is invalid", 400)
+            payload["value_type"] = value_type
+
+        if "description" in payload:
+            payload["description"] = parse_optional_string(payload.get("description"), field_name="description", max_length=500)
+        if "unit" in payload:
+            payload["unit"] = parse_optional_string(payload.get("unit"), field_name="unit", max_length=50)
+        if "default_value_json" in payload:
+            payload["default_value_json"] = normalize_default_value_json(payload.get("default_value_json"))
+    except ValueError as exc:
+        return None, error_response("validation_error", str(exc), 400)
+
+    for bool_field in ("is_required", "is_runtime", "is_user_editable"):
+        if not partial or bool_field in payload:
+            value = payload.get(bool_field)
+            if not isinstance(value, bool):
+                return None, error_response("validation_error", f"{bool_field} must be a boolean", 400)
+            payload[bool_field] = value
+
+    if not partial or "sort_order" in payload:
+        sort_order = payload.get("sort_order")
+        if isinstance(sort_order, bool) or not isinstance(sort_order, int):
+            return None, error_response("validation_error", "sort_order must be an integer", 400)
+        if sort_order < 0 or sort_order > 9999:
+            return None, error_response("validation_error", "sort_order must be between 0 and 9999", 400)
+        payload["sort_order"] = sort_order
 
     return payload, None
 
@@ -663,3 +775,187 @@ def update_semantic_type(type_id: int):
 
     updated = fetch_semantic_type_row(type_id)
     return {"semantic_type": serialize_semantic_type(updated)}
+
+
+@bp.get("/semantic-types/<int:type_id>/properties")
+@admin_required
+def list_property_definitions(type_id: int):
+    semantic_type = fetch_semantic_type_row(type_id)
+    if semantic_type is None:
+        return error_response("semantic_type_not_found", "semantic type not found", 404)
+
+    rows = get_db().execute(
+        """
+        SELECT pd.id, pd.semantic_type_id, pd.code, pd.display_name, pd.description, pd.value_type, pd.unit,
+               pd.default_value_json, pd.is_required, pd.is_runtime, pd.is_user_editable, pd.sort_order,
+               pd.created_at, pd.updated_at,
+               st.code AS semantic_type_code,
+               st.display_name AS semantic_type_display_name,
+               st.metamodel_version_id,
+               mv.status AS metamodel_version_status,
+               mv.version_code AS metamodel_version_code,
+               ns.code AS namespace_code
+        FROM property_definitions AS pd
+        JOIN semantic_types AS st ON st.id = pd.semantic_type_id
+        JOIN metamodel_versions AS mv ON mv.id = st.metamodel_version_id
+        JOIN metamodel_namespaces AS ns ON ns.id = mv.namespace_id
+        WHERE pd.semantic_type_id = ?
+        ORDER BY pd.sort_order ASC, pd.code ASC, pd.id ASC
+        """,
+        (type_id,),
+    ).fetchall()
+
+    return {
+        "semantic_type": serialize_semantic_type(semantic_type),
+        "items": [serialize_property_definition(row) for row in rows],
+    }
+
+
+@bp.post("/semantic-types/<int:type_id>/properties")
+@admin_required
+def create_property_definition(type_id: int):
+    semantic_type = fetch_semantic_type_row(type_id)
+    if semantic_type is None:
+        return error_response("semantic_type_not_found", "semantic type not found", 404)
+    if semantic_type["metamodel_version_status"] != "draft":
+        return error_response("invalid_state", "only draft semantic types can be edited", 409)
+
+    payload, error = validate_property_payload(request.get_json(silent=True) or {}, partial=False)
+    if error:
+        return error
+
+    conflict = get_db().execute(
+        """
+        SELECT 1
+        FROM property_definitions
+        WHERE semantic_type_id = ? AND code = ?
+        """,
+        (type_id, payload["code"]),
+    ).fetchone()
+    if conflict is not None:
+        return error_response("property_conflict", "property code already exists in semantic type", 409)
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    cursor = db_conn.execute(
+        """
+        INSERT INTO property_definitions (
+            semantic_type_id, code, display_name, description, value_type, unit, default_value_json,
+            is_required, is_runtime, is_user_editable, sort_order, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            type_id,
+            payload["code"],
+            payload["display_name"],
+            payload.get("description"),
+            payload["value_type"],
+            payload.get("unit"),
+            payload.get("default_value_json"),
+            int(payload["is_required"]),
+            int(payload["is_runtime"]),
+            int(payload["is_user_editable"]),
+            payload["sort_order"],
+            timestamp,
+            timestamp,
+        ),
+    )
+    db_conn.execute(
+        """
+        UPDATE metamodel_versions
+        SET updated_at = ?
+        WHERE id = ?
+        """,
+        (timestamp, semantic_type["metamodel_version_id"]),
+    )
+    db_conn.commit()
+
+    created = fetch_property_row(int(cursor.lastrowid))
+    return {
+        "semantic_type": serialize_semantic_type(semantic_type),
+        "property_definition": serialize_property_definition(created),
+    }, 201
+
+
+@bp.patch("/properties/<int:property_id>")
+@admin_required
+def update_property_definition(property_id: int):
+    existing = fetch_property_row(property_id)
+    if existing is None:
+        return error_response("property_not_found", "property definition not found", 404)
+    if existing["metamodel_version_status"] != "draft":
+        return error_response("invalid_state", "only draft property definitions can be edited", 409)
+
+    current_payload = {
+        "code": existing["code"],
+        "display_name": existing["display_name"],
+        "description": existing["description"],
+        "value_type": existing["value_type"],
+        "unit": existing["unit"],
+        "default_value_json": existing["default_value_json"],
+        "is_required": bool(existing["is_required"]),
+        "is_runtime": bool(existing["is_runtime"]),
+        "is_user_editable": bool(existing["is_user_editable"]),
+        "sort_order": existing["sort_order"],
+    }
+    current_payload.update(request.get_json(silent=True) or {})
+    payload, error = validate_property_payload(current_payload, partial=False)
+    if error:
+        return error
+
+    conflict = get_db().execute(
+        """
+        SELECT 1
+        FROM property_definitions
+        WHERE semantic_type_id = ? AND code = ? AND id != ?
+        """,
+        (existing["semantic_type_id"], payload["code"], property_id),
+    ).fetchone()
+    if conflict is not None:
+        return error_response("property_conflict", "property code already exists in semantic type", 409)
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    db_conn.execute(
+        """
+        UPDATE property_definitions
+        SET code = ?,
+            display_name = ?,
+            description = ?,
+            value_type = ?,
+            unit = ?,
+            default_value_json = ?,
+            is_required = ?,
+            is_runtime = ?,
+            is_user_editable = ?,
+            sort_order = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            payload["code"],
+            payload["display_name"],
+            payload.get("description"),
+            payload["value_type"],
+            payload.get("unit"),
+            payload.get("default_value_json"),
+            int(payload["is_required"]),
+            int(payload["is_runtime"]),
+            int(payload["is_user_editable"]),
+            payload["sort_order"],
+            timestamp,
+            property_id,
+        ),
+    )
+    db_conn.execute(
+        """
+        UPDATE metamodel_versions
+        SET updated_at = ?
+        WHERE id = ?
+        """,
+        (timestamp, existing["metamodel_version_id"]),
+    )
+    db_conn.commit()
+
+    updated = fetch_property_row(property_id)
+    return {"property_definition": serialize_property_definition(updated)}

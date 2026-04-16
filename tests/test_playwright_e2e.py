@@ -338,6 +338,28 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
 
     expect(page.locator("#admin-metamodel-semantic-types-list .admin-item", has_text="Worker Pool Updated").first).to_contain_text("no-binding")
 
+    page.locator("#metamodel-property-semantic-type-id").select_option(label="Worker Pool Updated (WorkerPool)")
+    page.locator("#metamodel-property-code").fill("worker_count")
+    page.locator("#metamodel-property-display-name").fill("Worker Count")
+    page.locator("#metamodel-property-value-type").select_option("integer")
+    page.locator("#metamodel-property-unit").fill("count")
+    page.locator("#metamodel-property-sort-order").fill("30")
+    page.locator("#metamodel-property-default-value-json").fill("4")
+    page.locator("#metamodel-property-description").fill("Playwright property definition create")
+    page.locator("#save-metamodel-property-button").click()
+
+    createdProperty = page.locator("#admin-metamodel-properties-list .admin-item", has_text="Worker Count").first
+    expect(createdProperty).to_contain_text("worker_count")
+    expect(createdProperty).to_contain_text("integer")
+
+    createdProperty.get_by_role("button", name="수정").click()
+    expect(page.locator("#metamodel-property-form-mode")).to_contain_text("edit")
+    page.locator("#metamodel-property-display-name").fill("Worker Count Updated")
+    page.locator("#metamodel-property-user-editable").uncheck()
+    page.locator("#save-metamodel-property-button").click()
+
+    expect(page.locator("#admin-metamodel-properties-list .admin-item", has_text="Worker Count Updated").first).to_contain_text("user_editable=false")
+
     createdVersion.locator(".publish-metamodel-button").click()
 
     expect(page.locator(".admin-item", has_text="core-v2-ui-draft").first).to_contain_text("published")

@@ -12,6 +12,8 @@ const metamodelVersionsList = document.getElementById("admin-metamodel-versions-
 const metamodelVersionCount = document.getElementById("metamodel-version-count");
 const metamodelSemanticTypesList = document.getElementById("admin-metamodel-semantic-types-list");
 const metamodelSemanticTypeCount = document.getElementById("metamodel-semantic-type-count");
+const metamodelPropertiesList = document.getElementById("admin-metamodel-properties-list");
+const metamodelPropertyCount = document.getElementById("metamodel-property-count");
 const alertRulesList = document.getElementById("admin-alert-rules-list");
 const alertRuleCount = document.getElementById("alert-rule-count");
 const alertRulePreviewPanel = document.getElementById("alert-rule-preview-panel");
@@ -34,6 +36,7 @@ const refreshDebugButton = document.getElementById("refresh-debug-button");
 const refreshCleanupButton = document.getElementById("refresh-cleanup-button");
 const refreshMetamodelVersionsButton = document.getElementById("refresh-metamodel-versions-button");
 const refreshMetamodelSemanticTypesButton = document.getElementById("refresh-metamodel-semantic-types-button");
+const refreshMetamodelPropertiesButton = document.getElementById("refresh-metamodel-properties-button");
 const refreshAlertRulesButton = document.getElementById("refresh-alert-rules-button");
 
 const ingestStatusFilter = document.getElementById("ingest-status-filter");
@@ -59,6 +62,22 @@ const metamodelSemanticTypeDescriptionInput = document.getElementById("metamodel
 const metamodelSemanticTypeGroupableInput = document.getElementById("metamodel-semantic-type-groupable");
 const metamodelSemanticTypeRuntimeBindingInput = document.getElementById("metamodel-semantic-type-runtime-binding");
 const metamodelSemanticTypeActiveInput = document.getElementById("metamodel-semantic-type-active");
+const metamodelPropertyForm = document.getElementById("metamodel-property-form");
+const metamodelPropertyFormTitle = document.getElementById("metamodel-property-form-title");
+const metamodelPropertyFormMode = document.getElementById("metamodel-property-form-mode");
+const metamodelPropertyFormResetButton = document.getElementById("metamodel-property-form-reset");
+const metamodelPropertyIdInput = document.getElementById("metamodel-property-id");
+const metamodelPropertySemanticTypeIdInput = document.getElementById("metamodel-property-semantic-type-id");
+const metamodelPropertyCodeInput = document.getElementById("metamodel-property-code");
+const metamodelPropertyDisplayNameInput = document.getElementById("metamodel-property-display-name");
+const metamodelPropertyValueTypeSelect = document.getElementById("metamodel-property-value-type");
+const metamodelPropertyUnitInput = document.getElementById("metamodel-property-unit");
+const metamodelPropertySortOrderInput = document.getElementById("metamodel-property-sort-order");
+const metamodelPropertyDefaultValueJsonInput = document.getElementById("metamodel-property-default-value-json");
+const metamodelPropertyDescriptionInput = document.getElementById("metamodel-property-description");
+const metamodelPropertyRequiredInput = document.getElementById("metamodel-property-required");
+const metamodelPropertyRuntimeInput = document.getElementById("metamodel-property-runtime");
+const metamodelPropertyUserEditableInput = document.getElementById("metamodel-property-user-editable");
 const alertRuleForm = document.getElementById("alert-rule-form");
 const alertRuleFormTitle = document.getElementById("alert-rule-form-title");
 const alertRuleFormMode = document.getElementById("alert-rule-form-mode");
@@ -83,6 +102,7 @@ const alertAckFilter = document.getElementById("alert-ack-filter");
 
 let metamodelVersions = [];
 let metamodelSemanticTypes = [];
+let metamodelProperties = [];
 let alertRules = [];
 let monitoredObjects = [];
 let selectedAlertRuleId = null;
@@ -93,6 +113,7 @@ let selectedGroupedEvent = null;
 let selectedGroupedEventRawItems = [];
 let selectedRawEventId = null;
 let selectedMetamodelSemanticTypeId = null;
+let selectedMetamodelPropertyId = null;
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -635,6 +656,22 @@ function resetMetamodelSemanticTypeForm() {
     selectedMetamodelSemanticTypeId = null;
 }
 
+function renderMetamodelPropertySemanticTypeOptions(selectedId = "") {
+    const items = metamodelSemanticTypes
+        .map(
+            (item) => `
+                <option value="${escapeHtml(item.id)}" ${String(item.id) === String(selectedId) ? "selected" : ""}>
+                    ${escapeHtml(item.display_name)} (${escapeHtml(item.code)})
+                </option>
+            `
+        )
+        .join("");
+
+    metamodelPropertySemanticTypeIdInput.innerHTML = items
+        ? items
+        : '<option value="">선택 가능한 semantic type이 없습니다.</option>';
+}
+
 function fillMetamodelSemanticTypeForm(item) {
     metamodelSemanticTypeIdInput.value = String(item.id);
     metamodelDraftVersionSelect.value = String(item.metamodel_version_id);
@@ -651,9 +688,50 @@ function fillMetamodelSemanticTypeForm(item) {
     selectedMetamodelSemanticTypeId = item.id;
 }
 
+function resetMetamodelPropertyForm({ preserveSemanticType = true } = {}) {
+    const currentSemanticTypeId = preserveSemanticType ? metamodelPropertySemanticTypeIdInput.value : "";
+    metamodelPropertyForm.reset();
+    metamodelPropertyIdInput.value = "";
+    metamodelPropertyValueTypeSelect.value = "string";
+    metamodelPropertySortOrderInput.value = "0";
+    metamodelPropertyUserEditableInput.checked = true;
+    metamodelPropertyRequiredInput.checked = false;
+    metamodelPropertyRuntimeInput.checked = false;
+    metamodelPropertyFormTitle.textContent = "Property Definition 생성";
+    metamodelPropertyFormMode.textContent = "create";
+    selectedMetamodelPropertyId = null;
+    renderMetamodelPropertySemanticTypeOptions(currentSemanticTypeId);
+}
+
+function fillMetamodelPropertyForm(item) {
+    metamodelPropertyIdInput.value = String(item.id);
+    metamodelPropertySemanticTypeIdInput.value = String(item.semantic_type_id);
+    metamodelPropertyCodeInput.value = item.code || "";
+    metamodelPropertyDisplayNameInput.value = item.display_name || "";
+    metamodelPropertyValueTypeSelect.value = item.value_type;
+    metamodelPropertyUnitInput.value = item.unit || "";
+    metamodelPropertySortOrderInput.value = String(item.sort_order ?? 0);
+    metamodelPropertyDefaultValueJsonInput.value = item.default_value_json || "";
+    metamodelPropertyDescriptionInput.value = item.description || "";
+    metamodelPropertyRequiredInput.checked = Boolean(item.is_required);
+    metamodelPropertyRuntimeInput.checked = Boolean(item.is_runtime);
+    metamodelPropertyUserEditableInput.checked = Boolean(item.is_user_editable);
+    metamodelPropertyFormTitle.textContent = `Property Definition 수정 #${item.id}`;
+    metamodelPropertyFormMode.textContent = "edit";
+    selectedMetamodelPropertyId = item.id;
+}
+
 function renderMetamodelSemanticTypes(items) {
     metamodelSemanticTypes = items;
     metamodelSemanticTypeCount.textContent = `${items.length}개`;
+    const previousSemanticTypeId = selectedMetamodelSemanticTypeId ?? metamodelPropertySemanticTypeIdInput.value;
+    const nextSemanticTypeId = items.some((item) => String(item.id) === String(previousSemanticTypeId))
+        ? String(previousSemanticTypeId)
+        : (items[0] ? String(items[0].id) : "");
+    renderMetamodelPropertySemanticTypeOptions(nextSemanticTypeId);
+    if (selectedMetamodelSemanticTypeId && !items.some((item) => item.id === selectedMetamodelSemanticTypeId)) {
+        selectedMetamodelSemanticTypeId = null;
+    }
 
     if (items.length === 0) {
         metamodelSemanticTypesList.innerHTML = '<p class="section-copy">선택한 draft version에 semantic type이 없습니다.</p>';
@@ -676,6 +754,39 @@ function renderMetamodelSemanticTypes(items) {
                         </div>
                     </div>
                     <p class="admin-meta">groupable=${item.is_groupable ? "true" : "false"} | default notation=${escapeHtml(item.default_notation_code || "-")}</p>
+                    <p class="admin-meta">${escapeHtml(item.description || "설명 없음")}</p>
+                </article>
+            `
+        )
+        .join("");
+}
+
+function renderMetamodelProperties(items) {
+    metamodelProperties = items;
+    metamodelPropertyCount.textContent = `${items.length}개`;
+
+    if (items.length === 0) {
+        metamodelPropertiesList.innerHTML = '<p class="section-copy">선택한 semantic type에 property definition이 없습니다.</p>';
+        return;
+    }
+
+    metamodelPropertiesList.innerHTML = items
+        .map(
+            (item) => `
+                <article class="admin-item ${item.is_user_editable ? "" : "is-disabled"}">
+                    <div class="section-header">
+                        <div>
+                            <h3>${escapeHtml(item.display_name)}</h3>
+                            <p class="admin-meta">${escapeHtml(item.code)} | ${escapeHtml(item.value_type)} | sort ${escapeHtml(item.sort_order)}</p>
+                        </div>
+                        <div class="toolbar-inline">
+                            <span class="meta-pill">${item.is_required ? "required" : "optional"}</span>
+                            <span class="meta-pill">${item.is_runtime ? "runtime" : "design"}</span>
+                            <button class="button ghost small edit-metamodel-property-button" type="button" data-property-id="${escapeHtml(item.id)}">수정</button>
+                        </div>
+                    </div>
+                    <p class="admin-meta">unit=${escapeHtml(item.unit || "-")} | user_editable=${item.is_user_editable ? "true" : "false"}</p>
+                    <p class="admin-meta">default=${escapeHtml(item.default_value_json || "-")}</p>
                     <p class="admin-meta">${escapeHtml(item.description || "설명 없음")}</p>
                 </article>
             `
@@ -929,10 +1040,22 @@ async function loadMetamodelSemanticTypes() {
     if (!versionId) {
         metamodelSemanticTypes = [];
         renderMetamodelSemanticTypes([]);
+        renderMetamodelProperties([]);
         return;
     }
     const payload = await apiFetch(`/api/admin/metamodel/versions/${versionId}/semantic-types`);
     renderMetamodelSemanticTypes(payload.items);
+}
+
+async function loadMetamodelProperties() {
+    const semanticTypeId = metamodelPropertySemanticTypeIdInput.value;
+    if (!semanticTypeId) {
+        metamodelProperties = [];
+        renderMetamodelProperties([]);
+        return;
+    }
+    const payload = await apiFetch(`/api/admin/metamodel/semantic-types/${semanticTypeId}/properties`);
+    renderMetamodelProperties(payload.items);
 }
 
 async function loadMonitoredObjects() {
@@ -1010,7 +1133,9 @@ async function createMetamodelVersion(event) {
 
         metamodelVersionForm.reset();
         await Promise.all([loadMetamodelVersions(), loadMetamodelSemanticTypes()]);
+        await loadMetamodelProperties();
         resetMetamodelSemanticTypeForm();
+        resetMetamodelPropertyForm();
         showBanner("메타모델 draft 버전을 생성했습니다.", "success");
     } catch (error) {
         showBanner(error.message, "error");
@@ -1025,7 +1150,9 @@ async function publishMetamodelVersion(versionId) {
             method: "POST",
         });
         await Promise.all([loadMetamodelVersions(), loadMetamodelSemanticTypes()]);
+        await loadMetamodelProperties();
         resetMetamodelSemanticTypeForm();
+        resetMetamodelPropertyForm();
         showBanner("메타모델 버전을 publish했습니다.", "success");
     } catch (error) {
         showBanner(error.message, "error");
@@ -1070,7 +1197,57 @@ async function saveMetamodelSemanticType(event) {
         }
 
         await Promise.all([loadMetamodelVersions(), loadMetamodelSemanticTypes()]);
+        if (semanticTypeId) {
+            metamodelPropertySemanticTypeIdInput.value = String(semanticTypeId);
+        }
+        await loadMetamodelProperties();
         resetMetamodelSemanticTypeForm();
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
+}
+
+async function saveMetamodelProperty(event) {
+    event.preventDefault();
+    clearBanner();
+
+    const semanticTypeId = Number(metamodelPropertySemanticTypeIdInput.value);
+    if (!semanticTypeId) {
+        showBanner("편집할 semantic type을 먼저 선택하세요.", "error");
+        return;
+    }
+
+    const propertyId = metamodelPropertyIdInput.value ? Number(metamodelPropertyIdInput.value) : null;
+    const payload = {
+        code: metamodelPropertyCodeInput.value.trim(),
+        display_name: metamodelPropertyDisplayNameInput.value.trim(),
+        value_type: metamodelPropertyValueTypeSelect.value,
+        unit: metamodelPropertyUnitInput.value.trim() || null,
+        default_value_json: metamodelPropertyDefaultValueJsonInput.value.trim() || null,
+        description: metamodelPropertyDescriptionInput.value.trim() || null,
+        is_required: metamodelPropertyRequiredInput.checked,
+        is_runtime: metamodelPropertyRuntimeInput.checked,
+        is_user_editable: metamodelPropertyUserEditableInput.checked,
+        sort_order: Number.parseInt(metamodelPropertySortOrderInput.value || "0", 10),
+    };
+
+    try {
+        if (propertyId) {
+            await apiFetch(`/api/admin/metamodel/properties/${propertyId}`, {
+                method: "PATCH",
+                body: payload,
+            });
+            showBanner("property definition을 수정했습니다.", "success");
+        } else {
+            await apiFetch(`/api/admin/metamodel/semantic-types/${semanticTypeId}/properties`, {
+                method: "POST",
+                body: payload,
+            });
+            showBanner("property definition을 생성했습니다.", "success");
+        }
+
+        await Promise.all([loadMetamodelVersions(), loadMetamodelProperties()]);
+        resetMetamodelPropertyForm();
     } catch (error) {
         showBanner(error.message, "error");
     }
@@ -1177,6 +1354,7 @@ async function refreshAll() {
             loadDebug(),
             loadCleanupRuns(),
         ]);
+        await loadMetamodelProperties();
     } catch (error) {
         showBanner(error.message, "error");
     }
@@ -1191,7 +1369,12 @@ refreshAlertHistoryButton?.addEventListener("click", loadAlertHistoryArchive);
 refreshDebugButton?.addEventListener("click", loadDebug);
 refreshCleanupButton?.addEventListener("click", loadCleanupRuns);
 refreshMetamodelVersionsButton?.addEventListener("click", loadMetamodelVersions);
-refreshMetamodelSemanticTypesButton?.addEventListener("click", loadMetamodelSemanticTypes);
+refreshMetamodelSemanticTypesButton?.addEventListener("click", () => {
+    loadMetamodelSemanticTypes()
+        .then(() => loadMetamodelProperties())
+        .catch((error) => showBanner(error.message, "error"));
+});
+refreshMetamodelPropertiesButton?.addEventListener("click", loadMetamodelProperties);
 refreshAlertRulesButton?.addEventListener("click", loadAlertRules);
 alertRuleScopeFilter?.addEventListener("change", loadAlertRules);
 alertRuleStateFilter?.addEventListener("change", loadAlertRules);
@@ -1224,10 +1407,19 @@ metamodelVersionForm?.addEventListener("submit", createMetamodelVersion);
 metamodelNamespaceSelect?.addEventListener("change", renderMetamodelSelectOptions);
 metamodelDraftVersionSelect?.addEventListener("change", () => {
     resetMetamodelSemanticTypeForm();
-    loadMetamodelSemanticTypes().catch((error) => showBanner(error.message, "error"));
+    resetMetamodelPropertyForm({ preserveSemanticType: false });
+    loadMetamodelSemanticTypes()
+        .then(() => loadMetamodelProperties())
+        .catch((error) => showBanner(error.message, "error"));
 });
 metamodelSemanticTypeForm?.addEventListener("submit", saveMetamodelSemanticType);
 metamodelSemanticTypeFormResetButton?.addEventListener("click", resetMetamodelSemanticTypeForm);
+metamodelPropertyForm?.addEventListener("submit", saveMetamodelProperty);
+metamodelPropertyFormResetButton?.addEventListener("click", () => resetMetamodelPropertyForm());
+metamodelPropertySemanticTypeIdInput?.addEventListener("change", () => {
+    resetMetamodelPropertyForm();
+    loadMetamodelProperties().catch((error) => showBanner(error.message, "error"));
+});
 alertRuleForm?.addEventListener("submit", saveAlertRule);
 alertRuleFormResetButton?.addEventListener("click", resetAlertRuleForm);
 alertRuleScopeTypeSelect?.addEventListener("change", toggleAlertRuleScopeFields);
@@ -1255,6 +1447,21 @@ metamodelSemanticTypesList?.addEventListener("click", (event) => {
         return;
     }
     fillMetamodelSemanticTypeForm(item);
+    metamodelPropertySemanticTypeIdInput.value = String(item.id);
+    resetMetamodelPropertyForm();
+    loadMetamodelProperties().catch((error) => showBanner(error.message, "error"));
+});
+metamodelPropertiesList?.addEventListener("click", (event) => {
+    const button = event.target instanceof HTMLElement ? event.target.closest(".edit-metamodel-property-button") : null;
+    if (!button) {
+        return;
+    }
+    const propertyId = Number(button.dataset.propertyId);
+    const item = metamodelProperties.find((entry) => entry.id === propertyId);
+    if (!item) {
+        return;
+    }
+    fillMetamodelPropertyForm(item);
 });
 alertRulesList?.addEventListener("click", (event) => {
     const button = event.target instanceof HTMLElement ? event.target.closest(".edit-alert-rule-button") : null;
@@ -1341,4 +1548,5 @@ latestStateStatusFilter?.addEventListener("change", loadLatestStates);
 debugDirectionFilter?.addEventListener("change", loadDebug);
 
 resetAlertRuleForm();
+resetMetamodelPropertyForm({ preserveSemanticType: false });
 refreshAll();

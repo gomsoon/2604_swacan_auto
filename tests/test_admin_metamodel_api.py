@@ -335,3 +335,216 @@ def test_admin_rejects_invalid_semantic_type_payload_boundaries(seeded_client) -
     assert invalid_kind.get_json()["error"]["code"] == "validation_error"
     assert invalid_bool.status_code == 400
     assert invalid_bool.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_can_list_property_definitions_for_semantic_type(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/metamodel/semantic-types/103/properties")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["semantic_type"]["code"] == "SoftwareProcess"
+    assert any(item["code"] == "display_name" for item in payload["items"])
+    assert any(item["code"] == "target_id" for item in payload["items"])
+
+
+def test_admin_can_create_property_definition_in_draft_semantic_type(seeded_app, seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v6-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for property definition create",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    semantic_types = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/semantic-types").get_json()["items"]
+    process_type = next(item for item in semantic_types if item["code"] == "SoftwareProcess")
+
+    response = seeded_client.post(
+        f"/api/admin/metamodel/semantic-types/{process_type['id']}/properties",
+        json={
+            "code": "worker_count",
+            "display_name": "Worker Count",
+            "description": "Expected worker process count",
+            "value_type": "integer",
+            "unit": "count",
+            "default_value_json": "4",
+            "is_required": False,
+            "is_runtime": False,
+            "is_user_editable": True,
+            "sort_order": 30,
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert payload["property_definition"]["code"] == "worker_count"
+    assert payload["property_definition"]["default_value"] == 4
+    assert payload["property_definition"]["semantic_type_code"] == "SoftwareProcess"
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        row = db_conn.execute(
+            "SELECT code, display_name, default_value_json FROM property_definitions WHERE semantic_type_id = ? AND code = ?",
+            (process_type["id"], "worker_count"),
+        ).fetchone()
+        assert row["display_name"] == "Worker Count"
+        assert row["default_value_json"] == "4"
+
+
+def test_admin_rejects_property_create_for_published_semantic_type(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/metamodel/semantic-types/103/properties",
+        json={
+            "code": "worker_count",
+            "display_name": "Worker Count",
+            "value_type": "integer",
+            "is_required": False,
+            "is_runtime": False,
+            "is_user_editable": True,
+            "sort_order": 10,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["error"]["code"] == "invalid_state"
+
+
+def test_admin_can_update_property_definition_with_boundary_values(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v7-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for property update",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    semantic_types = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/semantic-types").get_json()["items"]
+    process_type = next(item for item in semantic_types if item["code"] == "SoftwareProcess")
+    create_property = seeded_client.post(
+        f"/api/admin/metamodel/semantic-types/{process_type['id']}/properties",
+        json={
+            "code": "worker_count",
+            "display_name": "Worker Count",
+            "value_type": "integer",
+            "default_value_json": "4",
+            "is_required": False,
+            "is_runtime": False,
+            "is_user_editable": True,
+            "sort_order": 0,
+        },
+    )
+    assert create_property.status_code == 201
+    property_id = create_property.get_json()["property_definition"]["id"]
+
+    ok_response = seeded_client.patch(
+        f"/api/admin/metamodel/properties/{property_id}",
+        json={
+            "display_name": "Worker Count Updated",
+            "description": "a" * 500,
+            "value_type": "number",
+            "unit": "threads",
+            "default_value_json": "{\"min\":1,\"max\":32}",
+            "is_required": True,
+            "is_runtime": False,
+            "is_user_editable": False,
+            "sort_order": 9999,
+        },
+    )
+    too_high_sort_order = seeded_client.patch(
+        f"/api/admin/metamodel/properties/{property_id}",
+        json={
+            "display_name": "Worker Count Updated",
+            "description": "ok",
+            "value_type": "number",
+            "default_value_json": "8",
+            "is_required": True,
+            "is_runtime": False,
+            "is_user_editable": False,
+            "sort_order": 10000,
+        },
+    )
+
+    assert ok_response.status_code == 200
+    ok_payload = ok_response.get_json()["property_definition"]
+    assert ok_payload["display_name"] == "Worker Count Updated"
+    assert ok_payload["sort_order"] == 9999
+    assert ok_payload["default_value"] == {"min": 1, "max": 32}
+    assert too_high_sort_order.status_code == 400
+    assert too_high_sort_order.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_rejects_invalid_property_definition_payload_boundaries(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v8-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for property validation",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    semantic_types = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/semantic-types").get_json()["items"]
+    process_type = next(item for item in semantic_types if item["code"] == "SoftwareProcess")
+
+    invalid_value_type = seeded_client.post(
+        f"/api/admin/metamodel/semantic-types/{process_type['id']}/properties",
+        json={
+            "code": "worker_count",
+            "display_name": "Worker Count",
+            "value_type": "floatish",
+            "is_required": False,
+            "is_runtime": False,
+            "is_user_editable": True,
+            "sort_order": 1,
+        },
+    )
+    invalid_default_json = seeded_client.post(
+        f"/api/admin/metamodel/semantic-types/{process_type['id']}/properties",
+        json={
+            "code": "worker_mode",
+            "display_name": "Worker Mode",
+            "value_type": "json",
+            "default_value_json": "{bad-json}",
+            "is_required": False,
+            "is_runtime": False,
+            "is_user_editable": True,
+            "sort_order": 1,
+        },
+    )
+    invalid_sort_order = seeded_client.post(
+        f"/api/admin/metamodel/semantic-types/{process_type['id']}/properties",
+        json={
+            "code": "worker_flag",
+            "display_name": "Worker Flag",
+            "value_type": "boolean",
+            "is_required": False,
+            "is_runtime": False,
+            "is_user_editable": True,
+            "sort_order": -1,
+        },
+    )
+
+    assert invalid_value_type.status_code == 400
+    assert invalid_value_type.get_json()["error"]["code"] == "validation_error"
+    assert invalid_default_json.status_code == 400
+    assert invalid_default_json.get_json()["error"]["code"] == "validation_error"
+    assert invalid_sort_order.status_code == 400
+    assert invalid_sort_order.get_json()["error"]["code"] == "validation_error"
