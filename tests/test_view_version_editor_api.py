@@ -101,6 +101,50 @@ def test_create_version_node_allows_metamodel_defined_virtual_machine(seeded_cli
     assert payload["node"]["parent_node_id"] == server_node["id"]
 
 
+def test_create_version_node_allows_process_inside_virtual_machine(seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+    server_node = next(node for node in draft_payload["nodes"] if node["node_type"] == "PhysicalServer")
+
+    vm_response = seeded_client.post(
+        f"/api/view-versions/{version_id}/nodes",
+        json={
+            "revision": draft_payload["version"]["revision"],
+            "node_type": "VirtualMachine",
+            "parent_node_id": server_node["id"],
+            "display_name": "Worker VM",
+            "target_id": "vm_worker_1",
+            "x": 90,
+            "y": 170,
+            "width": 240,
+            "height": 160,
+        },
+    )
+    assert vm_response.status_code == 201
+    vm_payload = vm_response.get_json()
+
+    process_response = seeded_client.post(
+        f"/api/view-versions/{version_id}/nodes",
+        json={
+            "revision": vm_payload["revision"],
+            "node_type": "SoftwareProcess",
+            "parent_node_id": vm_payload["node"]["id"],
+            "display_name": "VM Worker Process",
+            "target_id": "vm_worker_process_1",
+            "x": 120,
+            "y": 220,
+            "width": 170,
+            "height": 72,
+        },
+    )
+
+    assert process_response.status_code == 201
+    process_payload = process_response.get_json()
+    assert process_payload["node"]["parent_node_id"] == vm_payload["node"]["id"]
+    assert process_payload["node"]["node_type"] == "SoftwareProcess"
+
+
 def test_create_version_node_rejects_invalid_node_type(seeded_client) -> None:
     login(seeded_client)
     draft_payload = create_draft(seeded_client)

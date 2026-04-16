@@ -165,7 +165,9 @@ function refreshVersionPills() {
 function refreshPaletteInteractivity() {
     const paletteButtons = paletteGroupsRoot?.querySelectorAll(".palette-button") || [];
     paletteButtons.forEach((button) => {
-        button.disabled = !isEditableVersion() || !canCreateNodeType(button.dataset.semanticType);
+        const availability = getNodeCreationAvailability(button.dataset.semanticType);
+        button.disabled = !isEditableVersion() || !availability.enabled;
+        button.title = availability.reason;
     });
 }
 
@@ -260,6 +262,32 @@ function getNodeButtonLabel(nodeType, item) {
 
 function getEdgeToolLabel(edgeType, item) {
     return EDGE_TOOL_LABEL_BY_TYPE[edgeType] || `${item?.display_name || edgeType} 시작`;
+}
+
+function getNodeCreationAvailability(nodeType) {
+    if (!isNodeSemanticType(nodeType)) {
+        return {
+            enabled: false,
+            reason: "현재 메타모델에서 사용할 수 없는 semantic type입니다.",
+        };
+    }
+    const semanticType = getSemanticType(nodeType);
+    const allowedParentTypeCodes = getAllowedParentTypeCodes(nodeType);
+    if (allowedParentTypeCodes.length === 0) {
+        return { enabled: true, reason: `${semanticType?.display_name || nodeType}을(를) 루트 요소로 추가합니다.` };
+    }
+    const parentId = findCandidateParentId(nodeType);
+    if (parentId) {
+        const parentNode = getNode(parentId);
+        return {
+            enabled: true,
+            reason: `${parentNode?.display_name || parentNode?.node_type || "상위 요소"} 안에 ${semanticType?.display_name || nodeType}을(를) 추가합니다.`,
+        };
+    }
+    return {
+        enabled: false,
+        reason: `${semanticType?.display_name || nodeType}을(를) 배치할 수 있는 상위 요소를 먼저 선택하거나 생성해 주세요.`,
+    };
 }
 
 function getDefaultNodePayload(nodeType, item = getPaletteItemByType(nodeType)) {
@@ -412,11 +440,15 @@ async function loadPalette(metamodelVersionCode) {
 function syncSelectionPanel() {
     const node = getNode(state.selectedNodeId);
     if (node) {
-        selectionKind.textContent = `${node.node_type} #${node.id}`;
+        const semanticType = getSemanticType(node.semantic_type_code || node.node_type);
+        selectionKind.textContent = `${semanticType?.display_name || node.node_type} #${node.id}`;
         nodeForm.hidden = false;
         edgeSummary.hidden = true;
         formFields.displayName.value = node.display_name || "";
         formFields.targetId.value = node.target_id || "";
+        const allowsRuntimeBinding = semanticType?.allows_runtime_binding !== false;
+        formFields.targetId.disabled = !isEditableVersion() || !allowsRuntimeBinding;
+        formFields.targetId.placeholder = allowsRuntimeBinding ? "" : "이 semantic type은 runtime binding을 사용하지 않습니다.";
         formFields.x.value = node.x;
         formFields.y.value = node.y;
         formFields.width.value = node.width;
@@ -518,6 +550,11 @@ async function loadView() {
 
 async function addNode(nodeType) {
     if (!ensureEditableVersion("노드 추가")) {
+        return;
+    }
+    const availability = getNodeCreationAvailability(nodeType);
+    if (!availability.enabled) {
+        showBanner(availability.reason, "error");
         return;
     }
     clearBanner();

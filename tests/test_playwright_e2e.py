@@ -51,21 +51,28 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
 
     page.wait_for_url(re.compile(r".*/views/\d+/edit$"))
     expect(page.get_by_role("button", name="물리 서버 추가")).to_be_visible()
+    expect(page.get_by_role("button", name="가상 머신 추가")).to_be_disabled()
 
     page.get_by_role("button", name="물리 서버 추가").click()
     server_shape = page.locator('g.diagram-node[data-node-type="PhysicalServer"] .node-shape').first
     expect(server_shape).to_be_visible()
     expect(page.locator('g.diagram-node[data-node-type="PhysicalServer"]')).to_have_count(1)
     expect(page.get_by_role("button", name="가상 머신 추가")).to_be_visible()
+    expect(page.get_by_role("button", name="가상 머신 추가")).to_be_enabled()
 
     server_shape.click(force=True)
     page.get_by_role("button", name="가상 머신 추가").click()
     expect(page.locator('g.diagram-node[data-node-type="VirtualMachine"]')).to_have_count(1)
     expect(page.locator('g.diagram-node[data-notation-code="vm.logical.rect"]')).to_have_count(1)
+    vm_shape = page.locator('g.diagram-node[data-node-type="VirtualMachine"] .node-shape').first
+
+    vm_shape.click(force=True)
+    page.get_by_role("button", name="프로세스 추가").click()
+    expect(page.locator('g.diagram-node[data-node-type="SoftwareProcess"]')).to_have_count(1)
 
     server_shape.click(force=True)
     page.get_by_role("button", name="프로세스 추가").click()
-    expect(page.locator('g.diagram-node[data-node-type="SoftwareProcess"]')).to_have_count(1)
+    expect(page.locator('g.diagram-node[data-node-type="SoftwareProcess"]')).to_have_count(2)
 
     server_shape.click(force=True)
     page.get_by_role("button", name="에이전트 추가").click()
@@ -74,7 +81,7 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
 
     view_id = int(re.search(r"/views/(\d+)/edit$", page.url).group(1))
 
-    process_shape = page.locator('g.diagram-node[data-node-type="SoftwareProcess"] .node-shape').first
+    process_shape = page.locator('g.diagram-node[data-node-type="SoftwareProcess"] .node-shape').nth(1)
     agent_shape = page.locator('g.diagram-node[data-node-type="MonitoringAgent"] .node-shape').first
 
     process_shape.click(force=True)
@@ -130,7 +137,7 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
             """
             SELECT id
             FROM view_version_nodes
-            WHERE view_version_id = ? AND node_type = 'SoftwareProcess'
+            WHERE view_version_id = ? AND node_type = 'SoftwareProcess' AND display_name = 'Worker Alpha'
             LIMIT 1
             """,
             (draft_row["id"],),
@@ -239,7 +246,7 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
 
     monitor_server_node = page.locator('g.diagram-node[data-node-type="PhysicalServer"]').first
     monitor_agent_shape = page.locator('g.diagram-node[data-node-type="MonitoringAgent"] .node-shape').first
-    monitor_process_shape = page.locator('g.diagram-node[data-node-type="SoftwareProcess"] .node-shape').first
+    monitor_process_shape = page.locator('g.diagram-node[data-node-type="SoftwareProcess"]', has_text="Worker Alpha").locator(".node-shape").first
     expect(page.locator('g.diagram-node[data-notation-code="server.physical.rect"]')).to_have_count(1)
     expect(page.locator('g.diagram-node[data-notation-code="agent.rounded_rect.double_border"] .node-double-border')).to_have_count(1)
 
@@ -539,7 +546,8 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     page.locator("#inspector-association-display-name").fill("Worker Pool -> Monitoring Agent")
     page.locator("#inspector-association-direction").select_option("undirected")
     page.locator("#metamodel-workspace-inspector").get_by_role("button", name="빠른 저장").click()
-    expect(page.locator("#admin-metamodel-associations-list")).to_contain_text("Worker Pool -> Monitoring Agent")
+    expect(page.locator("#metamodel-association-display-name")).to_have_value("Worker Pool -> Monitoring Agent")
+    expect(page.locator("#admin-metamodel-associations-list")).to_contain_text("worker_pool_to_monitoring_agent")
     expect(page.locator("#metamodel-workspace-inspector")).to_contain_text("undirected")
 
     createdVersion.get_by_role("button", name="Diff").click()

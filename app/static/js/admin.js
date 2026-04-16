@@ -673,6 +673,10 @@ async function saveContainmentRuleFromInspector(ruleId) {
     });
     await Promise.all([loadMetamodelVersions(), loadMetamodelContainmentRules()]);
     selectedMetamodelWorkspace = { kind: "containment_rule", id: Number(ruleId) };
+    const updatedItem = metamodelContainmentRules.find((item) => Number(item.id) === Number(ruleId));
+    if (updatedItem) {
+        fillMetamodelContainmentRuleForm(updatedItem);
+    }
     refreshMetamodelWorkspace();
     showBanner("Containment rule을 inspector에서 저장했습니다.", "success");
 }
@@ -691,6 +695,10 @@ async function saveAssociationFromInspector(associationId) {
     });
     await Promise.all([loadMetamodelVersions(), loadMetamodelAssociations()]);
     selectedMetamodelWorkspace = { kind: "association_definition", id: Number(associationId) };
+    const updatedItem = metamodelAssociations.find((item) => Number(item.id) === Number(associationId));
+    if (updatedItem) {
+        fillMetamodelAssociationForm(updatedItem);
+    }
     refreshMetamodelWorkspace();
     showBanner("Association definition을 inspector에서 저장했습니다.", "success");
 }
