@@ -437,6 +437,11 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     expect(page.locator("#admin-metamodel-associations-list .admin-item", has_text="Monitors Worker Pool Updated").first).to_contain_text("undirected")
     expect(page.locator("#admin-metamodel-associations-list .admin-item", has_text="Monitors Worker Pool Updated").first).to_contain_text("1..n")
 
+    createdVersion.get_by_role("button", name="Validate").click()
+    expect(page.locator("#metamodel-validation-panel")).to_contain_text("core / core-v2-ui-draft validation")
+    expect(page.locator("#metamodel-validation-panel")).to_contain_text("valid")
+    expect(page.locator("#metamodel-validation-panel")).to_contain_text("error 0")
+
     createdVersion.locator(".publish-metamodel-button").click()
 
     expect(page.locator(".admin-item", has_text="core-v2-ui-draft").first).to_contain_text("published")

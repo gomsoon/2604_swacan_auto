@@ -157,6 +157,115 @@ def test_admin_rejects_publish_for_non_draft_version(seeded_client) -> None:
     assert response.get_json()["error"]["code"] == "publish_conflict"
 
 
+def test_admin_can_validate_draft_version_before_publish(seeded_client) -> None:
+    login(seeded_client)
+    create_response = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v2-validation-draft",
+            "based_on_version_id": 1,
+            "description": "Clone for validation test",
+        },
+    )
+    assert create_response.status_code == 201
+    draft_version_id = create_response.get_json()["version"]["id"]
+
+    response = seeded_client.get(f"/api/admin/metamodel/versions/{draft_version_id}/validation")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["version"]["id"] == draft_version_id
+    assert payload["validation"]["is_valid"] is True
+    assert payload["validation"]["summary"]["error_count"] == 0
+
+
+def test_admin_rejects_publish_when_validation_fails_missing_default_notation(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v2-invalid-default-notation",
+            "based_on_version_id": 1,
+            "description": "Draft with missing default notation",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    create_type = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPool",
+            "display_name": "Worker Pool",
+            "kind": "container",
+            "runtime_kind": "process-group",
+            "description": "Missing default notation target",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+    assert create_type.status_code == 201
+
+    validation_response = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/validation")
+    assert validation_response.status_code == 200
+    validation_payload = validation_response.get_json()["validation"]
+    assert validation_payload["is_valid"] is False
+    assert any(issue["code"] == "missing_default_notation" for issue in validation_payload["issues"])
+
+    publish_response = seeded_client.post(f"/api/admin/metamodel/versions/{version_id}/publish")
+    assert publish_response.status_code == 409
+    publish_payload = publish_response.get_json()
+    assert publish_payload["error"]["code"] == "validation_failed"
+    assert any(issue["code"] == "missing_default_notation" for issue in publish_payload["validation"]["issues"])
+
+
+def test_admin_rejects_publish_when_validation_fails_containment_cycle(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v2-invalid-cycle",
+            "based_on_version_id": 1,
+            "description": "Draft with containment cycle",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    semantic_types = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/semantic-types").get_json()["items"]
+    server_type = next(item for item in semantic_types if item["code"] == "PhysicalServer")
+    process_type = next(item for item in semantic_types if item["code"] == "SoftwareProcess")
+
+    create_cycle = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/containment-rules",
+        json={
+            "parent_type_id": process_type["id"],
+            "child_type_id": server_type["id"],
+            "min_count": 0,
+            "max_count": 1,
+            "cardinality_scope": "group_total",
+            "is_required": False,
+        },
+    )
+    assert create_cycle.status_code == 201
+
+    validation_response = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/validation")
+    assert validation_response.status_code == 200
+    validation_payload = validation_response.get_json()["validation"]
+    assert validation_payload["is_valid"] is False
+    assert any(issue["code"] == "containment_cycle" for issue in validation_payload["issues"])
+
+    publish_response = seeded_client.post(f"/api/admin/metamodel/versions/{version_id}/publish")
+    assert publish_response.status_code == 409
+    publish_payload = publish_response.get_json()
+    assert publish_payload["error"]["code"] == "validation_failed"
+    assert any(issue["code"] == "containment_cycle" for issue in publish_payload["validation"]["issues"])
+
+
 def test_admin_can_list_semantic_types_for_version(seeded_client) -> None:
     login(seeded_client)
 

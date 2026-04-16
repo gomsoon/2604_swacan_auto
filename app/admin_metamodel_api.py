@@ -471,6 +471,166 @@ def update_default_notation(*, semantic_type_id: int, notation_id: int | None, d
     )
 
 
+def validate_metamodel_version(version_id: int) -> dict[str, Any]:
+    db_conn = get_db()
+    issues: list[dict[str, Any]] = []
+
+    semantic_types = db_conn.execute(
+        """
+        SELECT st.id, st.code, st.display_name, st.kind, st.default_notation_id, st.is_active
+        FROM semantic_types AS st
+        WHERE st.metamodel_version_id = ?
+        ORDER BY st.id ASC
+        """,
+        (version_id,),
+    ).fetchall()
+    semantic_type_ids = {row["id"] for row in semantic_types}
+
+    if not semantic_types:
+        issues.append(
+            {
+                "code": "missing_semantic_types",
+                "severity": "error",
+                "message": "semantic type이 하나 이상 필요합니다.",
+            }
+        )
+
+    for row in semantic_types:
+        if row["kind"] == "runtime-only" or not row["is_active"]:
+            continue
+        if row["default_notation_id"] is None:
+            issues.append(
+                {
+                    "code": "missing_default_notation",
+                    "severity": "error",
+                    "message": f"{row['display_name']} ({row['code']})에 default notation이 필요합니다.",
+                    "semantic_type_id": row["id"],
+                    "semantic_type_code": row["code"],
+                }
+            )
+            continue
+
+        notation_row = db_conn.execute(
+            """
+            SELECT id
+            FROM notation_definitions
+            WHERE id = ? AND metamodel_version_id = ?
+            """,
+            (row["default_notation_id"], version_id),
+        ).fetchone()
+        if notation_row is None:
+            issues.append(
+                {
+                    "code": "invalid_default_notation",
+                    "severity": "error",
+                    "message": f"{row['display_name']} ({row['code']})의 default notation이 같은 version에 존재하지 않습니다.",
+                    "semantic_type_id": row["id"],
+                    "semantic_type_code": row["code"],
+                }
+            )
+
+    containment_rows = db_conn.execute(
+        """
+        SELECT parent_type_id, child_type_id
+        FROM containment_rules
+        WHERE metamodel_version_id = ?
+        ORDER BY id ASC
+        """,
+        (version_id,),
+    ).fetchall()
+
+    adjacency: dict[int, list[int]] = {}
+    for row in containment_rows:
+        adjacency.setdefault(row["parent_type_id"], []).append(row["child_type_id"])
+
+    visited: set[int] = set()
+    stack: set[int] = set()
+
+    def dfs(node_id: int, path: list[int]) -> None:
+        visited.add(node_id)
+        stack.add(node_id)
+        for next_id in adjacency.get(node_id, []):
+            if next_id not in semantic_type_ids:
+                issues.append(
+                    {
+                        "code": "invalid_containment_reference",
+                        "severity": "error",
+                        "message": f"containment rule이 존재하지 않는 semantic type을 참조합니다. ({node_id} -> {next_id})",
+                    }
+                )
+                continue
+            if next_id not in visited:
+                dfs(next_id, path + [next_id])
+            elif next_id in stack:
+                cycle_path = path + [next_id]
+                issues.append(
+                    {
+                        "code": "containment_cycle",
+                        "severity": "error",
+                        "message": "containment hierarchy에 cycle이 있습니다.",
+                        "cycle_type_ids": cycle_path,
+                    }
+                )
+        stack.remove(node_id)
+
+    for type_id in semantic_type_ids:
+        if type_id not in visited:
+            dfs(type_id, [type_id])
+
+    association_rows = db_conn.execute(
+        """
+        SELECT ad.id, ad.code, ad.source_type_id, ad.target_type_id, ad.semantics_json
+        FROM association_definitions AS ad
+        WHERE ad.metamodel_version_id = ?
+        ORDER BY ad.id ASC
+        """,
+        (version_id,),
+    ).fetchall()
+
+    edge_type_codes = {
+        row["code"]
+        for row in semantic_types
+        if row["kind"] == "edge"
+    }
+    for row in association_rows:
+        if row["source_type_id"] not in semantic_type_ids or row["target_type_id"] not in semantic_type_ids:
+            issues.append(
+                {
+                    "code": "invalid_association_reference",
+                    "severity": "error",
+                    "message": f"association {row['code']}이 같은 version에 없는 semantic type을 참조합니다.",
+                    "association_id": row["id"],
+                    "association_code": row["code"],
+                }
+            )
+        semantics = parse_json_or_none(row["semantics_json"])
+        if isinstance(semantics, dict) and semantics.get("default_edge_type"):
+            default_edge_type = semantics["default_edge_type"]
+            if default_edge_type not in edge_type_codes:
+                issues.append(
+                    {
+                        "code": "invalid_association_edge_type",
+                        "severity": "error",
+                        "message": f"association {row['code']}의 default_edge_type {default_edge_type}가 존재하지 않습니다.",
+                        "association_id": row["id"],
+                        "association_code": row["code"],
+                    }
+                )
+
+    summary = {
+        "semantic_type_count": len(semantic_types),
+        "containment_rule_count": len(containment_rows),
+        "association_count": len(association_rows),
+        "error_count": sum(1 for issue in issues if issue["severity"] == "error"),
+        "warning_count": sum(1 for issue in issues if issue["severity"] == "warning"),
+    }
+    return {
+        "is_valid": summary["error_count"] == 0,
+        "summary": summary,
+        "issues": issues,
+    }
+
+
 def validate_semantic_type_payload(data: dict[str, Any], *, partial: bool = False) -> tuple[dict[str, Any] | None, Any | None]:
     payload = dict(data)
     try:
@@ -944,6 +1104,19 @@ def create_version():
     return {"version": serialize_version(fetch_version(new_version_id))}, 201
 
 
+@bp.get("/versions/<int:version_id>/validation")
+@admin_required
+def validate_version(version_id: int):
+    version = fetch_version(version_id)
+    if version is None:
+        return error_response("metamodel_not_found", "metamodel version not found", 404)
+
+    return {
+        "version": serialize_version(version),
+        "validation": validate_metamodel_version(version_id),
+    }
+
+
 @bp.post("/versions/<int:version_id>/publish")
 @admin_required
 def publish_version(version_id: int):
@@ -952,6 +1125,17 @@ def publish_version(version_id: int):
         return error_response("metamodel_not_found", "metamodel version not found", 404)
     if version["status"] != "draft":
         return error_response("publish_conflict", "only draft versions can be published", 409)
+
+    validation = validate_metamodel_version(version_id)
+    if not validation["is_valid"]:
+        return {
+            "error": {
+                "code": "validation_failed",
+                "message": "metamodel version validation failed",
+            },
+            "version": serialize_version(version),
+            "validation": validation,
+        }, 409
 
     db_conn = get_db()
     timestamp = now_iso()

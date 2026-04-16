@@ -10,6 +10,7 @@ const staleAgents = document.getElementById("admin-stale-agents");
 const cleanupSummary = document.getElementById("admin-cleanup-summary");
 const metamodelVersionsList = document.getElementById("admin-metamodel-versions-list");
 const metamodelVersionCount = document.getElementById("metamodel-version-count");
+const metamodelValidationPanel = document.getElementById("metamodel-validation-panel");
 const metamodelSemanticTypesList = document.getElementById("admin-metamodel-semantic-types-list");
 const metamodelSemanticTypeCount = document.getElementById("metamodel-semantic-type-count");
 const metamodelPropertiesList = document.getElementById("admin-metamodel-properties-list");
@@ -172,6 +173,7 @@ let selectedMetamodelPropertyId = null;
 let selectedMetamodelContainmentRuleId = null;
 let selectedMetamodelNotationId = null;
 let selectedMetamodelAssociationId = null;
+let selectedMetamodelValidation = null;
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -692,6 +694,7 @@ function renderMetamodelVersions(items) {
                             <span class="meta-pill">type ${escapeHtml(item.semantic_type_count)}</span>
                             <span class="meta-pill">notation ${escapeHtml(item.notation_count)}</span>
                             <span class="meta-pill">palette ${escapeHtml(item.palette_group_count)}</span>
+                            ${canPublish ? `<button class="button ghost small validate-metamodel-button" type="button" data-version-id="${escapeHtml(item.id)}">Validate</button>` : ""}
                             ${canPublish ? `<button class="button small primary publish-metamodel-button" type="button" data-version-id="${escapeHtml(item.id)}">Publish</button>` : ""}
                         </div>
                     </div>
@@ -701,6 +704,53 @@ function renderMetamodelVersions(items) {
             `;
         })
         .join("");
+}
+
+function renderMetamodelValidationPanel() {
+    if (!selectedMetamodelValidation) {
+        metamodelValidationPanel.innerHTML =
+            '<p class="section-copy">draft version의 validation 결과를 확인하면 publish 전 문제를 빠르게 파악할 수 있습니다.</p>';
+        return;
+    }
+
+    const { version, validation } = selectedMetamodelValidation;
+    const summary = validation.summary || {};
+    const issues = validation.issues || [];
+
+    metamodelValidationPanel.innerHTML = `
+        <div class="section-header">
+            <h3>${escapeHtml(version.namespace_code)} / ${escapeHtml(version.version_code)} validation</h3>
+            <span class="meta-pill">${validation.is_valid ? "valid" : "invalid"}</span>
+        </div>
+        <div class="summary-metrics">
+            ${renderMetaPills([
+                ["semantic type", summary.semantic_type_count ?? 0],
+                ["containment", summary.containment_rule_count ?? 0],
+                ["association", summary.association_count ?? 0],
+                ["error", summary.error_count ?? 0],
+                ["warning", summary.warning_count ?? 0],
+            ])}
+        </div>
+        ${
+            issues.length === 0
+                ? '<p class="section-copy">현재 publish를 막는 validation issue가 없습니다.</p>'
+                : `<div class="admin-list compact-admin-list">
+                    ${issues
+                        .map(
+                            (issue) => `
+                                <article class="admin-item compact-admin-item">
+                                    <div class="section-header">
+                                        <h4>${escapeHtml(issue.code)}</h4>
+                                        <span class="meta-pill">${escapeHtml(issue.severity)}</span>
+                                    </div>
+                                    <p class="admin-meta">${escapeHtml(issue.message || "설명 없음")}</p>
+                                </article>
+                            `
+                        )
+                        .join("")}
+                </div>`
+        }
+    `;
 }
 
 function resetMetamodelSemanticTypeForm() {
@@ -1377,6 +1427,12 @@ async function loadMetamodelVersions() {
     renderMetamodelVersions(payload.items);
 }
 
+async function loadMetamodelValidation(versionId) {
+    const payload = await apiFetch(`/api/admin/metamodel/versions/${versionId}/validation`);
+    selectedMetamodelValidation = payload;
+    renderMetamodelValidationPanel();
+}
+
 async function loadMetamodelSemanticTypes() {
     const versionId = metamodelDraftVersionSelect.value;
     if (!versionId) {
@@ -1546,12 +1602,23 @@ async function publishMetamodelVersion(versionId) {
         await loadMetamodelContainmentRules();
         await loadMetamodelPaletteGroups();
         await loadMetamodelNotations();
+        await loadMetamodelAssociations();
+        selectedMetamodelValidation = null;
+        renderMetamodelValidationPanel();
         resetMetamodelSemanticTypeForm();
         resetMetamodelPropertyForm();
         resetMetamodelContainmentRuleForm();
         resetMetamodelNotationForm({ preserveSemanticType: false });
+        resetMetamodelAssociationForm();
         showBanner("메타모델 버전을 publish했습니다.", "success");
     } catch (error) {
+        if (error.payload?.version && error.payload?.validation) {
+            selectedMetamodelValidation = {
+                version: error.payload.version,
+                validation: error.payload.validation,
+            };
+            renderMetamodelValidationPanel();
+        }
         showBanner(error.message, "error");
     }
 }
@@ -1992,6 +2059,23 @@ alertRuleForm?.addEventListener("submit", saveAlertRule);
 alertRuleFormResetButton?.addEventListener("click", resetAlertRuleForm);
 alertRuleScopeTypeSelect?.addEventListener("change", toggleAlertRuleScopeFields);
 metamodelVersionsList?.addEventListener("click", async (event) => {
+    const validateButton = event.target instanceof HTMLElement ? event.target.closest(".validate-metamodel-button") : null;
+    if (validateButton) {
+        const versionId = Number(validateButton.dataset.versionId);
+        if (!versionId) {
+            return;
+        }
+
+        try {
+            clearBanner();
+            await loadMetamodelValidation(versionId);
+            showBanner("메타모델 validation 결과를 갱신했습니다.", "success");
+        } catch (error) {
+            showBanner(error.message, "error");
+        }
+        return;
+    }
+
     const button = event.target instanceof HTMLElement ? event.target.closest(".publish-metamodel-button") : null;
     if (!button) {
         return;
@@ -2162,4 +2246,5 @@ resetMetamodelPropertyForm({ preserveSemanticType: false });
 resetMetamodelContainmentRuleForm();
 resetMetamodelNotationForm({ preserveSemanticType: false });
 resetMetamodelAssociationForm();
+renderMetamodelValidationPanel();
 refreshAll();
