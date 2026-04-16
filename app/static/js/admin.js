@@ -189,6 +189,7 @@ let selectedMetamodelContainmentRuleId = null;
 let selectedMetamodelNotationId = null;
 let selectedMetamodelAssociationId = null;
 let selectedMetamodelValidation = null;
+let selectedMetamodelDiff = null;
 let selectedMetamodelWorkspace = null;
 let metamodelEditorFocusTimer = null;
 let metamodelWorkspaceInteractionMode = "select";
@@ -1175,6 +1176,7 @@ function renderMetamodelVersions(items) {
                             <span class="meta-pill">type ${escapeHtml(item.semantic_type_count)}</span>
                             <span class="meta-pill">notation ${escapeHtml(item.notation_count)}</span>
                             <span class="meta-pill">palette ${escapeHtml(item.palette_group_count)}</span>
+                            <button class="button ghost small diff-metamodel-button" type="button" data-version-id="${escapeHtml(item.id)}">Diff</button>
                             ${canPublish ? `<button class="button ghost small validate-metamodel-button" type="button" data-version-id="${escapeHtml(item.id)}">Validate</button>` : ""}
                             ${canPublish ? `<button class="button small primary publish-metamodel-button" type="button" data-version-id="${escapeHtml(item.id)}">Publish</button>` : ""}
                         </div>
@@ -1187,49 +1189,179 @@ function renderMetamodelVersions(items) {
         .join("");
 }
 
+function renderMetamodelDiffItems(label, items, kind) {
+    if (!items || items.length === 0) {
+        return "";
+    }
+
+    return `
+        <section>
+            <h4>${escapeHtml(label)}</h4>
+            <div class="admin-list compact-admin-list">
+                ${items
+                    .map((item) => {
+                        if (kind === "changed") {
+                            return `
+                                <article class="admin-item compact-admin-item">
+                                    <div class="section-header">
+                                        <h5>${escapeHtml(item.title)}</h5>
+                                        <span class="meta-pill">${escapeHtml(item.key)}</span>
+                                    </div>
+                                    <p class="admin-meta">${escapeHtml(item.meta || "-")}</p>
+                                    <p class="admin-meta">changed: ${escapeHtml((item.changed_fields || []).join(", "))}</p>
+                                </article>
+                            `;
+                        }
+
+                        return `
+                            <article class="admin-item compact-admin-item">
+                                <div class="section-header">
+                                    <h5>${escapeHtml(item.title)}</h5>
+                                    <span class="meta-pill">${escapeHtml(item.key)}</span>
+                                </div>
+                                <p class="admin-meta">${escapeHtml(item.meta || "-")}</p>
+                            </article>
+                        `;
+                    })
+                    .join("")}
+            </div>
+        </section>
+    `;
+}
+
 function renderMetamodelValidationPanel() {
-    if (!selectedMetamodelValidation) {
+    if (!selectedMetamodelValidation && !selectedMetamodelDiff) {
         metamodelValidationPanel.innerHTML =
-            '<p class="section-copy">draft version의 validation 결과를 확인하면 publish 전 문제를 빠르게 파악할 수 있습니다.</p>';
+            '<p class="section-copy">draft version의 validation 결과와 baseline 대비 diff/영향도를 확인하면 publish 전 판단이 쉬워집니다.</p>';
         return;
     }
 
-    const { version, validation } = selectedMetamodelValidation;
-    const summary = validation.summary || {};
-    const issues = validation.issues || [];
+    const version = selectedMetamodelValidation?.version || selectedMetamodelDiff?.version;
+    const validation = selectedMetamodelValidation?.validation || null;
+    const validationSummary = validation?.summary || {};
+    const validationIssues = validation?.issues || [];
+    const diff = selectedMetamodelDiff?.diff || null;
+    const diffSummary = diff?.summary || {};
+    const diffImpacts = diff?.impacts || {};
+    const baselineVersion = diff?.baseline_version || null;
+    const diffSectionLabels = {
+        semantic_types: "Semantic Type",
+        properties: "Property",
+        containment_rules: "Containment",
+        associations: "Association",
+        notations: "Notation",
+    };
+    const diffSectionsMarkup = diff
+        ? Object.entries(diffSectionLabels)
+            .map(([sectionKey, sectionLabel]) => {
+                const section = diff.sections?.[sectionKey];
+                if (!section) {
+                    return "";
+                }
+                return `
+                    <section>
+                        <h4>${escapeHtml(sectionLabel)}</h4>
+                        <div class="summary-metrics">
+                            ${renderMetaPills([
+                                ["added", section.added.length],
+                                ["changed", section.changed.length],
+                                ["removed", section.removed.length],
+                                ["unchanged", section.unchanged_count],
+                            ])}
+                        </div>
+                        ${renderMetamodelDiffItems(`${sectionLabel} added`, section.added, "added")}
+                        ${renderMetamodelDiffItems(`${sectionLabel} changed`, section.changed, "changed")}
+                        ${renderMetamodelDiffItems(`${sectionLabel} removed`, section.removed, "removed")}
+                    </section>
+                `;
+            })
+            .join("")
+        : "";
 
     metamodelValidationPanel.innerHTML = `
         <div class="section-header">
-            <h3>${escapeHtml(version.namespace_code)} / ${escapeHtml(version.version_code)} validation</h3>
-            <span class="meta-pill">${validation.is_valid ? "valid" : "invalid"}</span>
-        </div>
-        <div class="summary-metrics">
-            ${renderMetaPills([
-                ["semantic type", summary.semantic_type_count ?? 0],
-                ["containment", summary.containment_rule_count ?? 0],
-                ["association", summary.association_count ?? 0],
-                ["error", summary.error_count ?? 0],
-                ["warning", summary.warning_count ?? 0],
-            ])}
+            <h3>${escapeHtml(version.namespace_code)} / ${escapeHtml(version.version_code)} review</h3>
+            <div class="toolbar-inline">
+                ${validation ? `<span class="meta-pill">${validation.is_valid ? "valid" : "invalid"}</span>` : ""}
+                ${diff ? `<span class="meta-pill">baseline ${escapeHtml(baselineVersion?.version_code || "none")}</span>` : ""}
+            </div>
         </div>
         ${
-            issues.length === 0
-                ? '<p class="section-copy">현재 publish를 막는 validation issue가 없습니다.</p>'
-                : `<div class="admin-list compact-admin-list">
-                    ${issues
-                        .map(
-                            (issue) => `
-                                <article class="admin-item compact-admin-item">
-                                    <div class="section-header">
-                                        <h4>${escapeHtml(issue.code)}</h4>
-                                        <span class="meta-pill">${escapeHtml(issue.severity)}</span>
-                                    </div>
-                                    <p class="admin-meta">${escapeHtml(issue.message || "설명 없음")}</p>
-                                </article>
-                            `
-                        )
-                        .join("")}
-                </div>`
+            validation
+                ? `
+                    <section>
+                        <h4>Validation</h4>
+                        <div class="summary-metrics">
+                            ${renderMetaPills([
+                                ["semantic type", validationSummary.semantic_type_count ?? 0],
+                                ["containment", validationSummary.containment_rule_count ?? 0],
+                                ["association", validationSummary.association_count ?? 0],
+                                ["error", validationSummary.error_count ?? 0],
+                                ["warning", validationSummary.warning_count ?? 0],
+                            ])}
+                        </div>
+                        ${
+                            validationIssues.length === 0
+                                ? '<p class="section-copy">현재 publish를 막는 validation issue가 없습니다.</p>'
+                                : `<div class="admin-list compact-admin-list">
+                                    ${validationIssues
+                                        .map(
+                                            (issue) => `
+                                                <article class="admin-item compact-admin-item">
+                                                    <div class="section-header">
+                                                        <h5>${escapeHtml(issue.code)}</h5>
+                                                        <span class="meta-pill">${escapeHtml(issue.severity)}</span>
+                                                    </div>
+                                                    <p class="admin-meta">${escapeHtml(issue.message || "설명 없음")}</p>
+                                                </article>
+                                            `
+                                        )
+                                        .join("")}
+                                </div>`
+                        }
+                    </section>
+                `
+                : ""
+        }
+        ${
+            diff
+                ? `
+                    <section>
+                        <h4>Diff / 영향도</h4>
+                        <div class="summary-metrics">
+                            ${renderMetaPills([
+                                ["active view", diffImpacts.active_view_count ?? 0],
+                                ["logical view", diffImpacts.active_logical_view_count ?? 0],
+                                ["semantic +", diffSummary.semantic_types?.added ?? 0],
+                                ["semantic ~", diffSummary.semantic_types?.changed ?? 0],
+                                ["property +", diffSummary.properties?.added ?? 0],
+                                ["association +", diffSummary.associations?.added ?? 0],
+                            ])}
+                        </div>
+                        <p class="admin-meta">baseline 전략: ${escapeHtml(diff.baseline_strategy || "none")}</p>
+                        ${
+                            (diffImpacts.active_views || []).length === 0
+                                ? '<p class="section-copy">현재 baseline 메타모델을 참조하는 active Monitoring View가 없습니다.</p>'
+                                : `<div class="admin-list compact-admin-list">
+                                    ${diffImpacts.active_views
+                                        .map(
+                                            (item) => `
+                                                <article class="admin-item compact-admin-item">
+                                                    <div class="section-header">
+                                                        <h5>${escapeHtml(item.view_name)}</h5>
+                                                        <span class="meta-pill">${escapeHtml(item.version_code)}</span>
+                                                    </div>
+                                                    <p class="admin-meta">view_id ${escapeHtml(item.view_id)}</p>
+                                                </article>
+                                            `
+                                        )
+                                        .join("")}
+                                </div>`
+                        }
+                        ${diffSectionsMarkup || '<p class="section-copy">baseline 대비 structural diff가 없습니다.</p>'}
+                    </section>
+                `
+                : ""
         }
     `;
 }
@@ -2400,7 +2532,19 @@ async function loadMetamodelVersions() {
 
 async function loadMetamodelValidation(versionId) {
     const payload = await apiFetch(`/api/admin/metamodel/versions/${versionId}/validation`);
+    if (selectedMetamodelDiff?.version?.id && Number(selectedMetamodelDiff.version.id) !== Number(versionId)) {
+        selectedMetamodelDiff = null;
+    }
     selectedMetamodelValidation = payload;
+    renderMetamodelValidationPanel();
+}
+
+async function loadMetamodelDiff(versionId) {
+    const payload = await apiFetch(`/api/admin/metamodel/versions/${versionId}/diff`);
+    if (selectedMetamodelValidation?.version?.id && Number(selectedMetamodelValidation.version.id) !== Number(versionId)) {
+        selectedMetamodelValidation = null;
+    }
+    selectedMetamodelDiff = payload;
     renderMetamodelValidationPanel();
 }
 
@@ -2654,6 +2798,7 @@ async function publishMetamodelVersion(versionId) {
         await loadMetamodelNotations();
         await loadMetamodelAssociations();
         selectedMetamodelValidation = null;
+        selectedMetamodelDiff = null;
         renderMetamodelValidationPanel();
         resetMetamodelSemanticTypeForm();
         resetMetamodelPropertyForm();
@@ -3185,6 +3330,23 @@ metamodelVersionsList?.addEventListener("click", async (event) => {
             clearBanner();
             await loadMetamodelValidation(versionId);
             showBanner("메타모델 validation 결과를 갱신했습니다.", "success");
+        } catch (error) {
+            showBanner(error.message, "error");
+        }
+        return;
+    }
+
+    const diffButton = event.target instanceof HTMLElement ? event.target.closest(".diff-metamodel-button") : null;
+    if (diffButton) {
+        const versionId = Number(diffButton.dataset.versionId);
+        if (!versionId) {
+            return;
+        }
+
+        try {
+            clearBanner();
+            await loadMetamodelDiff(versionId);
+            showBanner("메타모델 diff/영향도를 갱신했습니다.", "success");
         } catch (error) {
             showBanner(error.message, "error");
         }

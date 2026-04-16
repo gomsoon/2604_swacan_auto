@@ -631,6 +631,328 @@ def validate_metamodel_version(version_id: int) -> dict[str, Any]:
     }
 
 
+def normalize_json_for_compare(raw_value: Any) -> Any:
+    if raw_value in (None, ""):
+        return None
+    try:
+        parsed = json.loads(raw_value) if isinstance(raw_value, str) else raw_value
+        return json.dumps(parsed, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return str(raw_value).strip()
+
+
+def fetch_metamodel_diff_baseline(version) -> tuple[Any | None, str]:
+    if version["based_on_version_id"]:
+        baseline = fetch_version(version["based_on_version_id"])
+        if baseline is not None:
+            return baseline, "based_on_version"
+
+    baseline = get_db().execute(
+        """
+        SELECT mv.id, mv.namespace_id, mv.version_code, mv.status, mv.description, mv.based_on_version_id,
+               mv.published_at, mv.created_at, mv.updated_at,
+               ns.code AS namespace_code, ns.name AS namespace_name
+        FROM metamodel_versions AS mv
+        JOIN metamodel_namespaces AS ns ON ns.id = mv.namespace_id
+        WHERE mv.namespace_id = ? AND mv.status = 'published' AND mv.id != ?
+        ORDER BY COALESCE(mv.published_at, mv.updated_at, mv.created_at) DESC, mv.id DESC
+        LIMIT 1
+        """,
+        (version["namespace_id"], version["id"]),
+    ).fetchone()
+    if baseline is not None:
+        return baseline, "latest_published"
+
+    return None, "none"
+
+
+def build_metamodel_diff_section(
+    current_items: dict[str, dict[str, Any]],
+    baseline_items: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    added_keys = sorted(set(current_items) - set(baseline_items))
+    removed_keys = sorted(set(baseline_items) - set(current_items))
+    shared_keys = sorted(set(current_items) & set(baseline_items))
+
+    changed: list[dict[str, Any]] = []
+    unchanged_count = 0
+
+    for key in shared_keys:
+        before = baseline_items[key]
+        after = current_items[key]
+        changed_fields = sorted(
+            field_name
+            for field_name in after.keys()
+            if field_name not in {"key", "title", "meta"} and before.get(field_name) != after.get(field_name)
+        )
+        if changed_fields:
+            changed.append(
+                {
+                    "key": key,
+                    "title": after["title"],
+                    "meta": after["meta"],
+                    "changed_fields": changed_fields,
+                    "before": before,
+                    "after": after,
+                }
+            )
+        else:
+            unchanged_count += 1
+
+    return {
+        "added": [current_items[key] for key in added_keys],
+        "removed": [baseline_items[key] for key in removed_keys],
+        "changed": changed,
+        "unchanged_count": unchanged_count,
+    }
+
+
+def fetch_semantic_type_diff_items(version_id: int) -> dict[str, dict[str, Any]]:
+    rows = get_db().execute(
+        """
+        SELECT st.code, st.display_name, st.description, st.kind, st.runtime_kind, st.is_groupable,
+               st.allows_runtime_binding, st.is_active, nd.code AS default_notation_code
+        FROM semantic_types AS st
+        LEFT JOIN notation_definitions AS nd ON nd.id = st.default_notation_id
+        WHERE st.metamodel_version_id = ?
+        ORDER BY st.code ASC
+        """,
+        (version_id,),
+    ).fetchall()
+    return {
+        row["code"]: {
+            "key": row["code"],
+            "title": row["display_name"],
+            "meta": f"{row['code']} | {row['kind']}",
+            "display_name": row["display_name"],
+            "description": row["description"],
+            "kind": row["kind"],
+            "runtime_kind": row["runtime_kind"],
+            "is_groupable": bool(row["is_groupable"]),
+            "allows_runtime_binding": bool(row["allows_runtime_binding"]),
+            "is_active": bool(row["is_active"]),
+            "default_notation_code": row["default_notation_code"],
+        }
+        for row in rows
+    }
+
+
+def fetch_property_diff_items(version_id: int) -> dict[str, dict[str, Any]]:
+    rows = get_db().execute(
+        """
+        SELECT st.code AS semantic_type_code, pd.code, pd.display_name, pd.description, pd.value_type, pd.unit,
+               pd.default_value_json, pd.is_required, pd.is_runtime, pd.is_user_editable, pd.sort_order
+        FROM property_definitions AS pd
+        JOIN semantic_types AS st ON st.id = pd.semantic_type_id
+        WHERE st.metamodel_version_id = ?
+        ORDER BY st.code ASC, pd.code ASC
+        """,
+        (version_id,),
+    ).fetchall()
+    return {
+        f"{row['semantic_type_code']}:{row['code']}": {
+            "key": f"{row['semantic_type_code']}:{row['code']}",
+            "title": row["display_name"],
+            "meta": f"{row['semantic_type_code']} | {row['code']}",
+            "semantic_type_code": row["semantic_type_code"],
+            "display_name": row["display_name"],
+            "description": row["description"],
+            "value_type": row["value_type"],
+            "unit": row["unit"],
+            "default_value_json": normalize_json_for_compare(row["default_value_json"]),
+            "is_required": bool(row["is_required"]),
+            "is_runtime": bool(row["is_runtime"]),
+            "is_user_editable": bool(row["is_user_editable"]),
+            "sort_order": row["sort_order"],
+        }
+        for row in rows
+    }
+
+
+def fetch_containment_diff_items(version_id: int) -> dict[str, dict[str, Any]]:
+    rows = get_db().execute(
+        """
+        SELECT parent_st.code AS parent_type_code, child_st.code AS child_type_code,
+               cr.min_count, cr.max_count, cr.cardinality_scope, cr.is_required
+        FROM containment_rules AS cr
+        JOIN semantic_types AS parent_st ON parent_st.id = cr.parent_type_id
+        JOIN semantic_types AS child_st ON child_st.id = cr.child_type_id
+        WHERE cr.metamodel_version_id = ?
+        ORDER BY parent_st.code ASC, child_st.code ASC
+        """,
+        (version_id,),
+    ).fetchall()
+    return {
+        f"{row['parent_type_code']}->{row['child_type_code']}": {
+            "key": f"{row['parent_type_code']}->{row['child_type_code']}",
+            "title": f"{row['parent_type_code']} -> {row['child_type_code']}",
+            "meta": row["cardinality_scope"],
+            "parent_type_code": row["parent_type_code"],
+            "child_type_code": row["child_type_code"],
+            "min_count": row["min_count"],
+            "max_count": row["max_count"],
+            "cardinality_scope": row["cardinality_scope"],
+            "is_required": bool(row["is_required"]),
+        }
+        for row in rows
+    }
+
+
+def fetch_association_diff_items(version_id: int) -> dict[str, dict[str, Any]]:
+    rows = get_db().execute(
+        """
+        SELECT ad.code, ad.display_name, ad.description, ad.direction, ad.multiplicity_source,
+               ad.multiplicity_target, ad.semantics_json,
+               source_st.code AS source_type_code,
+               target_st.code AS target_type_code
+        FROM association_definitions AS ad
+        JOIN semantic_types AS source_st ON source_st.id = ad.source_type_id
+        JOIN semantic_types AS target_st ON target_st.id = ad.target_type_id
+        WHERE ad.metamodel_version_id = ?
+        ORDER BY ad.code ASC
+        """,
+        (version_id,),
+    ).fetchall()
+    return {
+        row["code"]: {
+            "key": row["code"],
+            "title": row["display_name"],
+            "meta": f"{row['source_type_code']} -> {row['target_type_code']}",
+            "display_name": row["display_name"],
+            "description": row["description"],
+            "source_type_code": row["source_type_code"],
+            "target_type_code": row["target_type_code"],
+            "direction": row["direction"],
+            "multiplicity_source": row["multiplicity_source"],
+            "multiplicity_target": row["multiplicity_target"],
+            "semantics_json": normalize_json_for_compare(row["semantics_json"]),
+        }
+        for row in rows
+    }
+
+
+def fetch_notation_diff_items(version_id: int) -> dict[str, dict[str, Any]]:
+    rows = get_db().execute(
+        """
+        SELECT nd.code, nd.display_name, nd.kind, nd.render_primitive, nd.render_schema_json,
+               nd.style_tokens_json, nd.sort_order, nd.is_default, nd.is_visible_in_palette,
+               st.code AS semantic_type_code,
+               pg.code AS palette_group_code
+        FROM notation_definitions AS nd
+        JOIN semantic_types AS st ON st.id = nd.semantic_type_id
+        LEFT JOIN palette_groups AS pg ON pg.id = nd.palette_group_id
+        WHERE nd.metamodel_version_id = ?
+        ORDER BY nd.code ASC
+        """,
+        (version_id,),
+    ).fetchall()
+    return {
+        row["code"]: {
+            "key": row["code"],
+            "title": row["display_name"],
+            "meta": f"{row['semantic_type_code']} | {row['kind']}",
+            "display_name": row["display_name"],
+            "semantic_type_code": row["semantic_type_code"],
+            "palette_group_code": row["palette_group_code"],
+            "kind": row["kind"],
+            "render_primitive": row["render_primitive"],
+            "render_schema_json": normalize_json_for_compare(row["render_schema_json"]),
+            "style_tokens_json": normalize_json_for_compare(row["style_tokens_json"]),
+            "sort_order": row["sort_order"],
+            "is_default": bool(row["is_default"]),
+            "is_visible_in_palette": bool(row["is_visible_in_palette"]),
+        }
+        for row in rows
+    }
+
+
+def calculate_metamodel_diff(version_id: int) -> dict[str, Any]:
+    version = fetch_version(version_id)
+    if version is None:
+        raise LookupError("metamodel version not found")
+
+    baseline_version, baseline_strategy = fetch_metamodel_diff_baseline(version)
+
+    current_sections = {
+        "semantic_types": fetch_semantic_type_diff_items(version_id),
+        "properties": fetch_property_diff_items(version_id),
+        "containment_rules": fetch_containment_diff_items(version_id),
+        "associations": fetch_association_diff_items(version_id),
+        "notations": fetch_notation_diff_items(version_id),
+    }
+    baseline_sections = {
+        "semantic_types": fetch_semantic_type_diff_items(baseline_version["id"]) if baseline_version else {},
+        "properties": fetch_property_diff_items(baseline_version["id"]) if baseline_version else {},
+        "containment_rules": fetch_containment_diff_items(baseline_version["id"]) if baseline_version else {},
+        "associations": fetch_association_diff_items(baseline_version["id"]) if baseline_version else {},
+        "notations": fetch_notation_diff_items(baseline_version["id"]) if baseline_version else {},
+    }
+
+    section_results = {
+        section_name: build_metamodel_diff_section(current_sections[section_name], baseline_sections[section_name])
+        for section_name in current_sections
+    }
+    summary = {
+        section_name: {
+            "added": len(section["added"]),
+            "removed": len(section["removed"]),
+            "changed": len(section["changed"]),
+            "unchanged": section["unchanged_count"],
+        }
+        for section_name, section in section_results.items()
+    }
+
+    referenced_version_id = baseline_version["id"] if baseline_version else version["id"]
+    active_view_rows = get_db().execute(
+        """
+        SELECT vv.id, vv.view_id, vv.version_code, vv.version_no, v.name AS view_name
+        FROM view_versions AS vv
+        JOIN views AS v ON v.id = vv.view_id
+        WHERE vv.status = 'active' AND vv.metamodel_version_id = ?
+        ORDER BY vv.view_id ASC, vv.id ASC
+        LIMIT 10
+        """,
+        (referenced_version_id,),
+    ).fetchall()
+    active_view_count = get_db().execute(
+        """
+        SELECT COUNT(*) AS count
+        FROM view_versions
+        WHERE status = 'active' AND metamodel_version_id = ?
+        """,
+        (referenced_version_id,),
+    ).fetchone()["count"]
+    active_logical_view_count = get_db().execute(
+        """
+        SELECT COUNT(DISTINCT view_id) AS count
+        FROM view_versions
+        WHERE status = 'active' AND metamodel_version_id = ?
+        """,
+        (referenced_version_id,),
+    ).fetchone()["count"]
+
+    return {
+        "baseline_version": serialize_version(baseline_version) if baseline_version else None,
+        "baseline_strategy": baseline_strategy,
+        "summary": summary,
+        "impacts": {
+            "referenced_version_id": referenced_version_id,
+            "active_view_count": active_view_count,
+            "active_logical_view_count": active_logical_view_count,
+            "active_views": [
+                {
+                    "id": row["id"],
+                    "view_id": row["view_id"],
+                    "view_name": row["view_name"],
+                    "version_code": row["version_code"] or f"v{row['version_no']}",
+                }
+                for row in active_view_rows
+            ],
+        },
+        "sections": section_results,
+    }
+
+
 def validate_semantic_type_payload(data: dict[str, Any], *, partial: bool = False) -> tuple[dict[str, Any] | None, Any | None]:
     payload = dict(data)
     try:
@@ -1114,6 +1436,19 @@ def validate_version(version_id: int):
     return {
         "version": serialize_version(version),
         "validation": validate_metamodel_version(version_id),
+    }
+
+
+@bp.get("/versions/<int:version_id>/diff")
+@admin_required
+def diff_version(version_id: int):
+    version = fetch_version(version_id)
+    if version is None:
+        return error_response("metamodel_not_found", "metamodel version not found", 404)
+
+    return {
+        "version": serialize_version(version),
+        "diff": calculate_metamodel_diff(version_id),
     }
 
 

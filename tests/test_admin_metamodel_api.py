@@ -266,6 +266,86 @@ def test_admin_rejects_publish_when_validation_fails_containment_cycle(seeded_cl
     assert any(issue["code"] == "containment_cycle" for issue in publish_payload["validation"]["issues"])
 
 
+def test_admin_can_load_metamodel_diff_against_based_on_version(seeded_client) -> None:
+    login(seeded_client)
+    create_response = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v2-diff-draft",
+            "based_on_version_id": 1,
+            "description": "Clone for diff test",
+        },
+    )
+    assert create_response.status_code == 201
+    version_id = create_response.get_json()["version"]["id"]
+
+    semantic_types = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/semantic-types").get_json()["items"]
+    process_type = next(item for item in semantic_types if item["code"] == "SoftwareProcess")
+
+    update_type = seeded_client.patch(
+        f"/api/admin/metamodel/semantic-types/{process_type['id']}",
+        json={"display_name": "App Process V2"},
+    )
+    assert update_type.status_code == 200
+
+    create_type = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPool",
+            "display_name": "Worker Pool",
+            "kind": "container",
+            "runtime_kind": "process-group",
+            "description": "Diff preview type",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+    assert create_type.status_code == 201
+    worker_pool_type_id = create_type.get_json()["semantic_type"]["id"]
+
+    create_property = seeded_client.post(
+        f"/api/admin/metamodel/semantic-types/{worker_pool_type_id}/properties",
+        json={
+            "code": "worker_count",
+            "display_name": "Worker Count",
+            "value_type": "integer",
+            "unit": "count",
+            "default_value_json": "4",
+            "sort_order": 10,
+            "is_required": False,
+            "is_runtime": True,
+            "is_user_editable": True,
+        },
+    )
+    assert create_property.status_code == 201
+
+    response = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/diff")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["version"]["id"] == version_id
+    assert payload["diff"]["baseline_version"]["id"] == 1
+    assert payload["diff"]["baseline_strategy"] == "based_on_version"
+    assert payload["diff"]["summary"]["semantic_types"]["added"] == 1
+    assert payload["diff"]["summary"]["semantic_types"]["changed"] == 1
+    assert payload["diff"]["summary"]["properties"]["added"] == 1
+    assert payload["diff"]["impacts"]["active_view_count"] >= 1
+    assert payload["diff"]["impacts"]["active_logical_view_count"] >= 1
+    assert any(item["key"] == "WorkerPool" for item in payload["diff"]["sections"]["semantic_types"]["added"])
+    assert any(item["key"] == "SoftwareProcess" for item in payload["diff"]["sections"]["semantic_types"]["changed"])
+
+
+def test_admin_metamodel_diff_returns_not_found_for_unknown_version(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/metamodel/versions/999999/diff")
+
+    assert response.status_code == 404
+    assert response.get_json()["error"]["code"] == "metamodel_not_found"
+
+
 def test_admin_can_list_semantic_types_for_version(seeded_client) -> None:
     login(seeded_client)
 
