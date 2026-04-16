@@ -874,6 +874,16 @@ a {
     flex-wrap: wrap;
 }
 
+.inspector-form-grid {
+    display: grid;
+    gap: 12px;
+    margin-top: 14px;
+}
+
+.inspector-inline-checkbox {
+    align-self: end;
+}
+
 .metamodel-notation-preview svg {
     width: 100%;
     height: auto;

@@ -468,6 +468,10 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     expect(page.locator("body")).to_contain_text("Containment rule을 canvas에서 생성했습니다.")
     expect(page.locator("#admin-metamodel-containment-rules-list")).to_contain_text("WorkerPool -> MonitoringAgent")
     expect(page.locator("#metamodel-workspace-mode-status")).to_contain_text("선택 모드")
+    page.locator("#inspector-containment-max-count").fill("12")
+    page.locator("#metamodel-workspace-inspector").get_by_role("button", name="빠른 저장").click()
+    expect(page.locator("#admin-metamodel-containment-rules-list")).to_contain_text("max=12")
+    expect(page.locator("#metamodel-workspace-inspector")).to_contain_text("max 12")
 
     page.locator('#metamodel-workspace-outline [data-workspace-kind="association_definition"]', has_text="Monitors Worker Pool Updated").click()
     expect(page.locator("#metamodel-workspace-inspector")).to_contain_text("Monitors Worker Pool Updated")
@@ -498,6 +502,11 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     expect(page.locator("body")).to_contain_text("Association definition을 canvas에서 생성했습니다.")
     expect(page.locator("#admin-metamodel-associations-list")).to_contain_text("worker_pool_to_monitoring_agent")
     expect(page.locator("#metamodel-workspace-mode-status")).to_contain_text("선택 모드")
+    page.locator("#inspector-association-display-name").fill("Worker Pool -> Monitoring Agent")
+    page.locator("#inspector-association-direction").select_option("undirected")
+    page.locator("#metamodel-workspace-inspector").get_by_role("button", name="빠른 저장").click()
+    expect(page.locator("#admin-metamodel-associations-list")).to_contain_text("Worker Pool -> Monitoring Agent")
+    expect(page.locator("#metamodel-workspace-inspector")).to_contain_text("undirected")
 
     createdVersion.get_by_role("button", name="Validate").click()
     expect(page.locator("#metamodel-validation-panel")).to_contain_text("core / core-v2-ui-draft validation")

@@ -462,6 +462,46 @@ function openMetamodelEditorFromInspector(action, kind, id) {
     }
 }
 
+async function saveContainmentRuleFromInspector(ruleId) {
+    const payload = {
+        min_count: document.getElementById("inspector-containment-min-count")?.value === ""
+            ? null
+            : Number.parseInt(document.getElementById("inspector-containment-min-count")?.value || "", 10),
+        max_count: document.getElementById("inspector-containment-max-count")?.value === ""
+            ? null
+            : Number.parseInt(document.getElementById("inspector-containment-max-count")?.value || "", 10),
+        cardinality_scope: document.getElementById("inspector-containment-cardinality-scope")?.value,
+        is_required: Boolean(document.getElementById("inspector-containment-required")?.checked),
+    };
+
+    await apiFetch(`/api/admin/metamodel/containment-rules/${ruleId}`, {
+        method: "PATCH",
+        body: payload,
+    });
+    await Promise.all([loadMetamodelVersions(), loadMetamodelContainmentRules()]);
+    selectedMetamodelWorkspace = { kind: "containment_rule", id: Number(ruleId) };
+    refreshMetamodelWorkspace();
+    showBanner("Containment rule을 inspector에서 저장했습니다.", "success");
+}
+
+async function saveAssociationFromInspector(associationId) {
+    const payload = {
+        display_name: document.getElementById("inspector-association-display-name")?.value?.trim(),
+        direction: document.getElementById("inspector-association-direction")?.value,
+        multiplicity_source: document.getElementById("inspector-association-multiplicity-source")?.value?.trim() || null,
+        multiplicity_target: document.getElementById("inspector-association-multiplicity-target")?.value?.trim() || null,
+    };
+
+    await apiFetch(`/api/admin/metamodel/associations/${associationId}`, {
+        method: "PATCH",
+        body: payload,
+    });
+    await Promise.all([loadMetamodelVersions(), loadMetamodelAssociations()]);
+    selectedMetamodelWorkspace = { kind: "association_definition", id: Number(associationId) };
+    refreshMetamodelWorkspace();
+    showBanner("Association definition을 inspector에서 저장했습니다.", "success");
+}
+
 function toOptionalNumberValue(value) {
     if (value === "" || value === null || value === undefined) {
         return null;
@@ -1220,6 +1260,29 @@ function renderMetamodelWorkspaceInspector() {
                     ["required", item.is_required ? "yes" : "no"],
                 ])}
             </div>
+            <div class="inspector-form-grid">
+                <label class="field compact-field">
+                    <span>Min</span>
+                    <input id="inspector-containment-min-count" type="number" min="0" max="9999" value="${escapeHtml(item.min_count ?? "")}">
+                </label>
+                <label class="field compact-field">
+                    <span>Max</span>
+                    <input id="inspector-containment-max-count" type="number" min="0" max="9999" value="${escapeHtml(item.max_count ?? "")}">
+                </label>
+                <label class="field compact-field">
+                    <span>Scope</span>
+                    <select id="inspector-containment-cardinality-scope">
+                        <option value="group_total" ${item.cardinality_scope === "group_total" ? "selected" : ""}>group_total</option>
+                        <option value="per_member" ${item.cardinality_scope === "per_member" ? "selected" : ""}>per_member</option>
+                    </select>
+                </label>
+                <label class="field checkbox-field inspector-inline-checkbox">
+                    <span><input id="inspector-containment-required" type="checkbox" ${item.is_required ? "checked" : ""}> required</span>
+                </label>
+            </div>
+            <div class="toolbar-inline inspector-actions">
+                <button class="button primary small" type="button" data-inspector-save="containment_rule" data-workspace-id="${escapeHtml(item.id)}">빠른 저장</button>
+            </div>
         `;
         return;
     }
@@ -1244,6 +1307,30 @@ function renderMetamodelWorkspaceInspector() {
                     ["source", item.multiplicity_source || "-"],
                     ["target", item.multiplicity_target || "-"],
                 ])}
+            </div>
+            <div class="inspector-form-grid">
+                <label class="field">
+                    <span>Display Name</span>
+                    <input id="inspector-association-display-name" type="text" value="${escapeHtml(item.display_name || "")}">
+                </label>
+                <label class="field compact-field">
+                    <span>Direction</span>
+                    <select id="inspector-association-direction">
+                        <option value="directed" ${item.direction === "directed" ? "selected" : ""}>directed</option>
+                        <option value="undirected" ${item.direction === "undirected" ? "selected" : ""}>undirected</option>
+                    </select>
+                </label>
+                <label class="field compact-field">
+                    <span>Source Multiplicity</span>
+                    <input id="inspector-association-multiplicity-source" type="text" value="${escapeHtml(item.multiplicity_source || "")}">
+                </label>
+                <label class="field compact-field">
+                    <span>Target Multiplicity</span>
+                    <input id="inspector-association-multiplicity-target" type="text" value="${escapeHtml(item.multiplicity_target || "")}">
+                </label>
+            </div>
+            <div class="toolbar-inline inspector-actions">
+                <button class="button primary small" type="button" data-inspector-save="association_definition" data-workspace-id="${escapeHtml(item.id)}">빠른 저장</button>
             </div>
             <p class="admin-meta">${escapeHtml(item.description || "설명 없음")}</p>
             ${
@@ -2802,6 +2889,27 @@ metamodelWorkspaceCanvas?.addEventListener("click", (event) => {
     selectMetamodelWorkspaceItem(item.dataset.workspaceKind, item.dataset.workspaceId).catch((error) => showBanner(error.message, "error"));
 });
 metamodelWorkspaceInspector?.addEventListener("click", (event) => {
+    const saveButton = event.target instanceof Element ? event.target.closest("[data-inspector-save][data-workspace-id]") : null;
+    if (saveButton) {
+        const workspaceId = Number(saveButton.dataset.workspaceId);
+        if (!workspaceId) {
+            return;
+        }
+
+        const kind = saveButton.dataset.inspectorSave;
+        const promise =
+            kind === "containment_rule"
+                ? saveContainmentRuleFromInspector(workspaceId)
+                : kind === "association_definition"
+                    ? saveAssociationFromInspector(workspaceId)
+                    : null;
+
+        if (promise) {
+            promise.catch((error) => showBanner(error.message, "error"));
+        }
+        return;
+    }
+
     const button = event.target instanceof Element ? event.target.closest("[data-inspector-action][data-workspace-kind][data-workspace-id]") : null;
     if (!button) {
         return;
