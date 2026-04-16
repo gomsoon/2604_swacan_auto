@@ -142,10 +142,10 @@
 
 지금 시점에서 가장 자연스러운 다음 작업은 아래와 같다.
 
-1. registry 기반 렌더링을 editor와 monitor에 더 깊게 연결
-2. 관리자용 metamodel draft/publish API 초안 구현
-3. `monitored_objects / node_bindings / alert_instances` 설계 초안 구체화
-4. grouped event 설계 초안 작성
+1. 관리자용 metamodel draft 내부 편집 API와 UI 구현
+2. semantic type / property / containment / notation draft 편집 흐름 연결
+3. metamodel draft 검증과 publish 전환 조건 정리
+4. alert backlog는 `archive/action log 정리`, `suppression`, `rule dry-run preview`를 후속 과제로 유지
 
 ## 6. 주요 리스크
 
