@@ -115,6 +115,41 @@ def serialize_grouped_event(row) -> dict[str, Any]:
     return payload
 
 
+def load_grouped_event_raw_rows(grouped_event_row, limit: int):
+    clauses = [
+        "event_type = ?",
+        "severity = ?",
+        "occurred_at >= ?",
+        "occurred_at <= ?",
+    ]
+    params: list[Any] = [
+        grouped_event_row["event_type"],
+        grouped_event_row["severity"],
+        grouped_event_row["first_occurred_at"],
+        grouped_event_row["last_occurred_at"],
+    ]
+
+    if grouped_event_row["monitored_object_id"] is not None:
+        clauses.append("monitored_object_id = ?")
+        params.append(grouped_event_row["monitored_object_id"])
+    else:
+        clauses.append("monitored_object_id IS NULL")
+        clauses.append("target_id = ?")
+        params.append(grouped_event_row["target_id"])
+
+    params.append(limit)
+    return get_db().execute(
+        f"""
+        SELECT id, agent_id, monitored_object_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
+        FROM raw_events
+        WHERE {' AND '.join(clauses)}
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT ?
+        """,
+        tuple(params),
+    ).fetchall()
+
+
 def serialize_debug_payload(row) -> dict[str, Any]:
     return {
         "id": row["id"],
@@ -453,6 +488,32 @@ def list_grouped_events():
         (limit,),
     ).fetchall()
     return {"items": [serialize_grouped_event(row) for row in rows]}
+
+
+@bp.get("/grouped-events/<int:grouped_event_id>/raw-events")
+@admin_required
+def list_grouped_event_raw_events(grouped_event_id: int):
+    limit, error = parse_limit()
+    if error:
+        return error
+
+    grouped_event_row = get_db().execute(
+        """
+        SELECT id, monitored_object_id, target_id, event_type, severity,
+               first_occurred_at, last_occurred_at, repeat_count, latest_message, latest_event_json
+        FROM grouped_events
+        WHERE id = ?
+        """,
+        (grouped_event_id,),
+    ).fetchone()
+    if grouped_event_row is None:
+        return error_response("not_found", "grouped event not found", 404)
+
+    raw_rows = load_grouped_event_raw_rows(grouped_event_row, limit)
+    return {
+        "grouped_event": serialize_grouped_event(grouped_event_row),
+        "items": [serialize_raw_event(row) for row in raw_rows],
+    }
 
 
 @bp.get("/latest-states")

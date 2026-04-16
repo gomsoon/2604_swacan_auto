@@ -9,6 +9,7 @@ const monitorStatus = document.getElementById("monitor-status");
 const agentSummary = document.getElementById("monitor-agent-summary");
 const alertsList = document.getElementById("alerts-list");
 const eventsList = document.getElementById("events-list");
+const eventDetailPanel = document.getElementById("event-detail-panel");
 const selectionSummary = document.getElementById("monitor-selection-summary");
 const refreshEventsButton = document.getElementById("refresh-events-button");
 
@@ -21,6 +22,9 @@ const state = {
     latestStates: [],
     alerts: [],
     events: [],
+    selectedEventId: null,
+    eventDetails: [],
+    selectedGroupedEvent: null,
     selectedNodeId: null,
 };
 
@@ -202,7 +206,7 @@ function renderEvents() {
     eventsList.innerHTML = state.events
         .map(
             (event) => `
-            <article class="event-item">
+            <article class="event-item event-summary-item is-interactive${state.selectedEventId === event.id ? " is-selected" : ""}" data-grouped-event-id="${escapeHtml(event.id)}">
                 <h3>${escapeHtml(event.event_type)}</h3>
                 <p>${escapeHtml(event.latest_message || event.message || "메시지 없음")}</p>
                 <p>${escapeHtml(event.target_id)} | ${escapeHtml(event.severity)} | 반복 ${escapeHtml(event.repeat_count ?? 1)}회</p>
@@ -211,6 +215,49 @@ function renderEvents() {
         `
         )
         .join("");
+}
+
+function renderEventDetails() {
+    if (!state.selectedGroupedEvent) {
+        eventDetailPanel.innerHTML = '<p class="section-copy">grouped event를 선택하면 raw event 상세를 볼 수 있습니다.</p>';
+        return;
+    }
+
+    const groupedEvent = state.selectedGroupedEvent;
+    const rawEventItems = state.eventDetails;
+    const header = `
+        <div class="section-header">
+            <h3>${escapeHtml(groupedEvent.event_type)}</h3>
+            <span class="meta-pill">반복 ${escapeHtml(groupedEvent.repeat_count ?? 1)}회</span>
+        </div>
+        <p class="admin-meta">${escapeHtml(groupedEvent.target_id || "-")} | ${escapeHtml(groupedEvent.severity)} | ${escapeHtml(formatTimestamp(groupedEvent.last_occurred_at || groupedEvent.occurred_at))}</p>
+    `;
+
+    if (rawEventItems.length === 0) {
+        eventDetailPanel.innerHTML = `
+            ${header}
+            <p class="section-copy">조건에 맞는 raw event가 없습니다.</p>
+        `;
+        return;
+    }
+
+    eventDetailPanel.innerHTML = `
+        ${header}
+        <div class="event-list raw-event-list">
+            ${rawEventItems
+                .map(
+                    (event) => `
+                        <article class="event-item raw-event-item">
+                            <h4>${escapeHtml(event.event_type)}</h4>
+                            <p>${escapeHtml(event.message || "메시지 없음")}</p>
+                            <p>${escapeHtml(event.target_id)} | ${escapeHtml(event.severity)}</p>
+                            <p>${escapeHtml(formatTimestamp(event.occurred_at))}</p>
+                        </article>
+                    `
+                )
+                .join("")}
+        </div>
+    `;
 }
 
 function renderAlerts() {
@@ -331,7 +378,16 @@ function render() {
     renderAgentSummary();
     renderAlerts();
     renderEvents();
+    renderEventDetails();
     renderSelection();
+}
+
+async function loadEventDetails(groupedEventId) {
+    const payload = await apiFetch(`/api/views/${state.viewId}/events/${groupedEventId}/raw-events?limit=20`);
+    state.selectedEventId = groupedEventId;
+    state.selectedGroupedEvent = payload.grouped_event;
+    state.eventDetails = payload.items;
+    render();
 }
 
 async function loadView() {
@@ -376,6 +432,13 @@ async function loadRuntimeData() {
     state.alerts = alerts.items;
     state.events = events.items;
     monitorStatus.textContent = `최근 갱신 ${new Date().toLocaleTimeString("ko-KR", { hour12: false })}`;
+    if (state.selectedEventId && state.events.some((item) => item.id === state.selectedEventId)) {
+        await loadEventDetails(state.selectedEventId);
+        return;
+    }
+    state.selectedEventId = null;
+    state.selectedGroupedEvent = null;
+    state.eventDetails = [];
 }
 
 async function refreshAll() {
@@ -391,6 +454,19 @@ async function refreshAll() {
 }
 
 refreshEventsButton?.addEventListener("click", refreshAll);
+eventsList?.addEventListener("click", async (event) => {
+    const card = event.target instanceof Element ? event.target.closest("[data-grouped-event-id]") : null;
+    if (!card) {
+        return;
+    }
+
+    try {
+        clearBanner();
+        await loadEventDetails(Number(card.dataset.groupedEventId));
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
+});
 agentSummary?.addEventListener("click", (event) => {
     const card = event.target.closest("[data-node-id]");
     if (!card) {

@@ -605,6 +605,95 @@ def test_events_reject_out_of_range_limits(seeded_client) -> None:
     assert over_response.get_json()["error"]["code"] == "validation_error"
 
 
+def test_event_drill_down_returns_group_raw_events_for_active_view(seeded_app, seeded_client) -> None:
+    seed_monitoring_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO raw_events (
+                id, agent_id, monitored_object_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                104,
+                "agent_local",
+                1302,
+                "app_main",
+                "process_stopped",
+                "warning",
+                "process still missing",
+                json.dumps({"pid": 1234, "retry": 2}),
+                "2026-04-10T10:21:40.100+09:00",
+                "2026-04-10T10:21:40.230+09:00",
+            ),
+        )
+        db_conn.execute(
+            """
+            UPDATE grouped_events
+            SET last_occurred_at = ?, repeat_count = ?, latest_message = ?, latest_event_json = ?, updated_at = ?
+            WHERE monitored_object_id = ? AND event_type = 'process_stopped'
+            """,
+            (
+                "2026-04-10T10:21:40.100+09:00",
+                2,
+                "process still missing",
+                json.dumps({"pid": 1234, "retry": 2}),
+                "2026-04-10T10:21:40.230+09:00",
+                1302,
+            ),
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/1/events/1/raw-events?limit=10")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["grouped_event"]["id"] == 1
+    assert payload["grouped_event"]["repeat_count"] == 2
+    assert [item["id"] for item in payload["items"]] == [104, 101]
+    assert all(item["event_type"] == "process_stopped" for item in payload["items"])
+
+
+def test_event_drill_down_accepts_boundary_limits(seeded_app, seeded_client) -> None:
+    seed_monitoring_rows(seeded_app)
+    login(seeded_client)
+
+    low_response = seeded_client.get("/api/views/1/events/1/raw-events?limit=1")
+    high_response = seeded_client.get("/api/views/1/events/1/raw-events?limit=100")
+
+    assert low_response.status_code == 200
+    assert high_response.status_code == 200
+    assert len(low_response.get_json()["items"]) == 1
+    assert len(high_response.get_json()["items"]) == 1
+
+
+def test_event_drill_down_rejects_out_of_range_limits(seeded_client) -> None:
+    login(seeded_client)
+
+    zero_response = seeded_client.get("/api/views/1/events/1/raw-events?limit=0")
+    over_response = seeded_client.get("/api/views/1/events/1/raw-events?limit=101")
+    invalid_response = seeded_client.get("/api/views/1/events/1/raw-events?limit=abc")
+
+    assert zero_response.status_code == 400
+    assert over_response.status_code == 400
+    assert invalid_response.status_code == 400
+    assert zero_response.get_json()["error"]["code"] == "validation_error"
+    assert over_response.get_json()["error"]["code"] == "validation_error"
+    assert invalid_response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_event_drill_down_returns_not_found_for_unmatched_grouped_event(seeded_app, seeded_client) -> None:
+    seed_monitoring_rows(seeded_app)
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/1/events/999/raw-events?limit=10")
+
+    assert response.status_code == 404
+    assert response.get_json()["error"]["code"] == "not_found"
+
+
 def test_latest_state_marks_agent_warning_at_exact_warning_threshold(seeded_app, seeded_client) -> None:
     seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T10:20:10.100+09:00")
     seeded_app.config["AGENT_HEARTBEAT_WARNING_SECONDS"] = 10

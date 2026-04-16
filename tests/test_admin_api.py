@@ -419,6 +419,116 @@ def test_admin_grouped_events_returns_recent_groups(seeded_app, seeded_client) -
     assert payload["items"][0]["repeat_count"] == 3
 
 
+def test_admin_grouped_event_drill_down_returns_matching_raw_events(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO grouped_events (
+                monitored_object_id, target_id, event_type, severity, first_occurred_at, last_occurred_at,
+                repeat_count, latest_message, latest_event_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1302,
+                "app_main",
+                "process_stopped",
+                "warning",
+                "2026-04-12T11:05:00.100+09:00",
+                "2026-04-12T11:05:40.100+09:00",
+                2,
+                "process still missing",
+                json.dumps({"pid": 1234, "retry": 2}),
+                "2026-04-12T11:05:00.200+09:00",
+                "2026-04-12T11:05:40.200+09:00",
+            ),
+        )
+        db_conn.execute(
+            """
+            INSERT INTO raw_events (
+                agent_id, monitored_object_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "agent_local",
+                1302,
+                "app_main",
+                "process_stopped",
+                "warning",
+                "process still missing",
+                json.dumps({"pid": 1234, "retry": 2}),
+                "2026-04-12T11:05:40.100+09:00",
+                "2026-04-12T11:05:40.200+09:00",
+            ),
+        )
+        grouped_event_id = db_conn.execute("SELECT MAX(id) AS id FROM grouped_events").fetchone()["id"]
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.get(f"/api/admin/grouped-events/{grouped_event_id}/raw-events?limit=10")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["grouped_event"]["id"] == grouped_event_id
+    assert payload["grouped_event"]["repeat_count"] == 2
+    assert len(payload["items"]) == 2
+    assert payload["items"][0]["message"] == "process still missing"
+
+
+def test_admin_grouped_event_drill_down_accepts_boundary_limits(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO grouped_events (
+                monitored_object_id, target_id, event_type, severity, first_occurred_at, last_occurred_at,
+                repeat_count, latest_message, latest_event_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1302,
+                "app_main",
+                "process_stopped",
+                "warning",
+                "2026-04-12T11:05:00.100+09:00",
+                "2026-04-12T11:05:00.100+09:00",
+                1,
+                "process not found",
+                json.dumps({"pid": 1234}),
+                "2026-04-12T11:05:00.200+09:00",
+                "2026-04-12T11:05:00.200+09:00",
+            ),
+        )
+        grouped_event_id = db_conn.execute("SELECT MAX(id) AS id FROM grouped_events").fetchone()["id"]
+        db_conn.commit()
+    login(seeded_client)
+
+    low_response = seeded_client.get(f"/api/admin/grouped-events/{grouped_event_id}/raw-events?limit=1")
+    high_response = seeded_client.get(f"/api/admin/grouped-events/{grouped_event_id}/raw-events?limit=100")
+
+    assert low_response.status_code == 200
+    assert high_response.status_code == 200
+    assert len(low_response.get_json()["items"]) == 1
+    assert len(high_response.get_json()["items"]) == 1
+
+
+def test_admin_grouped_event_drill_down_rejects_invalid_limits_and_missing_group(seeded_client) -> None:
+    login(seeded_client)
+
+    zero_response = seeded_client.get("/api/admin/grouped-events/1/raw-events?limit=0")
+    over_response = seeded_client.get("/api/admin/grouped-events/1/raw-events?limit=101")
+    invalid_response = seeded_client.get("/api/admin/grouped-events/1/raw-events?limit=abc")
+    missing_response = seeded_client.get("/api/admin/grouped-events/999/raw-events?limit=10")
+
+    assert zero_response.status_code == 400
+    assert over_response.status_code == 400
+    assert invalid_response.status_code == 400
+    assert missing_response.status_code == 404
+    assert missing_response.get_json()["error"]["code"] == "not_found"
+
+
 def test_admin_raw_events_reject_out_of_range_limits(seeded_client) -> None:
     login(seeded_client)
 

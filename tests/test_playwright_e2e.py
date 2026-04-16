@@ -261,6 +261,9 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     expect(page.locator("#monitor-selection-summary")).to_contain_text("process_restarted")
     expect(page.locator("#events-list")).to_contain_text("process_restarted")
     expect(page.locator("#events-list")).to_contain_text("Playwright process restarted")
+    page.locator("#events-list .event-summary-item", has_text="process_restarted").click()
+    expect(page.locator("#event-detail-panel")).to_contain_text("process_restarted")
+    expect(page.locator("#event-detail-panel")).to_contain_text("Playwright process restarted")
 
 
 def test_playwright_admin_page(page: Page, live_server) -> None:

@@ -195,6 +195,63 @@ def query_by_runtime_targets(
     return get_db().execute(sql, tuple(params)).fetchall()
 
 
+def fetch_grouped_event_for_runtime(
+    grouped_event_id: int,
+    *,
+    target_ids: list[str],
+    monitored_object_ids: list[int],
+):
+    rows = query_by_runtime_targets(
+        """
+        SELECT id, monitored_object_id, target_id, event_type, severity,
+               first_occurred_at, last_occurred_at, repeat_count, latest_message, latest_event_json
+        FROM grouped_events
+        WHERE ({runtime_filter})
+          AND id = ?
+        LIMIT 1
+        """,
+        target_ids=target_ids,
+        monitored_object_ids=monitored_object_ids,
+        extra_params=(grouped_event_id,),
+    )
+    return rows[0] if rows else None
+
+
+def load_grouped_event_raw_rows(grouped_event_row, limit: int):
+    clauses = [
+        "event_type = ?",
+        "severity = ?",
+        "occurred_at >= ?",
+        "occurred_at <= ?",
+    ]
+    params: list[Any] = [
+        grouped_event_row["event_type"],
+        grouped_event_row["severity"],
+        grouped_event_row["first_occurred_at"],
+        grouped_event_row["last_occurred_at"],
+    ]
+
+    if grouped_event_row["monitored_object_id"] is not None:
+        clauses.append("monitored_object_id = ?")
+        params.append(grouped_event_row["monitored_object_id"])
+    else:
+        clauses.append("monitored_object_id IS NULL")
+        clauses.append("target_id = ?")
+        params.append(grouped_event_row["target_id"])
+
+    params.append(limit)
+    return get_db().execute(
+        f"""
+        SELECT id, agent_id, monitored_object_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
+        FROM raw_events
+        WHERE {' AND '.join(clauses)}
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT ?
+        """,
+        tuple(params),
+    ).fetchall()
+
+
 def build_runtime_order_maps(target_rows):
     object_order: dict[int, int] = {}
     target_order: dict[str, int] = {}
@@ -524,6 +581,43 @@ def get_view_events(view_id: int):
     )
 
     return {"items": [serialize_grouped_event(row) for row in rows]}
+
+
+@bp.get("/<int:view_id>/events/<int:grouped_event_id>/raw-events")
+@login_required
+def get_view_grouped_event_raw_events(view_id: int, grouped_event_id: int):
+    view_row, error = get_view_for_user(view_id)
+    if error:
+        return error
+
+    limit_raw = request.args.get("limit", default=str(DEFAULT_EVENTS_LIMIT))
+    try:
+        limit = int(limit_raw)
+    except (TypeError, ValueError):
+        return error_response("validation_error", "limit must be an integer", 400)
+
+    if limit <= 0 or limit > MAX_EVENTS_LIMIT:
+        return error_response("validation_error", f"limit must be between 1 and {MAX_EVENTS_LIMIT}", 400)
+
+    target_rows = get_monitor_target_rows(view_row["id"])
+    target_ids = [row["target_id"] for row in target_rows if row["target_id"] is not None]
+    monitored_object_ids = [row["monitored_object_id"] for row in target_rows if row["monitored_object_id"] is not None]
+    if not target_ids and not monitored_object_ids:
+        return error_response("not_found", "grouped event not found", 404)
+
+    grouped_event_row = fetch_grouped_event_for_runtime(
+        grouped_event_id,
+        target_ids=target_ids,
+        monitored_object_ids=monitored_object_ids,
+    )
+    if grouped_event_row is None:
+        return error_response("not_found", "grouped event not found", 404)
+
+    raw_rows = load_grouped_event_raw_rows(grouped_event_row, limit)
+    return {
+        "grouped_event": serialize_grouped_event(grouped_event_row),
+        "items": [serialize_raw_event(row) for row in raw_rows],
+    }
 
 
 @bp.get("/<int:view_id>/alerts")

@@ -15,6 +15,7 @@ const alertRuleCount = document.getElementById("alert-rule-count");
 const ingestList = document.getElementById("admin-ingest-list");
 const latestStateList = document.getElementById("admin-latest-state-list");
 const eventsList = document.getElementById("admin-events-list");
+const eventDetailPanel = document.getElementById("admin-event-detail-panel");
 const alertsList = document.getElementById("admin-alerts-list");
 const debugList = document.getElementById("admin-debug-list");
 const cleanupList = document.getElementById("admin-cleanup-list");
@@ -56,6 +57,10 @@ const alertRuleEnabledInput = document.getElementById("alert-rule-enabled");
 
 let metamodelVersions = [];
 let alertRules = [];
+let groupedEvents = [];
+let selectedGroupedEventId = null;
+let selectedGroupedEvent = null;
+let selectedGroupedEventRawItems = [];
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -278,6 +283,7 @@ function renderLatestStates(items) {
 }
 
 function renderEvents(items) {
+    groupedEvents = items;
     if (items.length === 0) {
         eventsList.innerHTML = '<p class="section-copy">최근 event가 없습니다.</p>';
         return;
@@ -286,7 +292,7 @@ function renderEvents(items) {
     eventsList.innerHTML = items
         .map(
             (event) => `
-                <article class="event-item">
+                <article class="event-item event-summary-item is-interactive${selectedGroupedEventId === event.id ? " is-selected" : ""}" data-grouped-event-id="${escapeHtml(event.id)}">
                     <h3>${escapeHtml(event.event_type)}</h3>
                     <p>${escapeHtml(event.latest_message || event.message || "메시지 없음")}</p>
                     <p>${escapeHtml(event.target_id)} | ${escapeHtml(event.severity)} | 반복 ${escapeHtml(event.repeat_count ?? 1)}회</p>
@@ -295,6 +301,47 @@ function renderEvents(items) {
             `
         )
         .join("");
+}
+
+function renderEventDetailPanel() {
+    if (!selectedGroupedEvent) {
+        eventDetailPanel.innerHTML = '<p class="section-copy">grouped event를 선택하면 raw event 상세를 확인할 수 있습니다.</p>';
+        return;
+    }
+
+    const header = `
+        <div class="section-header">
+            <h3>${escapeHtml(selectedGroupedEvent.event_type)}</h3>
+            <span class="meta-pill">반복 ${escapeHtml(selectedGroupedEvent.repeat_count ?? 1)}회</span>
+        </div>
+        <p class="admin-meta">${escapeHtml(selectedGroupedEvent.target_id || "-")} | ${escapeHtml(selectedGroupedEvent.severity)} | ${escapeHtml(formatTimestamp(selectedGroupedEvent.last_occurred_at || selectedGroupedEvent.occurred_at))}</p>
+    `;
+
+    if (selectedGroupedEventRawItems.length === 0) {
+        eventDetailPanel.innerHTML = `
+            ${header}
+            <p class="section-copy">조건에 맞는 raw event가 없습니다.</p>
+        `;
+        return;
+    }
+
+    eventDetailPanel.innerHTML = `
+        ${header}
+        <div class="event-list raw-event-list">
+            ${selectedGroupedEventRawItems
+                .map(
+                    (event) => `
+                        <article class="event-item raw-event-item">
+                            <h4>${escapeHtml(event.event_type)}</h4>
+                            <p>${escapeHtml(event.message || "메시지 없음")}</p>
+                            <p>${escapeHtml(event.target_id)} | ${escapeHtml(event.severity)}</p>
+                            <p>${escapeHtml(formatTimestamp(event.occurred_at))}</p>
+                        </article>
+                    `
+                )
+                .join("")}
+        </div>
+    `;
 }
 
 function renderAlerts(items) {
@@ -527,6 +574,14 @@ async function loadLatestStates() {
 async function loadEvents() {
     const payload = await apiFetch("/api/admin/grouped-events?limit=10");
     renderEvents(payload.items);
+    if (selectedGroupedEventId && payload.items.some((item) => item.id === selectedGroupedEventId)) {
+        await loadGroupedEventDetails(selectedGroupedEventId);
+        return;
+    }
+    selectedGroupedEventId = null;
+    selectedGroupedEvent = null;
+    selectedGroupedEventRawItems = [];
+    renderEventDetailPanel();
 }
 
 async function loadAlerts() {
@@ -556,6 +611,15 @@ async function loadMetamodelVersions() {
 async function loadAlertRules() {
     const payload = await apiFetch("/api/admin/alert-rules");
     renderAlertRules(payload.items);
+}
+
+async function loadGroupedEventDetails(groupedEventId) {
+    const payload = await apiFetch(`/api/admin/grouped-events/${groupedEventId}/raw-events?limit=20`);
+    selectedGroupedEventId = groupedEventId;
+    selectedGroupedEvent = payload.grouped_event;
+    selectedGroupedEventRawItems = payload.items;
+    renderEvents(groupedEvents);
+    renderEventDetailPanel();
 }
 
 async function createMetamodelVersion(event) {
@@ -665,6 +729,19 @@ refreshDebugButton?.addEventListener("click", loadDebug);
 refreshCleanupButton?.addEventListener("click", loadCleanupRuns);
 refreshMetamodelVersionsButton?.addEventListener("click", loadMetamodelVersions);
 refreshAlertRulesButton?.addEventListener("click", loadAlertRules);
+eventsList?.addEventListener("click", async (event) => {
+    const card = event.target instanceof Element ? event.target.closest("[data-grouped-event-id]") : null;
+    if (!card) {
+        return;
+    }
+
+    try {
+        clearBanner();
+        await loadGroupedEventDetails(Number(card.dataset.groupedEventId));
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
+});
 metamodelVersionForm?.addEventListener("submit", createMetamodelVersion);
 metamodelNamespaceSelect?.addEventListener("change", renderMetamodelSelectOptions);
 alertRuleForm?.addEventListener("submit", saveAlertRule);
