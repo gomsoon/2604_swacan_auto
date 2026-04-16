@@ -1149,6 +1149,51 @@ def test_admin_rejects_invalid_containment_rule_payload_boundaries(seeded_client
     assert invalid_type_membership.get_json()["error"]["code"] == "validation_error"
 
 
+def test_admin_can_delete_containment_rule_in_draft_version(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v12-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for containment delete",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    rules = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/containment-rules").get_json()["items"]
+    existing_rule = next(
+        item
+        for item in rules
+        if item["parent_type_code"] == "PhysicalServer" and item["child_type_code"] == "SoftwareProcess"
+    )
+
+    delete_response = seeded_client.delete(f"/api/admin/metamodel/containment-rules/{existing_rule['id']}")
+
+    assert delete_response.status_code == 200
+    assert delete_response.get_json()["deleted"] is True
+    remaining_rules = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/containment-rules").get_json()["items"]
+    assert all(item["id"] != existing_rule["id"] for item in remaining_rules)
+
+
+def test_admin_rejects_delete_containment_rule_for_published_version(seeded_client) -> None:
+    login(seeded_client)
+
+    rules = seeded_client.get("/api/admin/metamodel/versions/1/containment-rules").get_json()["items"]
+    published_rule = next(
+        item
+        for item in rules
+        if item["parent_type_code"] == "PhysicalServer" and item["child_type_code"] == "SoftwareProcess"
+    )
+
+    response = seeded_client.delete(f"/api/admin/metamodel/containment-rules/{published_rule['id']}")
+
+    assert response.status_code == 409
+    assert response.get_json()["error"]["code"] == "invalid_state"
+
+
 def test_admin_can_list_notation_definitions_for_semantic_type(seeded_client) -> None:
     login(seeded_client)
 
@@ -1867,3 +1912,71 @@ def test_admin_rejects_invalid_association_definition_payload_boundaries(seeded_
     assert invalid_semantics_json.get_json()["error"]["code"] == "validation_error"
     assert invalid_type_membership.status_code == 400
     assert invalid_type_membership.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_can_delete_association_definition_in_draft_version(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v18-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for association delete",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    semantic_type_response = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPool",
+            "display_name": "Worker Pool",
+            "kind": "container",
+            "runtime_kind": "process-group",
+            "description": "Association delete target",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+    worker_pool_id = semantic_type_response.get_json()["semantic_type"]["id"]
+    semantic_types = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/semantic-types").get_json()["items"]
+    agent_type = next(item for item in semantic_types if item["code"] == "MonitoringAgent")
+
+    create_association = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/associations",
+        json={
+            "code": "monitors_worker_pool",
+            "display_name": "Monitors Worker Pool",
+            "description": "Association delete candidate",
+            "source_type_id": agent_type["id"],
+            "target_type_id": worker_pool_id,
+            "direction": "directed",
+            "multiplicity_source": "1",
+            "multiplicity_target": "0..n",
+            "semantics_json": "{\"default_edge_type\":\"CommunicationLink\"}",
+        },
+    )
+    assert create_association.status_code == 201
+    association_id = create_association.get_json()["association_definition"]["id"]
+
+    delete_response = seeded_client.delete(f"/api/admin/metamodel/associations/{association_id}")
+
+    assert delete_response.status_code == 200
+    assert delete_response.get_json()["deleted"] is True
+    remaining = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/associations").get_json()["items"]
+    assert all(item["id"] != association_id for item in remaining)
+
+
+def test_admin_rejects_delete_association_definition_for_published_version(seeded_client) -> None:
+    login(seeded_client)
+
+    associations = seeded_client.get("/api/admin/metamodel/versions/1/associations").get_json()["items"]
+    published_association = next(item for item in associations if item["code"] == "monitors")
+
+    response = seeded_client.delete(f"/api/admin/metamodel/associations/{published_association['id']}")
+
+    assert response.status_code == 409
+    assert response.get_json()["error"]["code"] == "invalid_state"

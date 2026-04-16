@@ -2336,6 +2336,34 @@ def update_containment_rule(rule_id: int):
     return {"containment_rule": serialize_containment_rule(updated)}
 
 
+@bp.delete("/containment-rules/<int:rule_id>")
+@admin_required
+def delete_containment_rule(rule_id: int):
+    existing = fetch_containment_rule_row(rule_id)
+    if existing is None:
+        return error_response("containment_rule_not_found", "containment rule not found", 404)
+    if existing["metamodel_version_status"] != "draft":
+        return error_response("invalid_state", "only draft containment rules can be deleted", 409)
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    db_conn.execute("DELETE FROM containment_rules WHERE id = ?", (rule_id,))
+    db_conn.execute(
+        """
+        UPDATE metamodel_versions
+        SET updated_at = ?
+        WHERE id = ?
+        """,
+        (timestamp, existing["metamodel_version_id"]),
+    )
+    db_conn.commit()
+
+    return {
+        "deleted": True,
+        "containment_rule_id": rule_id,
+    }
+
+
 @bp.get("/versions/<int:version_id>/associations")
 @admin_required
 def list_association_definitions(version_id: int):
@@ -2536,6 +2564,34 @@ def update_association_definition(association_id: int):
 
     updated = fetch_association_definition_row(association_id)
     return {"association_definition": serialize_association_definition(updated)}
+
+
+@bp.delete("/associations/<int:association_id>")
+@admin_required
+def delete_association_definition(association_id: int):
+    existing = fetch_association_definition_row(association_id)
+    if existing is None:
+        return error_response("association_not_found", "association definition not found", 404)
+    if existing["metamodel_version_status"] != "draft":
+        return error_response("invalid_state", "only draft association definitions can be deleted", 409)
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    db_conn.execute("DELETE FROM association_definitions WHERE id = ?", (association_id,))
+    db_conn.execute(
+        """
+        UPDATE metamodel_versions
+        SET updated_at = ?
+        WHERE id = ?
+        """,
+        (timestamp, existing["metamodel_version_id"]),
+    )
+    db_conn.commit()
+
+    return {
+        "deleted": True,
+        "association_definition_id": association_id,
+    }
 
 
 @bp.get("/versions/<int:version_id>/palette-groups")

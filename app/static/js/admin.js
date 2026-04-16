@@ -867,6 +867,11 @@ async function openMetamodelEditorFromInspector(action, kind, id) {
             return;
         }
 
+        if (action === "delete-containment-rule") {
+            await deleteMetamodelContainmentRule(item.id);
+            return;
+        }
+
         fillMetamodelContainmentRuleForm(item);
         scrollToMetamodelEditorSection(metamodelContainmentRuleSection, metamodelContainmentParentTypeIdInput);
         return;
@@ -910,6 +915,11 @@ async function openMetamodelEditorFromInspector(action, kind, id) {
             return;
         }
 
+        if (action === "delete-association-definition") {
+            await deleteMetamodelAssociationDefinition(item.id);
+            return;
+        }
+
         fillMetamodelAssociationForm(item);
         scrollToMetamodelEditorSection(metamodelAssociationSection, metamodelAssociationCodeInput);
     }
@@ -939,6 +949,34 @@ async function saveContainmentRuleFromInspector(ruleId) {
     }
     refreshMetamodelWorkspace();
     showBanner("Containment rule을 inspector에서 저장했습니다.", "success");
+}
+
+async function deleteMetamodelContainmentRule(ruleId) {
+    clearBanner();
+    const item = metamodelContainmentRules.find((entry) => entry.id === ruleId);
+    if (!item) {
+        showBanner("삭제할 containment rule을 찾을 수 없습니다.", "error");
+        return;
+    }
+    const confirmed = window.confirm(
+        `Containment Rule '${item.parent_type_display_name} -> ${item.child_type_display_name}'을(를) 삭제할까요?`
+    );
+    if (!confirmed) {
+        return;
+    }
+
+    await apiFetch(`/api/admin/metamodel/containment-rules/${ruleId}`, {
+        method: "DELETE",
+    });
+    if (selectedMetamodelContainmentRuleId === ruleId) {
+        resetMetamodelContainmentRuleForm();
+    }
+    if (selectedMetamodelWorkspace?.kind === "containment_rule" && Number(selectedMetamodelWorkspace.id) === Number(ruleId)) {
+        selectedMetamodelWorkspace = null;
+    }
+    await Promise.all([loadMetamodelVersions(), loadMetamodelContainmentRules()]);
+    refreshMetamodelWorkspace();
+    showBanner("containment rule을 삭제했습니다.", "success");
 }
 
 async function saveNotationFromInspector(notationId) {
@@ -996,6 +1034,32 @@ async function saveAssociationFromInspector(associationId) {
     }
     refreshMetamodelWorkspace();
     showBanner("Association definition을 inspector에서 저장했습니다.", "success");
+}
+
+async function deleteMetamodelAssociationDefinition(associationId) {
+    clearBanner();
+    const item = metamodelAssociations.find((entry) => entry.id === associationId);
+    if (!item) {
+        showBanner("삭제할 association definition을 찾을 수 없습니다.", "error");
+        return;
+    }
+    const confirmed = window.confirm(`Association Definition '${item.display_name}'을(를) 삭제할까요?`);
+    if (!confirmed) {
+        return;
+    }
+
+    await apiFetch(`/api/admin/metamodel/associations/${associationId}`, {
+        method: "DELETE",
+    });
+    if (selectedMetamodelAssociationId === associationId) {
+        resetMetamodelAssociationForm();
+    }
+    if (selectedMetamodelWorkspace?.kind === "association_definition" && Number(selectedMetamodelWorkspace.id) === Number(associationId)) {
+        selectedMetamodelWorkspace = null;
+    }
+    await Promise.all([loadMetamodelVersions(), loadMetamodelAssociations()]);
+    refreshMetamodelWorkspace();
+    showBanner("association definition을 삭제했습니다.", "success");
 }
 
 function toOptionalNumberValue(value) {
@@ -1931,6 +1995,7 @@ function renderMetamodelWorkspaceInspector() {
             <p class="admin-meta">${escapeHtml(item.parent_type_code)} -> ${escapeHtml(item.child_type_code)}</p>
             <div class="toolbar-inline inspector-actions">
                 <button class="button ghost small" type="button" data-inspector-action="edit-containment-rule" data-workspace-kind="containment_rule" data-workspace-id="${escapeHtml(item.id)}">Containment 편집</button>
+                <button class="button ghost small" type="button" data-inspector-action="delete-containment-rule" data-workspace-kind="containment_rule" data-workspace-id="${escapeHtml(item.id)}">삭제</button>
             </div>
             <div class="summary-metrics">
                 ${renderMetaPills([
@@ -1980,6 +2045,7 @@ function renderMetamodelWorkspaceInspector() {
             <p class="admin-meta">${escapeHtml(item.code)} | ${escapeHtml(item.source_type_code)} -> ${escapeHtml(item.target_type_code)}</p>
             <div class="toolbar-inline inspector-actions">
                 <button class="button ghost small" type="button" data-inspector-action="edit-association-definition" data-workspace-kind="association_definition" data-workspace-id="${escapeHtml(item.id)}">Association 편집</button>
+                <button class="button ghost small" type="button" data-inspector-action="delete-association-definition" data-workspace-kind="association_definition" data-workspace-id="${escapeHtml(item.id)}">삭제</button>
             </div>
             <div class="summary-metrics">
                 ${renderMetaPills([
@@ -2537,6 +2603,7 @@ function renderMetamodelContainmentRules(items) {
                             <span class="meta-pill">${escapeHtml(item.cardinality_scope)}</span>
                             <span class="meta-pill">${item.is_required ? "required" : "optional"}</span>
                             <button class="button ghost small edit-metamodel-containment-rule-button" type="button" data-containment-rule-id="${escapeHtml(item.id)}">수정</button>
+                            <button class="button ghost small delete-metamodel-containment-rule-button" type="button" data-containment-rule-id="${escapeHtml(item.id)}">삭제</button>
                         </div>
                     </div>
                     <p class="admin-meta">min=${escapeHtml(item.min_count ?? "-")} | max=${escapeHtml(item.max_count ?? "-")}</p>
@@ -2607,6 +2674,7 @@ function renderMetamodelAssociations(items) {
                             <span class="meta-pill">${escapeHtml(item.multiplicity_source || "-")}</span>
                             <span class="meta-pill">${escapeHtml(item.multiplicity_target || "-")}</span>
                             <button class="button ghost small edit-metamodel-association-button" type="button" data-association-id="${escapeHtml(item.id)}">수정</button>
+                            <button class="button ghost small delete-metamodel-association-button" type="button" data-association-id="${escapeHtml(item.id)}">삭제</button>
                         </div>
                     </div>
                     <p class="admin-meta">${escapeHtml(item.source_type_code)} -> ${escapeHtml(item.target_type_code)}</p>
@@ -3929,13 +3997,23 @@ metamodelSemanticTypesList?.addEventListener("click", (event) => {
     }
 });
 metamodelContainmentRulesList?.addEventListener("click", (event) => {
-    const button = event.target instanceof HTMLElement ? event.target.closest(".edit-metamodel-containment-rule-button") : null;
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (!target) {
+        return;
+    }
+    const editButton = target.closest(".edit-metamodel-containment-rule-button");
+    const deleteButton = target.closest(".delete-metamodel-containment-rule-button");
+    const button = editButton || deleteButton;
     if (!button) {
         return;
     }
     const ruleId = Number(button.dataset.containmentRuleId);
     const item = metamodelContainmentRules.find((entry) => entry.id === ruleId);
     if (!item) {
+        return;
+    }
+    if (deleteButton) {
+        deleteMetamodelContainmentRule(item.id).catch((error) => showBanner(error.message, "error"));
         return;
     }
     selectMetamodelWorkspaceItem("containment_rule", item.id).catch((error) => showBanner(error.message, "error"));
@@ -3987,13 +4065,23 @@ metamodelNotationsList?.addEventListener("click", (event) => {
     selectMetamodelWorkspaceItem("notation_definition", item.id).catch((error) => showBanner(error.message, "error"));
 });
 metamodelAssociationsList?.addEventListener("click", (event) => {
-    const button = event.target instanceof HTMLElement ? event.target.closest(".edit-metamodel-association-button") : null;
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (!target) {
+        return;
+    }
+    const editButton = target.closest(".edit-metamodel-association-button");
+    const deleteButton = target.closest(".delete-metamodel-association-button");
+    const button = editButton || deleteButton;
     if (!button) {
         return;
     }
     const associationId = Number(button.dataset.associationId);
     const item = metamodelAssociations.find((entry) => entry.id === associationId);
     if (!item) {
+        return;
+    }
+    if (deleteButton) {
+        deleteMetamodelAssociationDefinition(item.id).catch((error) => showBanner(error.message, "error"));
         return;
     }
     selectMetamodelWorkspaceItem("association_definition", item.id).catch((error) => showBanner(error.message, "error"));

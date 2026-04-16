@@ -493,7 +493,6 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     expect(page.locator("#admin-metamodel-associations-list .admin-item", has_text="Monitors Worker Pool Updated").first).to_contain_text("undirected")
     expect(page.locator("#admin-metamodel-associations-list .admin-item", has_text="Monitors Worker Pool Updated").first).to_contain_text("1..n")
     expect(page.locator("#metamodel-workspace-outline")).to_contain_text("Worker Pool Updated")
-    expect(page.locator("#metamodel-workspace-outline")).to_contain_text("Monitors Worker Pool Updated")
 
     page.locator('#metamodel-workspace-outline [data-workspace-kind="semantic_type"]', has_text="Worker Pool Updated").click()
     expect(page.locator("#metamodel-workspace-inspector")).to_contain_text("Worker Pool Updated")
@@ -551,6 +550,9 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     page.locator("#metamodel-workspace-inspector").get_by_role("button", name="빠른 저장").click()
     expect(page.locator("#admin-metamodel-containment-rules-list")).to_contain_text("max=12")
     expect(page.locator("#metamodel-workspace-inspector")).to_contain_text("max 12")
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator("#admin-metamodel-containment-rules-list .admin-item", has_text="WorkerPool -> MonitoringAgent").first.get_by_role("button", name="삭제").click()
+    expect(page.locator("#admin-metamodel-containment-rules-list")).not_to_contain_text("WorkerPool -> MonitoringAgent")
 
     page.locator('#metamodel-workspace-outline [data-workspace-kind="association_definition"]', has_text="Monitors Worker Pool Updated").click()
     expect(page.locator("#metamodel-workspace-inspector")).to_contain_text("Monitors Worker Pool Updated")
@@ -587,6 +589,9 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     expect(page.locator("#metamodel-association-display-name")).to_have_value("Worker Pool -> Monitoring Agent")
     expect(page.locator("#admin-metamodel-associations-list")).to_contain_text("worker_pool_to_monitoring_agent")
     expect(page.locator("#metamodel-workspace-inspector")).to_contain_text("undirected")
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator("#admin-metamodel-associations-list .admin-item", has_text="worker_pool_to_monitoring_agent").first.get_by_role("button", name="삭제").click()
+    expect(page.locator("#admin-metamodel-associations-list")).not_to_contain_text("worker_pool_to_monitoring_agent")
 
     createdVersion.get_by_role("button", name="Diff").click()
     expect(page.locator("#metamodel-validation-panel")).to_contain_text("core / core-v2-ui-draft review")
