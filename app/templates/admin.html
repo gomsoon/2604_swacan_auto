@@ -421,6 +421,83 @@
     <section class="card">
         <div class="section-header section-header-stack">
             <div>
+                <h2>Metamodel Editor: Association Definition</h2>
+                <p class="section-copy">선택한 draft version 기준으로 semantic type 간 association definition을 생성하고 수정합니다.</p>
+            </div>
+            <button id="refresh-metamodel-associations-button" class="button ghost small" type="button">갱신</button>
+        </div>
+
+        <div class="admin-metamodel-layout">
+            <form id="metamodel-association-form" class="stack-form card admin-subcard">
+                <div class="section-header">
+                    <h3 id="metamodel-association-form-title">Association Definition 생성</h3>
+                    <button id="metamodel-association-form-reset" class="button ghost small" type="button">초기화</button>
+                </div>
+                <input id="metamodel-association-id" type="hidden" value="">
+                <div class="field-grid">
+                    <label class="field compact-field">
+                        <span>Source Type</span>
+                        <select id="metamodel-association-source-type-id"></select>
+                    </label>
+                    <label class="field compact-field">
+                        <span>Target Type</span>
+                        <select id="metamodel-association-target-type-id"></select>
+                    </label>
+                </div>
+                <div class="field-grid">
+                    <label class="field compact-field">
+                        <span>Code</span>
+                        <input id="metamodel-association-code" type="text" placeholder="예: monitors_worker_pool" required>
+                    </label>
+                    <label class="field compact-field">
+                        <span>Display Name</span>
+                        <input id="metamodel-association-display-name" type="text" placeholder="예: Monitors Worker Pool" required>
+                    </label>
+                </div>
+                <div class="field-grid">
+                    <label class="field compact-field">
+                        <span>Direction</span>
+                        <select id="metamodel-association-direction">
+                            <option value="directed">directed</option>
+                            <option value="undirected">undirected</option>
+                        </select>
+                    </label>
+                    <label class="field compact-field">
+                        <span>Multiplicity Source</span>
+                        <input id="metamodel-association-multiplicity-source" type="text" placeholder="예: 1">
+                    </label>
+                    <label class="field compact-field">
+                        <span>Multiplicity Target</span>
+                        <input id="metamodel-association-multiplicity-target" type="text" placeholder="예: 0..n">
+                    </label>
+                </div>
+                <label class="field">
+                    <span>Description</span>
+                    <textarea id="metamodel-association-description" rows="3" placeholder="association 목적과 의미를 설명합니다."></textarea>
+                </label>
+                <label class="field">
+                    <span>Semantics JSON</span>
+                    <textarea id="metamodel-association-semantics-json" rows="4" placeholder='예: {"default_edge_type":"CommunicationLink"}'></textarea>
+                </label>
+                <div class="toolbar-inline">
+                    <button id="save-metamodel-association-button" class="button primary" type="submit">저장</button>
+                    <span id="metamodel-association-form-mode" class="meta-pill">create</span>
+                </div>
+            </form>
+
+            <section class="admin-subcard">
+                <div class="section-header">
+                    <h3>Draft Association Definition 목록</h3>
+                    <span id="metamodel-association-count" class="meta-pill">0개</span>
+                </div>
+                <div id="admin-metamodel-associations-list" class="admin-list"></div>
+            </section>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="section-header section-header-stack">
+            <div>
                 <h2>Alert Rule</h2>
                 <p class="section-copy">warning/critical 임계치를 object type 또는 특정 monitored object 단위로 조정합니다.</p>
             </div>

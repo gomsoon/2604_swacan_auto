@@ -410,6 +410,33 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     expect(page.locator("#admin-metamodel-notations-list .admin-item", has_text="Worker Pool Notation Updated").first).to_contain_text("rect")
     expect(page.locator("#admin-metamodel-notations-list .admin-item", has_text="Worker Pool Notation Updated").first).to_contain_text("hidden")
 
+    page.locator("#metamodel-association-source-type-id").select_option(label="Monitoring Agent (MonitoringAgent)")
+    page.locator("#metamodel-association-target-type-id").select_option(label="Worker Pool Updated (WorkerPool)")
+    page.locator("#metamodel-association-code").fill("monitors_worker_pool")
+    page.locator("#metamodel-association-display-name").fill("Monitors Worker Pool")
+    page.locator("#metamodel-association-direction").select_option("directed")
+    page.locator("#metamodel-association-multiplicity-source").fill("1")
+    page.locator("#metamodel-association-multiplicity-target").fill("0..n")
+    page.locator("#metamodel-association-description").fill("Playwright association definition create")
+    page.locator("#metamodel-association-semantics-json").fill('{"default_edge_type":"CommunicationLink"}')
+    page.locator("#save-metamodel-association-button").click()
+
+    createdAssociation = page.locator("#admin-metamodel-associations-list .admin-item", has_text="Monitors Worker Pool").first
+    expect(createdAssociation).to_contain_text("monitors_worker_pool")
+    expect(createdAssociation).to_contain_text("MonitoringAgent -> WorkerPool")
+    expect(createdAssociation).to_contain_text("0..n")
+
+    createdAssociation.get_by_role("button", name="수정").click()
+    expect(page.locator("#metamodel-association-form-mode")).to_contain_text("edit")
+    page.locator("#metamodel-association-display-name").fill("Monitors Worker Pool Updated")
+    page.locator("#metamodel-association-direction").select_option("undirected")
+    page.locator("#metamodel-association-multiplicity-target").fill("1..n")
+    page.locator("#metamodel-association-semantics-json").fill('{"default_edge_type":"CommunicationLink","visual_hint":"dashed"}')
+    page.locator("#save-metamodel-association-button").click()
+
+    expect(page.locator("#admin-metamodel-associations-list .admin-item", has_text="Monitors Worker Pool Updated").first).to_contain_text("undirected")
+    expect(page.locator("#admin-metamodel-associations-list .admin-item", has_text="Monitors Worker Pool Updated").first).to_contain_text("1..n")
+
     createdVersion.locator(".publish-metamodel-button").click()
 
     expect(page.locator(".admin-item", has_text="core-v2-ui-draft").first).to_contain_text("published")

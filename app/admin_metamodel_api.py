@@ -15,6 +15,7 @@ ALLOWED_VERSION_STATUSES = {"draft", "published", "deprecated"}
 ALLOWED_SEMANTIC_TYPE_KINDS = {"node", "edge", "container", "runtime-only"}
 ALLOWED_PROPERTY_VALUE_TYPES = {"string", "integer", "number", "boolean", "enum", "json"}
 ALLOWED_CARDINALITY_SCOPES = {"group_total", "per_member"}
+ALLOWED_ASSOCIATION_DIRECTIONS = {"directed", "undirected"}
 ALLOWED_NOTATION_KINDS = {"node", "edge"}
 ALLOWED_RENDER_PRIMITIVES = {"rect", "rounded_rect", "line", "badge", "label"}
 
@@ -243,6 +244,56 @@ def serialize_containment_rule(row) -> dict[str, Any]:
         "max_count": row["max_count"],
         "cardinality_scope": row["cardinality_scope"],
         "is_required": bool(row["is_required"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def fetch_association_definition_row(association_id: int):
+    return get_db().execute(
+        """
+        SELECT ad.id, ad.metamodel_version_id, ad.code, ad.display_name, ad.description,
+               ad.source_type_id, ad.target_type_id, ad.direction,
+               ad.multiplicity_source, ad.multiplicity_target, ad.semantics_json,
+               ad.created_at, ad.updated_at,
+               source_st.code AS source_type_code,
+               source_st.display_name AS source_type_display_name,
+               target_st.code AS target_type_code,
+               target_st.display_name AS target_type_display_name,
+               mv.status AS metamodel_version_status,
+               mv.version_code AS metamodel_version_code,
+               ns.code AS namespace_code
+        FROM association_definitions AS ad
+        JOIN semantic_types AS source_st ON source_st.id = ad.source_type_id
+        JOIN semantic_types AS target_st ON target_st.id = ad.target_type_id
+        JOIN metamodel_versions AS mv ON mv.id = ad.metamodel_version_id
+        JOIN metamodel_namespaces AS ns ON ns.id = mv.namespace_id
+        WHERE ad.id = ?
+        """,
+        (association_id,),
+    ).fetchone()
+
+
+def serialize_association_definition(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "metamodel_version_id": row["metamodel_version_id"],
+        "metamodel_version_code": row["metamodel_version_code"],
+        "namespace_code": row["namespace_code"],
+        "code": row["code"],
+        "display_name": row["display_name"],
+        "description": row["description"],
+        "source_type_id": row["source_type_id"],
+        "source_type_code": row["source_type_code"],
+        "source_type_display_name": row["source_type_display_name"],
+        "target_type_id": row["target_type_id"],
+        "target_type_code": row["target_type_code"],
+        "target_type_display_name": row["target_type_display_name"],
+        "direction": row["direction"],
+        "multiplicity_source": row["multiplicity_source"],
+        "multiplicity_target": row["multiplicity_target"],
+        "semantics_json": row["semantics_json"],
+        "semantics": parse_json_or_none(row["semantics_json"]),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -546,6 +597,60 @@ def validate_containment_rule_payload(data: dict[str, Any]) -> tuple[dict[str, A
 
     payload["min_count"] = min_count
     payload["max_count"] = max_count
+    return payload, None
+
+
+def validate_association_definition_payload(data: dict[str, Any]) -> tuple[dict[str, Any] | None, Any | None]:
+    payload = dict(data)
+
+    try:
+        payload["code"] = parse_optional_string(payload.get("code"), field_name="code", max_length=100)
+        if not payload["code"]:
+            return None, error_response("validation_error", "code is required", 400)
+
+        payload["display_name"] = parse_optional_string(
+            payload.get("display_name"),
+            field_name="display_name",
+            max_length=100,
+        )
+        if not payload["display_name"]:
+            return None, error_response("validation_error", "display_name is required", 400)
+
+        payload["description"] = parse_optional_string(
+            payload.get("description"),
+            field_name="description",
+            max_length=500,
+        )
+        payload["multiplicity_source"] = parse_optional_string(
+            payload.get("multiplicity_source"),
+            field_name="multiplicity_source",
+            max_length=20,
+        )
+        payload["multiplicity_target"] = parse_optional_string(
+            payload.get("multiplicity_target"),
+            field_name="multiplicity_target",
+            max_length=20,
+        )
+
+        for field_name in ("source_type_id", "target_type_id"):
+            value = payload.get(field_name)
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                return None, error_response("validation_error", f"{field_name} must be a positive integer", 400)
+
+        if payload["source_type_id"] == payload["target_type_id"]:
+            return None, error_response("validation_error", "source_type_id and target_type_id must be different", 400)
+
+        if payload.get("direction") not in ALLOWED_ASSOCIATION_DIRECTIONS:
+            return None, error_response("validation_error", "direction is invalid", 400)
+
+        payload["semantics_json"] = validate_json_text_field(
+            payload.get("semantics_json"),
+            field_name="semantics_json",
+            required=False,
+        )
+    except ValueError as exc:
+        return None, error_response("validation_error", str(exc), 400)
+
     return payload, None
 
 
@@ -1416,6 +1521,208 @@ def update_containment_rule(rule_id: int):
 
     updated = fetch_containment_rule_row(rule_id)
     return {"containment_rule": serialize_containment_rule(updated)}
+
+
+@bp.get("/versions/<int:version_id>/associations")
+@admin_required
+def list_association_definitions(version_id: int):
+    version = fetch_version(version_id)
+    if version is None:
+        return error_response("metamodel_not_found", "metamodel version not found", 404)
+
+    rows = get_db().execute(
+        """
+        SELECT ad.id, ad.metamodel_version_id, ad.code, ad.display_name, ad.description,
+               ad.source_type_id, ad.target_type_id, ad.direction,
+               ad.multiplicity_source, ad.multiplicity_target, ad.semantics_json,
+               ad.created_at, ad.updated_at,
+               source_st.code AS source_type_code,
+               source_st.display_name AS source_type_display_name,
+               target_st.code AS target_type_code,
+               target_st.display_name AS target_type_display_name,
+               mv.version_code AS metamodel_version_code,
+               ns.code AS namespace_code
+        FROM association_definitions AS ad
+        JOIN semantic_types AS source_st ON source_st.id = ad.source_type_id
+        JOIN semantic_types AS target_st ON target_st.id = ad.target_type_id
+        JOIN metamodel_versions AS mv ON mv.id = ad.metamodel_version_id
+        JOIN metamodel_namespaces AS ns ON ns.id = mv.namespace_id
+        WHERE ad.metamodel_version_id = ?
+        ORDER BY ad.code ASC, ad.id ASC
+        """,
+        (version_id,),
+    ).fetchall()
+
+    return {
+        "version": serialize_version(version),
+        "items": [serialize_association_definition(row) for row in rows],
+    }
+
+
+@bp.post("/versions/<int:version_id>/associations")
+@admin_required
+def create_association_definition(version_id: int):
+    version, error = require_draft_version(version_id)
+    if error:
+        return error
+
+    payload, error = validate_association_definition_payload(request.get_json(silent=True) or {})
+    if error:
+        return error
+
+    type_rows = get_db().execute(
+        """
+        SELECT id
+        FROM semantic_types
+        WHERE metamodel_version_id = ? AND id IN (?, ?)
+        """,
+        (version_id, payload["source_type_id"], payload["target_type_id"]),
+    ).fetchall()
+    if len(type_rows) != 2:
+        return error_response("validation_error", "source_type_id and target_type_id must belong to the selected version", 400)
+
+    conflict = get_db().execute(
+        """
+        SELECT 1
+        FROM association_definitions
+        WHERE metamodel_version_id = ? AND code = ?
+        """,
+        (version_id, payload["code"]),
+    ).fetchone()
+    if conflict is not None:
+        return error_response("association_conflict", "association code already exists in version", 409)
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    cursor = db_conn.execute(
+        """
+        INSERT INTO association_definitions (
+            metamodel_version_id, code, display_name, description, source_type_id, target_type_id,
+            direction, multiplicity_source, multiplicity_target, semantics_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            version_id,
+            payload["code"],
+            payload["display_name"],
+            payload.get("description"),
+            payload["source_type_id"],
+            payload["target_type_id"],
+            payload["direction"],
+            payload.get("multiplicity_source"),
+            payload.get("multiplicity_target"),
+            payload.get("semantics_json"),
+            timestamp,
+            timestamp,
+        ),
+    )
+    db_conn.execute(
+        """
+        UPDATE metamodel_versions
+        SET updated_at = ?
+        WHERE id = ?
+        """,
+        (timestamp, version_id),
+    )
+    db_conn.commit()
+
+    created = fetch_association_definition_row(int(cursor.lastrowid))
+    return {
+        "version": serialize_version(version),
+        "association_definition": serialize_association_definition(created),
+    }, 201
+
+
+@bp.patch("/associations/<int:association_id>")
+@admin_required
+def update_association_definition(association_id: int):
+    existing = fetch_association_definition_row(association_id)
+    if existing is None:
+        return error_response("association_not_found", "association definition not found", 404)
+    if existing["metamodel_version_status"] != "draft":
+        return error_response("invalid_state", "only draft association definitions can be edited", 409)
+
+    current_payload = {
+        "code": existing["code"],
+        "display_name": existing["display_name"],
+        "description": existing["description"],
+        "source_type_id": existing["source_type_id"],
+        "target_type_id": existing["target_type_id"],
+        "direction": existing["direction"],
+        "multiplicity_source": existing["multiplicity_source"],
+        "multiplicity_target": existing["multiplicity_target"],
+        "semantics_json": existing["semantics_json"],
+    }
+    current_payload.update(request.get_json(silent=True) or {})
+    payload, error = validate_association_definition_payload(current_payload)
+    if error:
+        return error
+
+    type_rows = get_db().execute(
+        """
+        SELECT id
+        FROM semantic_types
+        WHERE metamodel_version_id = ? AND id IN (?, ?)
+        """,
+        (existing["metamodel_version_id"], payload["source_type_id"], payload["target_type_id"]),
+    ).fetchall()
+    if len(type_rows) != 2:
+        return error_response("validation_error", "source_type_id and target_type_id must belong to the selected version", 400)
+
+    conflict = get_db().execute(
+        """
+        SELECT 1
+        FROM association_definitions
+        WHERE metamodel_version_id = ? AND code = ? AND id != ?
+        """,
+        (existing["metamodel_version_id"], payload["code"], association_id),
+    ).fetchone()
+    if conflict is not None:
+        return error_response("association_conflict", "association code already exists in version", 409)
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    db_conn.execute(
+        """
+        UPDATE association_definitions
+        SET code = ?,
+            display_name = ?,
+            description = ?,
+            source_type_id = ?,
+            target_type_id = ?,
+            direction = ?,
+            multiplicity_source = ?,
+            multiplicity_target = ?,
+            semantics_json = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            payload["code"],
+            payload["display_name"],
+            payload.get("description"),
+            payload["source_type_id"],
+            payload["target_type_id"],
+            payload["direction"],
+            payload.get("multiplicity_source"),
+            payload.get("multiplicity_target"),
+            payload.get("semantics_json"),
+            timestamp,
+            association_id,
+        ),
+    )
+    db_conn.execute(
+        """
+        UPDATE metamodel_versions
+        SET updated_at = ?
+        WHERE id = ?
+        """,
+        (timestamp, existing["metamodel_version_id"]),
+    )
+    db_conn.commit()
+
+    updated = fetch_association_definition_row(association_id)
+    return {"association_definition": serialize_association_definition(updated)}
 
 
 @bp.get("/versions/<int:version_id>/palette-groups")

@@ -1045,3 +1045,280 @@ def test_admin_rejects_invalid_notation_definition_payload_boundaries(seeded_cli
     assert invalid_kind_for_node_type.get_json()["error"]["code"] == "validation_error"
     assert invalid_palette_group_membership.status_code == 400
     assert invalid_palette_group_membership.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_can_list_association_definitions_for_version(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/metamodel/versions/1/associations")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["version"]["version_code"] == "seed-v1"
+    assert any(item["code"] == "communicates_with" for item in payload["items"])
+    assert any(item["code"] == "monitors" for item in payload["items"])
+
+
+def test_admin_can_create_association_definition_in_draft_version(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v15-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for association definition create",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    semantic_type_response = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPool",
+            "display_name": "Worker Pool",
+            "kind": "container",
+            "runtime_kind": "process-group",
+            "description": "Association target",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+    assert semantic_type_response.status_code == 201
+    worker_pool_id = semantic_type_response.get_json()["semantic_type"]["id"]
+
+    semantic_types = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/semantic-types").get_json()["items"]
+    agent_type = next(item for item in semantic_types if item["code"] == "MonitoringAgent")
+
+    response = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/associations",
+        json={
+            "code": "monitors_worker_pool",
+            "display_name": "Monitors Worker Pool",
+            "description": "Monitoring agent observes worker pool state",
+            "source_type_id": agent_type["id"],
+            "target_type_id": worker_pool_id,
+            "direction": "directed",
+            "multiplicity_source": "1",
+            "multiplicity_target": "0..n",
+            "semantics_json": "{\"default_edge_type\":\"CommunicationLink\"}",
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert payload["association_definition"]["code"] == "monitors_worker_pool"
+    assert payload["association_definition"]["source_type_code"] == "MonitoringAgent"
+    assert payload["association_definition"]["target_type_code"] == "WorkerPool"
+    assert payload["association_definition"]["semantics"]["default_edge_type"] == "CommunicationLink"
+
+
+def test_admin_rejects_association_create_for_published_version(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/metamodel/versions/1/associations",
+        json={
+            "code": "monitors_worker_pool",
+            "display_name": "Monitors Worker Pool",
+            "description": "Monitoring agent observes worker pool state",
+            "source_type_id": 104,
+            "target_type_id": 103,
+            "direction": "directed",
+            "multiplicity_source": "1",
+            "multiplicity_target": "0..n",
+            "semantics_json": "{\"default_edge_type\":\"CommunicationLink\"}",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["error"]["code"] == "invalid_state"
+
+
+def test_admin_can_update_association_definition_with_boundary_values(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v16-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for association update",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    semantic_type_response = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPool",
+            "display_name": "Worker Pool",
+            "kind": "container",
+            "runtime_kind": "process-group",
+            "description": "Association update target",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+    worker_pool_id = semantic_type_response.get_json()["semantic_type"]["id"]
+
+    semantic_types = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/semantic-types").get_json()["items"]
+    agent_type = next(item for item in semantic_types if item["code"] == "MonitoringAgent")
+
+    create_association = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/associations",
+        json={
+            "code": "monitors_worker_pool",
+            "display_name": "Monitors Worker Pool",
+            "description": "Monitoring agent observes worker pool state",
+            "source_type_id": agent_type["id"],
+            "target_type_id": worker_pool_id,
+            "direction": "directed",
+            "multiplicity_source": "1",
+            "multiplicity_target": "0..n",
+            "semantics_json": "{\"default_edge_type\":\"CommunicationLink\"}",
+        },
+    )
+    assert create_association.status_code == 201
+    association_id = create_association.get_json()["association_definition"]["id"]
+
+    ok_response = seeded_client.patch(
+        f"/api/admin/metamodel/associations/{association_id}",
+        json={
+            "code": "monitors_worker_pool_updated",
+            "display_name": "Monitors Worker Pool Updated",
+            "description": "a" * 500,
+            "source_type_id": agent_type["id"],
+            "target_type_id": worker_pool_id,
+            "direction": "undirected",
+            "multiplicity_source": "0..1",
+            "multiplicity_target": "1..n",
+            "semantics_json": "{\"default_edge_type\":\"CommunicationLink\",\"visual_hint\":\"dashed\"}",
+        },
+    )
+    invalid_description = seeded_client.patch(
+        f"/api/admin/metamodel/associations/{association_id}",
+        json={
+            "code": "monitors_worker_pool_updated",
+            "display_name": "Monitors Worker Pool Updated",
+            "description": "a" * 501,
+            "source_type_id": agent_type["id"],
+            "target_type_id": worker_pool_id,
+            "direction": "undirected",
+            "multiplicity_source": "0..1",
+            "multiplicity_target": "1..n",
+            "semantics_json": "{\"default_edge_type\":\"CommunicationLink\"}",
+        },
+    )
+
+    assert ok_response.status_code == 200
+    ok_payload = ok_response.get_json()["association_definition"]
+    assert ok_payload["code"] == "monitors_worker_pool_updated"
+    assert ok_payload["direction"] == "undirected"
+    assert ok_payload["multiplicity_target"] == "1..n"
+    assert ok_payload["semantics"]["visual_hint"] == "dashed"
+    assert invalid_description.status_code == 400
+    assert invalid_description.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_rejects_invalid_association_definition_payload_boundaries(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v17-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for association validation",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    semantic_type_response = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPool",
+            "display_name": "Worker Pool",
+            "kind": "container",
+            "runtime_kind": "process-group",
+            "description": "Association validation target",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+    worker_pool_id = semantic_type_response.get_json()["semantic_type"]["id"]
+
+    semantic_types = seeded_client.get(f"/api/admin/metamodel/versions/{version_id}/semantic-types").get_json()["items"]
+    agent_type = next(item for item in semantic_types if item["code"] == "MonitoringAgent")
+
+    same_type = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/associations",
+        json={
+            "code": "self_link",
+            "display_name": "Self Link",
+            "description": "Invalid self link",
+            "source_type_id": worker_pool_id,
+            "target_type_id": worker_pool_id,
+            "direction": "directed",
+            "multiplicity_source": "1",
+            "multiplicity_target": "1",
+            "semantics_json": "{\"default_edge_type\":\"CommunicationLink\"}",
+        },
+    )
+    invalid_direction = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/associations",
+        json={
+            "code": "bad_direction",
+            "display_name": "Bad Direction",
+            "description": "Invalid direction",
+            "source_type_id": agent_type["id"],
+            "target_type_id": worker_pool_id,
+            "direction": "two_way",
+            "multiplicity_source": "1",
+            "multiplicity_target": "1",
+            "semantics_json": "{\"default_edge_type\":\"CommunicationLink\"}",
+        },
+    )
+    invalid_semantics_json = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/associations",
+        json={
+            "code": "bad_semantics",
+            "display_name": "Bad Semantics",
+            "description": "Invalid semantics json",
+            "source_type_id": agent_type["id"],
+            "target_type_id": worker_pool_id,
+            "direction": "directed",
+            "multiplicity_source": "1",
+            "multiplicity_target": "1",
+            "semantics_json": "{bad-json}",
+        },
+    )
+    invalid_type_membership = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/associations",
+        json={
+            "code": "bad_membership",
+            "display_name": "Bad Membership",
+            "description": "Foreign type membership",
+            "source_type_id": 104,
+            "target_type_id": worker_pool_id,
+            "direction": "directed",
+            "multiplicity_source": "1",
+            "multiplicity_target": "1",
+            "semantics_json": "{\"default_edge_type\":\"CommunicationLink\"}",
+        },
+    )
+
+    assert same_type.status_code == 400
+    assert same_type.get_json()["error"]["code"] == "validation_error"
+    assert invalid_direction.status_code == 400
+    assert invalid_direction.get_json()["error"]["code"] == "validation_error"
+    assert invalid_semantics_json.status_code == 400
+    assert invalid_semantics_json.get_json()["error"]["code"] == "validation_error"
+    assert invalid_type_membership.status_code == 400
+    assert invalid_type_membership.get_json()["error"]["code"] == "validation_error"

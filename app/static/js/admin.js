@@ -18,6 +18,8 @@ const metamodelContainmentRulesList = document.getElementById("admin-metamodel-c
 const metamodelContainmentRuleCount = document.getElementById("metamodel-containment-rule-count");
 const metamodelNotationsList = document.getElementById("admin-metamodel-notations-list");
 const metamodelNotationCount = document.getElementById("metamodel-notation-count");
+const metamodelAssociationsList = document.getElementById("admin-metamodel-associations-list");
+const metamodelAssociationCount = document.getElementById("metamodel-association-count");
 const alertRulesList = document.getElementById("admin-alert-rules-list");
 const alertRuleCount = document.getElementById("alert-rule-count");
 const alertRulePreviewPanel = document.getElementById("alert-rule-preview-panel");
@@ -43,6 +45,7 @@ const refreshMetamodelSemanticTypesButton = document.getElementById("refresh-met
 const refreshMetamodelPropertiesButton = document.getElementById("refresh-metamodel-properties-button");
 const refreshMetamodelContainmentRulesButton = document.getElementById("refresh-metamodel-containment-rules-button");
 const refreshMetamodelNotationsButton = document.getElementById("refresh-metamodel-notations-button");
+const refreshMetamodelAssociationsButton = document.getElementById("refresh-metamodel-associations-button");
 const refreshAlertRulesButton = document.getElementById("refresh-alert-rules-button");
 
 const ingestStatusFilter = document.getElementById("ingest-status-filter");
@@ -112,6 +115,20 @@ const metamodelNotationRenderSchemaJsonInput = document.getElementById("metamode
 const metamodelNotationStyleTokensJsonInput = document.getElementById("metamodel-notation-style-tokens-json");
 const metamodelNotationIsDefaultInput = document.getElementById("metamodel-notation-is-default");
 const metamodelNotationIsVisibleInPaletteInput = document.getElementById("metamodel-notation-is-visible-in-palette");
+const metamodelAssociationForm = document.getElementById("metamodel-association-form");
+const metamodelAssociationFormTitle = document.getElementById("metamodel-association-form-title");
+const metamodelAssociationFormMode = document.getElementById("metamodel-association-form-mode");
+const metamodelAssociationFormResetButton = document.getElementById("metamodel-association-form-reset");
+const metamodelAssociationIdInput = document.getElementById("metamodel-association-id");
+const metamodelAssociationSourceTypeIdInput = document.getElementById("metamodel-association-source-type-id");
+const metamodelAssociationTargetTypeIdInput = document.getElementById("metamodel-association-target-type-id");
+const metamodelAssociationCodeInput = document.getElementById("metamodel-association-code");
+const metamodelAssociationDisplayNameInput = document.getElementById("metamodel-association-display-name");
+const metamodelAssociationDirectionInput = document.getElementById("metamodel-association-direction");
+const metamodelAssociationMultiplicitySourceInput = document.getElementById("metamodel-association-multiplicity-source");
+const metamodelAssociationMultiplicityTargetInput = document.getElementById("metamodel-association-multiplicity-target");
+const metamodelAssociationDescriptionInput = document.getElementById("metamodel-association-description");
+const metamodelAssociationSemanticsJsonInput = document.getElementById("metamodel-association-semantics-json");
 const alertRuleForm = document.getElementById("alert-rule-form");
 const alertRuleFormTitle = document.getElementById("alert-rule-form-title");
 const alertRuleFormMode = document.getElementById("alert-rule-form-mode");
@@ -140,6 +157,7 @@ let metamodelProperties = [];
 let metamodelContainmentRules = [];
 let metamodelPaletteGroups = [];
 let metamodelNotations = [];
+let metamodelAssociations = [];
 let alertRules = [];
 let monitoredObjects = [];
 let selectedAlertRuleId = null;
@@ -153,6 +171,7 @@ let selectedMetamodelSemanticTypeId = null;
 let selectedMetamodelPropertyId = null;
 let selectedMetamodelContainmentRuleId = null;
 let selectedMetamodelNotationId = null;
+let selectedMetamodelAssociationId = null;
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -781,6 +800,28 @@ function renderMetamodelPaletteGroupOptions(selectedId = "") {
     `;
 }
 
+function renderMetamodelAssociationTypeOptions(selectedSourceId = "", selectedTargetId = "") {
+    const options = metamodelSemanticTypes
+        .map(
+            (item) => `
+                <option value="${escapeHtml(item.id)}">
+                    ${escapeHtml(item.display_name)} (${escapeHtml(item.code)})
+                </option>
+            `
+        )
+        .join("");
+
+    const emptyOption = '<option value="">선택 가능한 semantic type이 없습니다.</option>';
+    metamodelAssociationSourceTypeIdInput.innerHTML = options || emptyOption;
+    metamodelAssociationTargetTypeIdInput.innerHTML = options || emptyOption;
+    if (options) {
+        metamodelAssociationSourceTypeIdInput.value = String(selectedSourceId || metamodelSemanticTypes[0]?.id || "");
+        metamodelAssociationTargetTypeIdInput.value = String(
+            selectedTargetId || metamodelSemanticTypes[1]?.id || metamodelSemanticTypes[0]?.id || ""
+        );
+    }
+}
+
 function fillMetamodelSemanticTypeForm(item) {
     metamodelSemanticTypeIdInput.value = String(item.id);
     metamodelDraftVersionSelect.value = String(item.metamodel_version_id);
@@ -841,6 +882,16 @@ function resetMetamodelNotationForm({ preserveSemanticType = true } = {}) {
     renderMetamodelPaletteGroupOptions(currentPaletteGroupId);
 }
 
+function resetMetamodelAssociationForm() {
+    metamodelAssociationForm.reset();
+    metamodelAssociationIdInput.value = "";
+    metamodelAssociationDirectionInput.value = "directed";
+    metamodelAssociationFormTitle.textContent = "Association Definition 생성";
+    metamodelAssociationFormMode.textContent = "create";
+    selectedMetamodelAssociationId = null;
+    renderMetamodelAssociationTypeOptions();
+}
+
 function fillMetamodelPropertyForm(item) {
     metamodelPropertyIdInput.value = String(item.id);
     metamodelPropertySemanticTypeIdInput.value = String(item.semantic_type_id);
@@ -890,6 +941,21 @@ function fillMetamodelNotationForm(item) {
     selectedMetamodelNotationId = item.id;
 }
 
+function fillMetamodelAssociationForm(item) {
+    metamodelAssociationIdInput.value = String(item.id);
+    renderMetamodelAssociationTypeOptions(item.source_type_id, item.target_type_id);
+    metamodelAssociationCodeInput.value = item.code || "";
+    metamodelAssociationDisplayNameInput.value = item.display_name || "";
+    metamodelAssociationDirectionInput.value = item.direction || "directed";
+    metamodelAssociationMultiplicitySourceInput.value = item.multiplicity_source || "";
+    metamodelAssociationMultiplicityTargetInput.value = item.multiplicity_target || "";
+    metamodelAssociationDescriptionInput.value = item.description || "";
+    metamodelAssociationSemanticsJsonInput.value = item.semantics_json || "";
+    metamodelAssociationFormTitle.textContent = `Association Definition 수정 #${item.id}`;
+    metamodelAssociationFormMode.textContent = "edit";
+    selectedMetamodelAssociationId = item.id;
+}
+
 function renderMetamodelSemanticTypes(items) {
     metamodelSemanticTypes = items;
     metamodelSemanticTypeCount.textContent = `${items.length}개`;
@@ -904,6 +970,10 @@ function renderMetamodelSemanticTypes(items) {
     );
     renderMetamodelNotationSemanticTypeOptions(
         metamodelNotationSemanticTypeIdInput.value || nextSemanticTypeId
+    );
+    renderMetamodelAssociationTypeOptions(
+        metamodelAssociationSourceTypeIdInput.value,
+        metamodelAssociationTargetTypeIdInput.value
     );
     if (selectedMetamodelSemanticTypeId && !items.some((item) => item.id === selectedMetamodelSemanticTypeId)) {
         selectedMetamodelSemanticTypeId = null;
@@ -994,6 +1064,39 @@ function renderMetamodelNotations(items) {
                     </div>
                     <p class="admin-meta">palette=${escapeHtml(item.palette_group_label || "-")} | sort=${escapeHtml(item.sort_order)}</p>
                     <p class="admin-meta">schema=${escapeHtml(item.render_schema_json || "-")}</p>
+                </article>
+            `
+        )
+        .join("");
+}
+
+function renderMetamodelAssociations(items) {
+    metamodelAssociations = items;
+    metamodelAssociationCount.textContent = `${items.length}개`;
+
+    if (items.length === 0) {
+        metamodelAssociationsList.innerHTML = '<p class="section-copy">선택한 draft version에 association definition이 없습니다.</p>';
+        return;
+    }
+
+    metamodelAssociationsList.innerHTML = items
+        .map(
+            (item) => `
+                <article class="admin-item">
+                    <div class="section-header">
+                        <div>
+                            <h3>${escapeHtml(item.display_name)}</h3>
+                            <p class="admin-meta">${escapeHtml(item.code)} | ${escapeHtml(item.direction)}</p>
+                        </div>
+                        <div class="toolbar-inline">
+                            <span class="meta-pill">${escapeHtml(item.multiplicity_source || "-")}</span>
+                            <span class="meta-pill">${escapeHtml(item.multiplicity_target || "-")}</span>
+                            <button class="button ghost small edit-metamodel-association-button" type="button" data-association-id="${escapeHtml(item.id)}">수정</button>
+                        </div>
+                    </div>
+                    <p class="admin-meta">${escapeHtml(item.source_type_code)} -> ${escapeHtml(item.target_type_code)}</p>
+                    <p class="admin-meta">semantics=${escapeHtml(item.semantics_json || "-")}</p>
+                    <p class="admin-meta">${escapeHtml(item.description || "설명 없음")}</p>
                 </article>
             `
         )
@@ -1332,6 +1435,17 @@ async function loadMetamodelNotations() {
     renderMetamodelNotations(payload.items);
 }
 
+async function loadMetamodelAssociations() {
+    const versionId = metamodelDraftVersionSelect.value;
+    if (!versionId) {
+        metamodelAssociations = [];
+        renderMetamodelAssociations([]);
+        return;
+    }
+    const payload = await apiFetch(`/api/admin/metamodel/versions/${versionId}/associations`);
+    renderMetamodelAssociations(payload.items);
+}
+
 async function loadMonitoredObjects() {
     const payload = await apiFetch("/api/admin/monitored-objects?limit=100");
     monitoredObjects = payload.items;
@@ -1486,6 +1600,7 @@ async function saveMetamodelSemanticType(event) {
         }
         await loadMetamodelProperties();
         await loadMetamodelNotations();
+        await loadMetamodelAssociations();
         resetMetamodelSemanticTypeForm();
     } catch (error) {
         showBanner(error.message, "error");
@@ -1627,6 +1742,51 @@ async function saveMetamodelNotation(event) {
     }
 }
 
+async function saveMetamodelAssociation(event) {
+    event.preventDefault();
+    clearBanner();
+
+    const versionId = Number(metamodelDraftVersionSelect.value);
+    if (!versionId) {
+        showBanner("편집할 draft version을 먼저 선택하세요.", "error");
+        return;
+    }
+
+    const associationId = metamodelAssociationIdInput.value ? Number(metamodelAssociationIdInput.value) : null;
+    const payload = {
+        source_type_id: Number(metamodelAssociationSourceTypeIdInput.value),
+        target_type_id: Number(metamodelAssociationTargetTypeIdInput.value),
+        code: metamodelAssociationCodeInput.value.trim(),
+        display_name: metamodelAssociationDisplayNameInput.value.trim(),
+        direction: metamodelAssociationDirectionInput.value,
+        multiplicity_source: metamodelAssociationMultiplicitySourceInput.value.trim() || null,
+        multiplicity_target: metamodelAssociationMultiplicityTargetInput.value.trim() || null,
+        description: metamodelAssociationDescriptionInput.value.trim() || null,
+        semantics_json: metamodelAssociationSemanticsJsonInput.value.trim() || null,
+    };
+
+    try {
+        if (associationId) {
+            await apiFetch(`/api/admin/metamodel/associations/${associationId}`, {
+                method: "PATCH",
+                body: payload,
+            });
+            showBanner("association definition을 수정했습니다.", "success");
+        } else {
+            await apiFetch(`/api/admin/metamodel/versions/${versionId}/associations`, {
+                method: "POST",
+                body: payload,
+            });
+            showBanner("association definition을 생성했습니다.", "success");
+        }
+
+        await Promise.all([loadMetamodelVersions(), loadMetamodelAssociations()]);
+        resetMetamodelAssociationForm();
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
+}
+
 async function saveAlertRule(event) {
     event.preventDefault();
     clearBanner();
@@ -1732,6 +1892,7 @@ async function refreshAll() {
         await loadMetamodelContainmentRules();
         await loadMetamodelPaletteGroups();
         await loadMetamodelNotations();
+        await loadMetamodelAssociations();
     } catch (error) {
         showBanner(error.message, "error");
     }
@@ -1752,12 +1913,14 @@ refreshMetamodelSemanticTypesButton?.addEventListener("click", () => {
             await loadMetamodelProperties();
             await loadMetamodelContainmentRules();
             await loadMetamodelNotations();
+            await loadMetamodelAssociations();
         })
         .catch((error) => showBanner(error.message, "error"));
 });
 refreshMetamodelPropertiesButton?.addEventListener("click", loadMetamodelProperties);
 refreshMetamodelContainmentRulesButton?.addEventListener("click", loadMetamodelContainmentRules);
 refreshMetamodelNotationsButton?.addEventListener("click", loadMetamodelNotations);
+refreshMetamodelAssociationsButton?.addEventListener("click", loadMetamodelAssociations);
 refreshAlertRulesButton?.addEventListener("click", loadAlertRules);
 alertRuleScopeFilter?.addEventListener("change", loadAlertRules);
 alertRuleStateFilter?.addEventListener("change", loadAlertRules);
@@ -1793,12 +1956,14 @@ metamodelDraftVersionSelect?.addEventListener("change", () => {
     resetMetamodelPropertyForm({ preserveSemanticType: false });
     resetMetamodelContainmentRuleForm();
     resetMetamodelNotationForm({ preserveSemanticType: false });
+    resetMetamodelAssociationForm();
     loadMetamodelSemanticTypes()
         .then(async () => {
             await loadMetamodelProperties();
             await loadMetamodelContainmentRules();
             await loadMetamodelPaletteGroups();
             await loadMetamodelNotations();
+            await loadMetamodelAssociations();
         })
         .catch((error) => showBanner(error.message, "error"));
 });
@@ -1810,6 +1975,8 @@ metamodelContainmentRuleForm?.addEventListener("submit", saveMetamodelContainmen
 metamodelContainmentRuleFormResetButton?.addEventListener("click", resetMetamodelContainmentRuleForm);
 metamodelNotationForm?.addEventListener("submit", saveMetamodelNotation);
 metamodelNotationFormResetButton?.addEventListener("click", () => resetMetamodelNotationForm());
+metamodelAssociationForm?.addEventListener("submit", saveMetamodelAssociation);
+metamodelAssociationFormResetButton?.addEventListener("click", resetMetamodelAssociationForm);
 metamodelContainmentRuleVersionIdInput?.addEventListener("change", () => {
     loadMetamodelContainmentRules().catch((error) => showBanner(error.message, "error"));
 });
@@ -1893,6 +2060,18 @@ metamodelNotationsList?.addEventListener("click", (event) => {
         return;
     }
     fillMetamodelNotationForm(item);
+});
+metamodelAssociationsList?.addEventListener("click", (event) => {
+    const button = event.target instanceof HTMLElement ? event.target.closest(".edit-metamodel-association-button") : null;
+    if (!button) {
+        return;
+    }
+    const associationId = Number(button.dataset.associationId);
+    const item = metamodelAssociations.find((entry) => entry.id === associationId);
+    if (!item) {
+        return;
+    }
+    fillMetamodelAssociationForm(item);
 });
 alertRulesList?.addEventListener("click", (event) => {
     const button = event.target instanceof HTMLElement ? event.target.closest(".edit-alert-rule-button") : null;
@@ -1982,4 +2161,5 @@ resetAlertRuleForm();
 resetMetamodelPropertyForm({ preserveSemanticType: false });
 resetMetamodelContainmentRuleForm();
 resetMetamodelNotationForm({ preserveSemanticType: false });
+resetMetamodelAssociationForm();
 refreshAll();
