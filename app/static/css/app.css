@@ -553,6 +553,54 @@ a {
     border: 1px solid var(--line);
 }
 
+.runtime-binding-panel {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border-radius: 16px;
+    background: var(--panel-strong);
+    border: 1px solid var(--line);
+}
+
+.runtime-binding-toolbar {
+    display: grid;
+    gap: 10px;
+}
+
+.runtime-binding-search-field {
+    gap: 6px;
+}
+
+.runtime-binding-results {
+    display: grid;
+    gap: 10px;
+}
+
+.runtime-binding-item {
+    display: grid;
+    gap: 4px;
+    width: 100%;
+    text-align: left;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    background: var(--paper);
+    color: inherit;
+}
+
+.runtime-binding-item:hover,
+.runtime-binding-item:focus-visible,
+.runtime-binding-item.is-selected {
+    border-color: rgba(22, 93, 91, 0.34);
+    box-shadow: inset 0 0 0 1px rgba(22, 93, 91, 0.16);
+}
+
+.runtime-binding-item-meta,
+.runtime-binding-empty {
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
 .field-hint {
     color: var(--muted);
     font-size: 0.82rem;

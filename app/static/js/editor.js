@@ -18,6 +18,12 @@ const outlineCollapseAllButton = document.getElementById("outline-collapse-all-b
 const nodeForm = document.getElementById("node-form");
 const dynamicPropertiesPanel = document.getElementById("node-dynamic-properties");
 const dynamicPropertiesFields = document.getElementById("node-dynamic-properties-fields");
+const runtimeBindingPanel = document.getElementById("runtime-binding-panel");
+const runtimeBindingSummary = document.getElementById("runtime-binding-summary");
+const runtimeBindingQueryInput = document.getElementById("runtime-binding-query");
+const runtimeBindingSearchButton = document.getElementById("runtime-binding-search-button");
+const runtimeBindingClearButton = document.getElementById("runtime-binding-clear-button");
+const runtimeBindingResults = document.getElementById("runtime-binding-results");
 const edgeSummary = document.getElementById("edge-summary");
 const edgeIdText = document.getElementById("edge-id-text");
 const edgeLinkText = document.getElementById("edge-link-text");
@@ -51,6 +57,16 @@ const state = {
     outlineQuery: "",
     collapsedOutlineNodeIds: new Set(),
     outlineSelectionNeedsScroll: false,
+    bindingSearch: {
+        activeNodeId: null,
+        query: "",
+        items: [],
+        currentBinding: null,
+        loading: false,
+        lastRequestSignature: null,
+        token: 0,
+        pendingSelection: null,
+    },
     drag: null,
     lastDragAt: 0,
 };
@@ -957,10 +973,179 @@ function collectDynamicProperties(node) {
     return nextProperties;
 }
 
+function getRuntimeBindingRequestSignature(node) {
+    return JSON.stringify({
+        nodeId: node?.id || null,
+        targetId: node?.target_id || "",
+        query: state.bindingSearch.query.trim(),
+    });
+}
+
+function getRuntimeBindingDisplay(item) {
+    if (!item) {
+        return "";
+    }
+    return item.runtime_binding_key || item.display_name || `object #${item.id}`;
+}
+
+function renderRuntimeBindingPanel(node, semanticType) {
+    if (!runtimeBindingPanel || !runtimeBindingSummary || !runtimeBindingResults) {
+        return;
+    }
+
+    const allowsRuntimeBinding = semanticType?.allows_runtime_binding !== false;
+    runtimeBindingPanel.hidden = !allowsRuntimeBinding;
+    if (!allowsRuntimeBinding) {
+        runtimeBindingResults.replaceChildren();
+        return;
+    }
+
+    const editable = isEditableVersion();
+    runtimeBindingQueryInput.disabled = !editable;
+    runtimeBindingSearchButton.disabled = !editable;
+    runtimeBindingClearButton.disabled = !editable;
+    runtimeBindingQueryInput.value = state.bindingSearch.query;
+
+    const pendingSelection = state.bindingSearch.pendingSelection;
+    const currentBinding = state.bindingSearch.currentBinding;
+    const targetIdValue = formFields.targetId.value.trim();
+    const isPendingSelection =
+        pendingSelection && pendingSelection.runtime_binding_key === targetIdValue && targetIdValue !== (node.target_id || "");
+
+    if (state.bindingSearch.loading) {
+        runtimeBindingSummary.textContent = "Runtime binding 후보를 불러오는 중입니다.";
+    } else if (isPendingSelection) {
+        runtimeBindingSummary.textContent = `저장 전 선택됨: ${pendingSelection.display_name} · ${getRuntimeBindingDisplay(pendingSelection)}`;
+    } else if (currentBinding) {
+        runtimeBindingSummary.textContent = `현재 binding: ${currentBinding.display_name} · ${getRuntimeBindingDisplay(currentBinding)} · open alert ${currentBinding.open_alert_count}`;
+    } else if (node.target_id) {
+        runtimeBindingSummary.textContent = `현재 target_id는 매핑되지 않았습니다: ${node.target_id}`;
+    } else {
+        runtimeBindingSummary.textContent = "현재 binding이 없습니다.";
+    }
+
+    runtimeBindingResults.replaceChildren();
+    const items = state.bindingSearch.items || [];
+    if (items.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "runtime-binding-empty";
+        empty.textContent = state.bindingSearch.loading
+            ? "검색 중입니다..."
+            : "표시할 runtime binding 후보가 없습니다.";
+        runtimeBindingResults.appendChild(empty);
+        return;
+    }
+
+    for (const item of items) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "runtime-binding-item";
+        const selectedTargetId = targetIdValue || node.target_id || "";
+        if (item.runtime_binding_key && item.runtime_binding_key === selectedTargetId) {
+            button.classList.add("is-selected");
+        }
+
+        const title = document.createElement("strong");
+        title.textContent = item.display_name;
+        button.appendChild(title);
+
+        const meta = document.createElement("span");
+        meta.className = "runtime-binding-item-meta";
+        meta.textContent = [
+            item.object_type,
+            getRuntimeBindingDisplay(item),
+            `open alert ${item.open_alert_count}`,
+        ]
+            .filter(Boolean)
+            .join(" · ");
+        button.appendChild(meta);
+
+        button.addEventListener("click", () => {
+            formFields.targetId.value = item.runtime_binding_key || "";
+            state.bindingSearch.pendingSelection = item;
+            renderRuntimeBindingPanel(node, semanticType);
+            setStatus(`${item.display_name} runtime binding을 적용했습니다. 저장하면 반영됩니다.`);
+        });
+        runtimeBindingResults.appendChild(button);
+    }
+}
+
+async function loadRuntimeBindingCandidates(node, { force = false } = {}) {
+    const semanticType = getSemanticType(node?.semantic_type_code || node?.node_type);
+    if (!node || semanticType?.allows_runtime_binding === false) {
+        return;
+    }
+
+    const signature = getRuntimeBindingRequestSignature(node);
+    if (!force && state.bindingSearch.lastRequestSignature === signature) {
+        return;
+    }
+
+    state.bindingSearch.loading = true;
+    state.bindingSearch.lastRequestSignature = signature;
+    const token = state.bindingSearch.token + 1;
+    state.bindingSearch.token = token;
+    renderRuntimeBindingPanel(node, semanticType);
+
+    try {
+        const params = new URLSearchParams();
+        const query = state.bindingSearch.query.trim();
+        if (query) {
+            params.set("query", query);
+        }
+        if (node.target_id) {
+            params.set("current_target_id", node.target_id);
+        }
+        params.set("limit", "8");
+
+        const payload = await apiFetch(`${getVersionApiBase()}/monitored-objects?${params.toString()}`);
+        if (state.bindingSearch.token !== token || state.selectedNodeId !== node.id) {
+            return;
+        }
+        state.bindingSearch.items = payload.items || [];
+        state.bindingSearch.currentBinding = payload.current_binding || null;
+    } catch (error) {
+        if (state.bindingSearch.token === token && state.selectedNodeId === node.id) {
+            showBanner(error.message, "error");
+            state.bindingSearch.items = [];
+            state.bindingSearch.currentBinding = null;
+        }
+    } finally {
+        if (state.bindingSearch.token === token && state.selectedNodeId === node.id) {
+            state.bindingSearch.loading = false;
+            renderRuntimeBindingPanel(node, semanticType);
+        }
+    }
+}
+
+function resetRuntimeBindingPanel(node = null) {
+    const nextTargetId = node?.target_id || "";
+    const sameNode = state.bindingSearch.activeNodeId === node?.id;
+    const existingSelected = state.bindingSearch.pendingSelection;
+    const keepPendingSelection =
+        sameNode &&
+        existingSelected &&
+        existingSelected.runtime_binding_key === formFields.targetId.value.trim() &&
+        existingSelected.runtime_binding_key !== nextTargetId;
+
+    state.bindingSearch.activeNodeId = node?.id || null;
+    state.bindingSearch.query = "";
+    state.bindingSearch.items = [];
+    state.bindingSearch.currentBinding = null;
+    state.bindingSearch.loading = false;
+    state.bindingSearch.lastRequestSignature = null;
+    state.bindingSearch.pendingSelection = keepPendingSelection ? existingSelected : null;
+    if (runtimeBindingQueryInput) {
+        runtimeBindingQueryInput.value = "";
+    }
+}
+
 function syncSelectionPanel() {
     const node = getNode(state.selectedNodeId);
     if (node) {
         const semanticType = getSemanticType(node.semantic_type_code || node.node_type);
+        const previousActiveNodeId = state.bindingSearch.activeNodeId;
+        const previousTargetId = previousActiveNodeId === node.id ? (state.bindingSearch.currentBinding?.runtime_binding_key || node.target_id || "") : "";
         selectionKind.textContent = `${semanticType?.display_name || node.node_type} #${node.id}`;
         nodeForm.hidden = false;
         edgeSummary.hidden = true;
@@ -974,6 +1159,13 @@ function syncSelectionPanel() {
         formFields.width.value = node.width;
         formFields.height.value = node.height;
         renderDynamicPropertyFields(node);
+        if (previousActiveNodeId !== node.id || previousTargetId !== (node.target_id || "")) {
+            resetRuntimeBindingPanel(node);
+        }
+        renderRuntimeBindingPanel(node, semanticType);
+        if (allowsRuntimeBinding) {
+            loadRuntimeBindingCandidates(node);
+        }
         return;
     }
 
@@ -987,6 +1179,9 @@ function syncSelectionPanel() {
         selectionKind.textContent = `${association?.display_name || edge.edge_type} #${edge.id}`;
         nodeForm.hidden = true;
         edgeSummary.hidden = false;
+        if (runtimeBindingPanel) {
+            runtimeBindingPanel.hidden = true;
+        }
         edgeIdText.textContent = String(edge.id);
         edgeLinkText.textContent = `${sourceNode?.display_name || edge.source_node_id} -> ${targetNode?.display_name || edge.target_node_id}`;
         return;
@@ -995,6 +1190,10 @@ function syncSelectionPanel() {
     selectionKind.textContent = "선택된 항목이 없습니다.";
     nodeForm.hidden = true;
     edgeSummary.hidden = true;
+    resetRuntimeBindingPanel();
+    if (runtimeBindingPanel) {
+        runtimeBindingPanel.hidden = true;
+    }
     if (dynamicPropertiesPanel) {
         dynamicPropertiesPanel.hidden = true;
     }
@@ -1082,6 +1281,7 @@ async function loadView() {
         state.connectSourceId = null;
         state.previewCreateNodeType = null;
         state.collapsedOutlineNodeIds = new Set();
+        resetRuntimeBindingPanel();
         updateRevision(payload.version.revision);
         updateEditorMode();
         render();
@@ -1269,6 +1469,8 @@ async function saveSelectedNode(event) {
             },
         });
         state.nodes = state.nodes.map((item) => (item.id === node.id ? payload.node : item));
+        state.bindingSearch.pendingSelection = null;
+        state.bindingSearch.lastRequestSignature = null;
         updateRevision(payload.revision);
         render();
         setStatus("노드가 저장되었습니다.");
@@ -1455,6 +1657,30 @@ activateVersionButton?.addEventListener("click", activateCurrentVersion);
 outlineSearchInput?.addEventListener("input", (event) => {
     state.outlineQuery = event.target.value || "";
     render();
+});
+runtimeBindingQueryInput?.addEventListener("input", (event) => {
+    state.bindingSearch.query = event.target.value || "";
+    state.bindingSearch.lastRequestSignature = null;
+    const node = getNode(state.selectedNodeId);
+    if (node) {
+        loadRuntimeBindingCandidates(node, { force: true });
+    }
+});
+runtimeBindingSearchButton?.addEventListener("click", () => {
+    const node = getNode(state.selectedNodeId);
+    if (node) {
+        state.bindingSearch.lastRequestSignature = null;
+        loadRuntimeBindingCandidates(node, { force: true });
+    }
+});
+runtimeBindingClearButton?.addEventListener("click", () => {
+    const node = getNode(state.selectedNodeId);
+    formFields.targetId.value = "";
+    state.bindingSearch.pendingSelection = null;
+    if (node) {
+        renderRuntimeBindingPanel(node, getSemanticType(node.semantic_type_code || node.node_type));
+        setStatus("Runtime binding을 제거했습니다. 저장하면 반영됩니다.");
+    }
 });
 outlineExpandAllButton?.addEventListener("click", expandAllOutlineBranches);
 outlineCollapseAllButton?.addEventListener("click", collapseAllOutlineBranches);

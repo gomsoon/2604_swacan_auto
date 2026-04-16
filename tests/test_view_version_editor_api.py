@@ -38,6 +38,38 @@ def test_view_version_metamodel_returns_owned_snapshot(seeded_client) -> None:
     assert any(item["semantic_type_code"] == "VirtualMachine" for item in payload["metamodel"]["palette_groups"][0]["items"])
 
 
+def test_view_version_monitored_objects_returns_current_binding_and_matches(seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+
+    response = seeded_client.get(
+        f"/api/view-versions/{version_id}/monitored-objects",
+        query_string={"query": "App", "current_target_id": "agent_local:host", "limit": 5},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["version"]["id"] == version_id
+    assert payload["current_binding"]["id"] == 1304
+    assert payload["current_binding"]["runtime_binding_key"] == "agent_local:host"
+    assert any(item["display_name"] == "App Process" for item in payload["items"])
+
+
+def test_view_version_monitored_objects_rejects_invalid_limit(seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+
+    response = seeded_client.get(
+        f"/api/view-versions/{version_id}/monitored-objects",
+        query_string={"limit": "0"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+
+
 def test_create_version_node_returns_backend_generated_id_and_revision(seeded_client) -> None:
     login(seeded_client)
     draft_payload = create_draft(seeded_client)

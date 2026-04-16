@@ -89,8 +89,12 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     agent_shape = page.locator('g.diagram-node[data-node-type="MonitoringAgent"] .node-shape').first
 
     process_shape.click(force=True)
-    process_target_id = page.locator("#node-target-id").input_value()
     page.locator("#node-display-name").fill("Worker Alpha")
+    expect(page.locator("#runtime-binding-panel")).to_be_visible()
+    page.locator("#runtime-binding-query").fill("App Process")
+    expect(page.locator("#runtime-binding-results .runtime-binding-item", has_text="App Process")).to_have_count(1)
+    page.locator("#runtime-binding-results .runtime-binding-item", has_text="App Process").click()
+    expect(page.locator("#node-target-id")).to_have_value("app_main")
     page.get_by_role("button", name="선택 항목 저장").click()
     expect(page.locator('#editor-outline-tree .outline-item-name', has_text="Worker Alpha")).to_be_visible()
     expect(page.locator('g.diagram-node[data-node-type="SoftwareProcess"] text.node-label', has_text="Worker Alpha")).to_be_visible()
@@ -182,23 +186,6 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
             """,
             (draft_row["id"],),
         ).fetchone()
-        db_conn.execute(
-            "DELETE FROM node_bindings WHERE view_version_node_id = ?",
-            (process_row["id"],),
-        )
-        db_conn.execute(
-            """
-            INSERT INTO node_bindings (
-                view_version_node_id, monitored_object_id, binding_role, created_at, updated_at
-            ) VALUES (?, ?, 'primary', ?, ?)
-            """,
-            (
-                process_row["id"],
-                1302,
-                "2026-04-12T20:09:58.000+09:00",
-                "2026-04-12T20:09:58.000+09:00",
-            ),
-        )
         db_conn.commit()
         assert edge_row["association_code"] == "monitors"
         assert edge_row["source_node_type"] == "MonitoringAgent"

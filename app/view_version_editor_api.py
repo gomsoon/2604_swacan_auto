@@ -35,6 +35,8 @@ RESERVED_NODE_PROPERTY_CODES = {
     "expected_min",
     "expected_max",
 }
+DEFAULT_MONITORED_OBJECT_LIMIT = 8
+MAX_MONITORED_OBJECT_LIMIT = 100
 
 
 def slugify(value: str) -> str:
@@ -58,6 +60,33 @@ def require_draft_version(version_id: int):
     if version_row["status"] != "draft":
         return None, error_response("version_state_conflict", "only draft versions can be edited", 409)
     return version_row, None
+
+
+def parse_monitored_object_limit():
+    limit_raw = request.args.get("limit", str(DEFAULT_MONITORED_OBJECT_LIMIT))
+    try:
+        limit = int(limit_raw)
+    except (TypeError, ValueError):
+        return None, error_response("validation_error", "limit must be an integer", 400)
+    if limit <= 0 or limit > MAX_MONITORED_OBJECT_LIMIT:
+        return None, error_response(
+            "validation_error",
+            f"limit must be between 1 and {MAX_MONITORED_OBJECT_LIMIT}",
+            400,
+        )
+    return limit, None
+
+
+def serialize_monitored_object(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "object_type": row["object_type"],
+        "display_name": row["display_name"],
+        "runtime_binding_key": row["runtime_binding_key"],
+        "active_view_count": row["active_view_count"],
+        "active_node_count": row["active_node_count"],
+        "open_alert_count": row["open_alert_count"],
+    }
 
 
 def fetch_version_metamodel(version_row) -> dict[str, Any] | None:
@@ -500,6 +529,116 @@ def get_version_metamodel(version_id: int):
     return {
         "version": version_payload,
         "metamodel": snapshot,
+    }
+
+
+@bp.get("/<int:version_id>/monitored-objects")
+@login_required
+def list_version_monitored_objects(version_id: int):
+    version_row, error = require_draft_version(version_id)
+    if error:
+        return error
+
+    limit, limit_error = parse_monitored_object_limit()
+    if limit_error:
+        return limit_error
+
+    query = (request.args.get("query") or "").strip()
+    current_target_id = (request.args.get("current_target_id") or "").strip()
+    clauses: list[str] = ["mo.runtime_binding_key IS NOT NULL"]
+    params: list[Any] = []
+
+    if query:
+        clauses.append("(mo.display_name LIKE ? OR COALESCE(mo.runtime_binding_key, '') LIKE ?)")
+        pattern = f"%{query}%"
+        params.extend([pattern, pattern])
+
+    order_prefix = ""
+    if current_target_id:
+        order_prefix = "CASE WHEN COALESCE(mo.runtime_binding_key, '') = ? THEN 0 ELSE 1 END, "
+        params.append(current_target_id)
+
+    sql = f"""
+        SELECT
+            mo.id,
+            mo.object_type,
+            mo.display_name,
+            mo.runtime_binding_key,
+            (
+                SELECT COUNT(DISTINCT vv.view_id)
+                FROM node_bindings AS nb
+                JOIN view_version_nodes AS vn ON vn.id = nb.view_version_node_id
+                JOIN view_versions AS vv ON vv.id = vn.view_version_id
+                WHERE nb.monitored_object_id = mo.id
+                  AND vv.status = 'active'
+            ) AS active_view_count,
+            (
+                SELECT COUNT(*)
+                FROM node_bindings AS nb
+                JOIN view_version_nodes AS vn ON vn.id = nb.view_version_node_id
+                JOIN view_versions AS vv ON vv.id = vn.view_version_id
+                WHERE nb.monitored_object_id = mo.id
+                  AND vv.status = 'active'
+            ) AS active_node_count,
+            (
+                SELECT COUNT(*)
+                FROM alert_instances AS alerts
+                WHERE alerts.monitored_object_id = mo.id
+                  AND alerts.status != 'resolved'
+            ) AS open_alert_count
+        FROM monitored_objects AS mo
+    """
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += f" ORDER BY {order_prefix}mo.display_name ASC, mo.id ASC LIMIT ?"
+    params.append(limit)
+
+    rows = get_db().execute(sql, tuple(params)).fetchall()
+    current_binding = None
+    if current_target_id:
+        current_row = get_db().execute(
+            """
+            SELECT
+                mo.id,
+                mo.object_type,
+                mo.display_name,
+                mo.runtime_binding_key,
+                (
+                    SELECT COUNT(DISTINCT vv.view_id)
+                    FROM node_bindings AS nb
+                    JOIN view_version_nodes AS vn ON vn.id = nb.view_version_node_id
+                    JOIN view_versions AS vv ON vv.id = vn.view_version_id
+                    WHERE nb.monitored_object_id = mo.id
+                      AND vv.status = 'active'
+                ) AS active_view_count,
+                (
+                    SELECT COUNT(*)
+                    FROM node_bindings AS nb
+                    JOIN view_version_nodes AS vn ON vn.id = nb.view_version_node_id
+                    JOIN view_versions AS vv ON vv.id = vn.view_version_id
+                    WHERE nb.monitored_object_id = mo.id
+                      AND vv.status = 'active'
+                ) AS active_node_count,
+                (
+                    SELECT COUNT(*)
+                    FROM alert_instances AS alerts
+                    WHERE alerts.monitored_object_id = mo.id
+                      AND alerts.status != 'resolved'
+                ) AS open_alert_count
+            FROM monitored_objects AS mo
+            WHERE mo.runtime_binding_key = ?
+            LIMIT 1
+            """,
+            (current_target_id,),
+        ).fetchone()
+        if current_row is not None:
+            current_binding = serialize_monitored_object(current_row)
+
+    return {
+        "version": serialize_view_version(dict(version_row)),
+        "query": query,
+        "current_binding": current_binding,
+        "items": [serialize_monitored_object(row) for row in rows],
     }
 
 

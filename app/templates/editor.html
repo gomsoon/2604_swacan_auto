@@ -80,6 +80,23 @@
                     <span>Target ID</span>
                     <input id="node-target-id" type="text">
                 </label>
+                <div id="runtime-binding-panel" class="runtime-binding-panel" hidden>
+                    <div class="section-header">
+                        <h3>Runtime Binding</h3>
+                    </div>
+                    <p id="runtime-binding-summary" class="selection-kind">현재 binding 정보를 불러오는 중입니다.</p>
+                    <div class="runtime-binding-toolbar">
+                        <label class="field runtime-binding-search-field">
+                            <span>검색</span>
+                            <input id="runtime-binding-query" type="search" placeholder="이름 또는 runtime binding key">
+                        </label>
+                        <div class="toolbar-inline">
+                            <button id="runtime-binding-search-button" class="button small ghost" type="button">검색</button>
+                            <button id="runtime-binding-clear-button" class="button small ghost" type="button">binding 제거</button>
+                        </div>
+                    </div>
+                    <div id="runtime-binding-results" class="runtime-binding-results" aria-label="runtime binding results"></div>
+                </div>
                 <div class="field-grid">
                     <label class="field">
                         <span>X</span>
