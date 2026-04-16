@@ -779,6 +779,126 @@ def test_admin_unacknowledge_alert_clears_ack_fields(seeded_app, seeded_client) 
     assert payload["ack_note"] is None
 
 
+def test_admin_alerts_support_active_and_resolved_status_filters(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET status = 'in_progress', status_updated_at = ?, status_updated_by_user_id = ?, status_note = ?, updated_at = ?
+            WHERE id = 1
+            """,
+            (
+                "2026-04-12T11:04:30.000+09:00",
+                1,
+                "investigating",
+                "2026-04-12T11:04:30.000+09:00",
+            ),
+        )
+        db_conn.execute(
+            """
+            INSERT INTO alert_instances (
+                monitored_object_id, alert_code, severity, status, status_updated_at, status_updated_by_user_id,
+                status_note, resolved_at, resolved_by_user_id,
+                first_occurred_at, last_occurred_at, repeat_count, latest_message, metadata_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1302,
+                "process.warning",
+                "warning",
+                "resolved",
+                "2026-04-12T11:06:00.000+09:00",
+                1,
+                "resolved note",
+                "2026-04-12T11:06:00.000+09:00",
+                1,
+                "2026-04-12T11:05:00.000+09:00",
+                "2026-04-12T11:05:30.000+09:00",
+                1,
+                "resolved message",
+                json.dumps({"state": "up"}),
+                "2026-04-12T11:05:00.000+09:00",
+                "2026-04-12T11:06:00.000+09:00",
+            ),
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    active_response = seeded_client.get("/api/admin/alerts?status=active")
+    resolved_response = seeded_client.get("/api/admin/alerts?status=resolved")
+
+    assert active_response.status_code == 200
+    assert len(active_response.get_json()["items"]) == 1
+    assert active_response.get_json()["items"][0]["status"] == "in_progress"
+
+    assert resolved_response.status_code == 200
+    assert len(resolved_response.get_json()["items"]) == 1
+    assert resolved_response.get_json()["items"][0]["status"] == "resolved"
+
+
+def test_admin_update_alert_status_accepts_boundary_note_length(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    login(seeded_client)
+
+    response = seeded_client.patch(
+        "/api/admin/alerts/1/status",
+        json={"status": "in_progress", "status_note": "a" * 500},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()["alert"]
+    assert payload["status"] == "in_progress"
+    assert payload["status_note"] == "a" * 500
+    assert payload["status_updated_by_username"] == "admin"
+
+
+def test_admin_update_alert_status_rejects_invalid_values(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    login(seeded_client)
+
+    invalid_status_response = seeded_client.patch(
+        "/api/admin/alerts/1/status",
+        json={"status": "unknown"},
+    )
+    too_long_note_response = seeded_client.patch(
+        "/api/admin/alerts/1/status",
+        json={"status": "suppressed", "status_note": "a" * 501},
+    )
+
+    assert invalid_status_response.status_code == 400
+    assert invalid_status_response.get_json()["error"]["code"] == "validation_error"
+    assert too_long_note_response.status_code == 400
+    assert too_long_note_response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_update_alert_status_resolves_and_reopens_alert(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    login(seeded_client)
+
+    resolve_response = seeded_client.patch(
+        "/api/admin/alerts/1/status",
+        json={"status": "resolved", "status_note": "done"},
+    )
+    reopen_response = seeded_client.patch(
+        "/api/admin/alerts/1/status",
+        json={"status": "open", "status_note": "reopened"},
+    )
+
+    assert resolve_response.status_code == 200
+    resolved_payload = resolve_response.get_json()["alert"]
+    assert resolved_payload["status"] == "resolved"
+    assert resolved_payload["resolved_by_username"] == "admin"
+    assert resolved_payload["resolved_at"] is not None
+
+    assert reopen_response.status_code == 200
+    reopened_payload = reopen_response.get_json()["alert"]
+    assert reopened_payload["status"] == "open"
+    assert reopened_payload["status_note"] == "reopened"
+    assert reopened_payload["resolved_at"] is None
+
+
 def test_admin_alert_rules_lists_seeded_rules(seeded_client) -> None:
     login(seeded_client)
 

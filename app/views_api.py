@@ -141,6 +141,11 @@ def serialize_alert_instance(alert_row) -> dict[str, Any]:
         "acknowledged_at": alert_row["acknowledged_at"],
         "acknowledged_by_username": alert_row["acknowledged_by_username"],
         "ack_note": alert_row["ack_note"],
+        "status_updated_at": alert_row["status_updated_at"],
+        "status_updated_by_username": alert_row["status_updated_by_username"],
+        "status_note": alert_row["status_note"],
+        "resolved_at": alert_row["resolved_at"],
+        "resolved_by_username": alert_row["resolved_by_username"],
         "first_occurred_at": alert_row["first_occurred_at"],
         "last_occurred_at": alert_row["last_occurred_at"],
         "repeat_count": alert_row["repeat_count"],
@@ -644,9 +649,13 @@ def get_view_alerts(view_id: int):
     if limit <= 0 or limit > MAX_EVENTS_LIMIT:
         return error_response("validation_error", f"limit must be between 1 and {MAX_EVENTS_LIMIT}", 400)
 
-    status_filter = request.args.get("status", "open")
-    if status_filter not in {"open", "resolved"}:
-        return error_response("validation_error", "status must be open or resolved", 400)
+    status_filter = (request.args.get("status") or "active").strip().lower()
+    if status_filter not in {"active", "open", "in_progress", "suppressed", "resolved"}:
+        return error_response(
+            "validation_error",
+            "status must be active, open, in_progress, suppressed or resolved",
+            400,
+        )
 
     target_rows = get_monitor_target_rows(view_row["id"])
     monitored_object_ids = [row["monitored_object_id"] for row in target_rows if row["monitored_object_id"] is not None]
@@ -654,6 +663,13 @@ def get_view_alerts(view_id: int):
         return {"items": []}
 
     placeholders = ", ".join("?" for _ in monitored_object_ids)
+    status_clause = "alerts.status != 'resolved'" if status_filter == "active" else "alerts.status = ?"
+    params: tuple[Any, ...]
+    if status_filter == "active":
+        params = tuple(monitored_object_ids) + (limit,)
+    else:
+        params = tuple(monitored_object_ids) + (status_filter, limit)
+
     rows = get_db().execute(
         f"""
         SELECT alerts.id, alerts.monitored_object_id, alerts.alert_code, alerts.source_rule_id,
@@ -661,21 +677,26 @@ def get_view_alerts(view_id: int):
                COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
                alerts.severity, alerts.status, alerts.acknowledged_at,
                ack_user.username AS acknowledged_by_username, alerts.ack_note,
+               alerts.status_updated_at, status_user.username AS status_updated_by_username,
+               alerts.status_note,
+               alerts.resolved_at, resolved_user.username AS resolved_by_username,
                alerts.first_occurred_at, alerts.last_occurred_at, alerts.repeat_count,
                alerts.latest_message, alerts.metadata_json
         FROM alert_instances AS alerts
         LEFT JOIN alert_rules AS rules ON rules.id = alerts.source_rule_id
         LEFT JOIN monitored_objects AS rule_mo ON rule_mo.id = rules.monitored_object_id
         LEFT JOIN users AS ack_user ON ack_user.id = alerts.acknowledged_by_user_id
+        LEFT JOIN users AS status_user ON status_user.id = alerts.status_updated_by_user_id
+        LEFT JOIN users AS resolved_user ON resolved_user.id = alerts.resolved_by_user_id
         WHERE alerts.monitored_object_id IN ({placeholders})
-          AND alerts.status = ?
+          AND {status_clause}
         ORDER BY
             CASE alerts.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
             alerts.last_occurred_at DESC,
             alerts.id DESC
         LIMIT ?
         """,
-        tuple(monitored_object_ids) + (status_filter, limit),
+        params,
     ).fetchall()
 
     return {"items": [serialize_alert_instance(row) for row in rows]}

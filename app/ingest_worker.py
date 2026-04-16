@@ -19,6 +19,7 @@ VALID_EVENT_TYPES = {
 }
 ALERT_OPEN_STATUSES = {"warning", "down"}
 ALERT_OPEN_SEVERITIES = {"warning", "critical"}
+ALERT_ACTIVE_STATUSES = {"open", "in_progress", "suppressed"}
 
 
 @dataclass(frozen=True)
@@ -157,13 +158,17 @@ def sync_latest_state_alert(
             """
             UPDATE alert_instances
             SET status = 'resolved',
+                resolved_at = COALESCE(resolved_at, ?),
+                resolved_by_user_id = NULL,
+                status_updated_at = ?,
+                status_updated_by_user_id = NULL,
                 updated_at = ?,
                 last_occurred_at = ?
             WHERE monitored_object_id = ?
-              AND status = 'open'
+              AND status != 'resolved'
               AND alert_code LIKE ?
             """,
-            (received_at, occurred_at, monitored_object_id, f"{alert_prefix}%"),
+            (received_at, received_at, received_at, occurred_at, monitored_object_id, f"{alert_prefix}%"),
         )
         return
 
@@ -175,23 +180,27 @@ def sync_latest_state_alert(
         """
         UPDATE alert_instances
         SET status = 'resolved',
+            resolved_at = COALESCE(resolved_at, ?),
+            resolved_by_user_id = NULL,
+            status_updated_at = ?,
+            status_updated_by_user_id = NULL,
             updated_at = ?,
             last_occurred_at = ?
         WHERE monitored_object_id = ?
-          AND status = 'open'
+          AND status != 'resolved'
           AND alert_code LIKE ?
           AND alert_code != ?
         """,
-        (received_at, occurred_at, monitored_object_id, f"{alert_prefix}%", alert_code),
+        (received_at, received_at, received_at, occurred_at, monitored_object_id, f"{alert_prefix}%", alert_code),
     )
 
     existing = db_conn.execute(
         """
-        SELECT id
+        SELECT id, status
         FROM alert_instances
         WHERE monitored_object_id = ?
           AND alert_code = ?
-          AND status = 'open'
+          AND status != 'resolved'
         ORDER BY id DESC
         LIMIT 1
         """,
@@ -203,14 +212,16 @@ def sync_latest_state_alert(
             """
             INSERT INTO alert_instances (
                 monitored_object_id, alert_code, severity, status,
+                status_updated_at, status_updated_by_user_id, status_note,
                 first_occurred_at, last_occurred_at, repeat_count,
                 latest_message, metadata_json, created_at, updated_at
-            ) VALUES (?, ?, ?, 'open', ?, ?, 1, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, 'open', ?, NULL, NULL, ?, ?, 1, ?, ?, ?, ?)
             """,
             (
                 monitored_object_id,
                 alert_code,
                 normalized_severity,
+                received_at,
                 occurred_at,
                 occurred_at,
                 latest_message,
@@ -334,13 +345,17 @@ def sync_threshold_alerts(
                 """
                 UPDATE alert_instances
                 SET status = 'resolved',
+                    resolved_at = COALESCE(resolved_at, ?),
+                    resolved_by_user_id = NULL,
+                    status_updated_at = ?,
+                    status_updated_by_user_id = NULL,
                     updated_at = ?,
                     last_occurred_at = ?
                 WHERE monitored_object_id = ?
                   AND alert_code = ?
-                  AND status = 'open'
+                  AND status != 'resolved'
                 """,
-                (received_at, occurred_at, monitored_object_id, alert_code),
+                (received_at, received_at, received_at, occurred_at, monitored_object_id, alert_code),
             )
             continue
 
@@ -360,11 +375,11 @@ def sync_threshold_alerts(
 
         existing = db_conn.execute(
             """
-            SELECT id
+            SELECT id, status
             FROM alert_instances
             WHERE monitored_object_id = ?
               AND alert_code = ?
-              AND status = 'open'
+              AND status != 'resolved'
             ORDER BY id DESC
             LIMIT 1
             """,
@@ -374,21 +389,23 @@ def sync_threshold_alerts(
         if existing is None:
             db_conn.execute(
                 """
-            INSERT INTO alert_instances (
-                monitored_object_id, alert_code, source_rule_id, severity, status,
-                first_occurred_at, last_occurred_at, repeat_count,
-                latest_message, metadata_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, 'open', ?, ?, 1, ?, ?, ?, ?)
-            """,
-            (
-                monitored_object_id,
-                alert_code,
-                rule["id"],
-                level,
-                occurred_at,
-                occurred_at,
-                latest_message,
-                metadata_json,
+                INSERT INTO alert_instances (
+                    monitored_object_id, alert_code, source_rule_id, severity, status,
+                    status_updated_at, status_updated_by_user_id, status_note,
+                    first_occurred_at, last_occurred_at, repeat_count,
+                    latest_message, metadata_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'open', ?, NULL, NULL, ?, ?, 1, ?, ?, ?, ?)
+                """,
+                (
+                    monitored_object_id,
+                    alert_code,
+                    rule["id"],
+                    level,
+                    received_at,
+                    occurred_at,
+                    occurred_at,
+                    latest_message,
+                    metadata_json,
                     received_at,
                     received_at,
                 ),

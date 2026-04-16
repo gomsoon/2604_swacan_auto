@@ -20,7 +20,8 @@ ALLOWED_STATE_TYPES = {"agent", "host", "process"}
 ALLOWED_STATE_STATUSES = {"up", "warning", "down"}
 ALLOWED_ALERT_SCOPE_TYPES = {"object_type", "monitored_object"}
 ALLOWED_ALERT_COMPARISONS = {"gte", "lte"}
-ALERT_INSTANCE_STATUSES = {"open", "resolved"}
+ALERT_INSTANCE_STATUSES = {"open", "in_progress", "suppressed", "resolved"}
+ALERT_ACTIVE_STATUSES = {"open", "in_progress", "suppressed"}
 
 
 def now_iso() -> str:
@@ -214,6 +215,13 @@ def serialize_alert_instance(row) -> dict[str, Any]:
         "acknowledged_by_user_id": row["acknowledged_by_user_id"],
         "acknowledged_by_username": row["acknowledged_by_username"],
         "ack_note": row["ack_note"],
+        "status_updated_at": row["status_updated_at"],
+        "status_updated_by_user_id": row["status_updated_by_user_id"],
+        "status_updated_by_username": row["status_updated_by_username"],
+        "status_note": row["status_note"],
+        "resolved_at": row["resolved_at"],
+        "resolved_by_user_id": row["resolved_by_user_id"],
+        "resolved_by_username": row["resolved_by_username"],
         "first_occurred_at": row["first_occurred_at"],
         "last_occurred_at": row["last_occurred_at"],
         "repeat_count": row["repeat_count"],
@@ -295,6 +303,13 @@ def parse_boolean_query_param(value: str | None, *, field_name: str) -> tuple[bo
     if normalized in {"false", "0"}:
         return False, None
     return None, error_response("validation_error", f"{field_name} must be true/false", 400)
+
+
+def parse_alert_status_filter(value: str | None) -> tuple[str, Any | None]:
+    normalized = (value or "active").strip().lower()
+    if normalized == "active" or normalized in ALERT_INSTANCE_STATUSES:
+        return normalized, None
+    return normalized, error_response("validation_error", "invalid status filter", 400)
 
 
 def validate_alert_rule_payload(data: dict[str, Any], *, partial: bool = False) -> tuple[dict[str, Any] | None, Any | None]:
@@ -399,7 +414,7 @@ def get_summary():
         "latest_states": fetch_count("SELECT COUNT(*) FROM latest_states"),
         "raw_events": fetch_count("SELECT COUNT(*) FROM raw_events"),
         "grouped_events": fetch_count("SELECT COUNT(*) FROM grouped_events"),
-        "open_alerts": fetch_count("SELECT COUNT(*) FROM alert_instances WHERE status = 'open'"),
+        "open_alerts": fetch_count("SELECT COUNT(*) FROM alert_instances WHERE status != 'resolved'"),
         "alert_rules": fetch_count("SELECT COUNT(*) FROM alert_rules"),
         "debug_payload_logs": fetch_count("SELECT COUNT(*) FROM debug_payload_logs"),
         "cleanup_runs": fetch_count("SELECT COUNT(*) FROM cleanup_runs"),
@@ -684,9 +699,9 @@ def list_alert_instances():
     if error:
         return error
 
-    status = request.args.get("status", "open")
-    if status not in ALERT_INSTANCE_STATUSES:
-        return error_response("validation_error", "invalid status filter", 400)
+    status, status_error = parse_alert_status_filter(request.args.get("status", "active"))
+    if status_error:
+        return status_error
 
     severity = request.args.get("severity")
     if severity and severity not in {"critical", "warning", "normal", "info"}:
@@ -699,8 +714,13 @@ def list_alert_instances():
     if ack_error:
         return ack_error
 
-    clauses = ["alerts.status = ?"]
-    params: list[Any] = [status]
+    clauses: list[str] = []
+    params: list[Any] = []
+    if status == "active":
+        clauses.append("alerts.status != 'resolved'")
+    else:
+        clauses.append("alerts.status = ?")
+        params.append(status)
     if severity:
         clauses.append("alerts.severity = ?")
         params.append(severity)
@@ -716,6 +736,9 @@ def list_alert_instances():
                COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
                alerts.acknowledged_at, alerts.acknowledged_by_user_id, ack_user.username AS acknowledged_by_username,
                alerts.ack_note,
+               alerts.status_updated_at, alerts.status_updated_by_user_id, status_user.username AS status_updated_by_username,
+               alerts.status_note,
+               alerts.resolved_at, alerts.resolved_by_user_id, resolved_user.username AS resolved_by_username,
                alerts.first_occurred_at, alerts.last_occurred_at, alerts.repeat_count,
                alerts.latest_message, alerts.metadata_json
         FROM alert_instances AS alerts
@@ -723,6 +746,8 @@ def list_alert_instances():
         LEFT JOIN alert_rules AS rules ON rules.id = alerts.source_rule_id
         LEFT JOIN monitored_objects AS rule_mo ON rule_mo.id = rules.monitored_object_id
         LEFT JOIN users AS ack_user ON ack_user.id = alerts.acknowledged_by_user_id
+        LEFT JOIN users AS status_user ON status_user.id = alerts.status_updated_by_user_id
+        LEFT JOIN users AS resolved_user ON resolved_user.id = alerts.resolved_by_user_id
         WHERE {where_clause}
         ORDER BY
             CASE alerts.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
@@ -793,6 +818,9 @@ def update_alert_instance(alert_id: int):
                COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
                alerts.acknowledged_at, alerts.acknowledged_by_user_id, ack_user.username AS acknowledged_by_username,
                alerts.ack_note,
+               alerts.status_updated_at, alerts.status_updated_by_user_id, status_user.username AS status_updated_by_username,
+               alerts.status_note,
+               alerts.resolved_at, alerts.resolved_by_user_id, resolved_user.username AS resolved_by_username,
                alerts.first_occurred_at, alerts.last_occurred_at, alerts.repeat_count,
                alerts.latest_message, alerts.metadata_json
         FROM alert_instances AS alerts
@@ -800,6 +828,89 @@ def update_alert_instance(alert_id: int):
         LEFT JOIN alert_rules AS rules ON rules.id = alerts.source_rule_id
         LEFT JOIN monitored_objects AS rule_mo ON rule_mo.id = rules.monitored_object_id
         LEFT JOIN users AS ack_user ON ack_user.id = alerts.acknowledged_by_user_id
+        LEFT JOIN users AS status_user ON status_user.id = alerts.status_updated_by_user_id
+        LEFT JOIN users AS resolved_user ON resolved_user.id = alerts.resolved_by_user_id
+        WHERE alerts.id = ?
+        """,
+        (alert_id,),
+    ).fetchone()
+    return {"alert": serialize_alert_instance(row)}
+
+
+@bp.patch("/alerts/<int:alert_id>/status")
+@admin_required
+def update_alert_status(alert_id: int):
+    db_conn = get_db()
+    existing = db_conn.execute(
+        """
+        SELECT id, status
+        FROM alert_instances
+        WHERE id = ?
+        """,
+        (alert_id,),
+    ).fetchone()
+    if existing is None:
+        return error_response("not_found", "alert not found", 404)
+
+    data = request.get_json(silent=True) or {}
+    next_status = data.get("status")
+    if next_status not in ALERT_INSTANCE_STATUSES:
+        return error_response("validation_error", "status is invalid", 400)
+
+    try:
+        status_note = parse_optional_string(data.get("status_note"), field_name="status_note", max_length=500)
+    except ValueError as exc:
+        return error_response("validation_error", str(exc), 400)
+
+    timestamp = now_iso()
+    resolved_at = timestamp if next_status == "resolved" else None
+    resolved_by_user_id = g.user["id"] if next_status == "resolved" else None
+
+    db_conn.execute(
+        """
+        UPDATE alert_instances
+        SET status = ?,
+            status_updated_at = ?,
+            status_updated_by_user_id = ?,
+            status_note = ?,
+            resolved_at = ?,
+            resolved_by_user_id = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            next_status,
+            timestamp,
+            g.user["id"],
+            status_note,
+            resolved_at,
+            resolved_by_user_id,
+            timestamp,
+            alert_id,
+        ),
+    )
+    db_conn.commit()
+
+    row = db_conn.execute(
+        """
+        SELECT alerts.id, alerts.monitored_object_id, mo.runtime_binding_key, mo.object_type AS semantic_type_code,
+               mo.display_name, alerts.alert_code, alerts.severity, alerts.status,
+               alerts.source_rule_id, rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
+               COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
+               alerts.acknowledged_at, alerts.acknowledged_by_user_id, ack_user.username AS acknowledged_by_username,
+               alerts.ack_note,
+               alerts.status_updated_at, alerts.status_updated_by_user_id, status_user.username AS status_updated_by_username,
+               alerts.status_note,
+               alerts.resolved_at, alerts.resolved_by_user_id, resolved_user.username AS resolved_by_username,
+               alerts.first_occurred_at, alerts.last_occurred_at, alerts.repeat_count,
+               alerts.latest_message, alerts.metadata_json
+        FROM alert_instances AS alerts
+        JOIN monitored_objects AS mo ON mo.id = alerts.monitored_object_id
+        LEFT JOIN alert_rules AS rules ON rules.id = alerts.source_rule_id
+        LEFT JOIN monitored_objects AS rule_mo ON rule_mo.id = rules.monitored_object_id
+        LEFT JOIN users AS ack_user ON ack_user.id = alerts.acknowledged_by_user_id
+        LEFT JOIN users AS status_user ON status_user.id = alerts.status_updated_by_user_id
+        LEFT JOIN users AS resolved_user ON resolved_user.id = alerts.resolved_by_user_id
         WHERE alerts.id = ?
         """,
         (alert_id,),
@@ -896,12 +1007,12 @@ def list_monitored_objects():
                 WHERE nb.monitored_object_id = mo.id
                   AND vv.status = 'active'
             ) AS active_node_count,
-            (
-                SELECT COUNT(*)
-                FROM alert_instances AS alerts
-                WHERE alerts.monitored_object_id = mo.id
-                  AND alerts.status = 'open'
-            ) AS open_alert_count
+              (
+                  SELECT COUNT(*)
+                  FROM alert_instances AS alerts
+                  WHERE alerts.monitored_object_id = mo.id
+                    AND alerts.status != 'resolved'
+              ) AS open_alert_count
         FROM monitored_objects AS mo
     """
     if clauses:
@@ -967,12 +1078,12 @@ def get_alert_rule_targets_preview(rule_id: int):
                 WHERE nb.monitored_object_id = mo.id
                   AND vv.status = 'active'
             ) AS active_node_count,
-            (
-                SELECT COUNT(*)
-                FROM alert_instances AS alerts
-                WHERE alerts.monitored_object_id = mo.id
-                  AND alerts.status = 'open'
-            ) AS open_alert_count
+              (
+                  SELECT COUNT(*)
+                  FROM alert_instances AS alerts
+                  WHERE alerts.monitored_object_id = mo.id
+                    AND alerts.status != 'resolved'
+              ) AS open_alert_count
         FROM monitored_objects AS mo
         WHERE {' AND '.join(clauses)}
         ORDER BY mo.display_name ASC, mo.id ASC

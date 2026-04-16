@@ -403,6 +403,77 @@ def test_alerts_prefer_monitored_object_binding_over_changed_active_target_id(se
     assert payload["items"][0]["monitored_object_id"] == 1302
 
 
+def test_alerts_default_to_active_status_filter(seeded_app, seeded_client) -> None:
+    seed_monitoring_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET status = 'in_progress', status_updated_at = ?, status_updated_by_user_id = ?, status_note = ?, updated_at = ?
+            WHERE monitored_object_id = ?
+            """,
+            (
+                "2026-04-10T10:22:00.000+09:00",
+                1,
+                "triage",
+                "2026-04-10T10:22:00.000+09:00",
+                1302,
+            ),
+        )
+        db_conn.execute(
+            """
+            INSERT INTO alert_instances (
+                monitored_object_id, alert_code, severity, status, status_updated_at, status_updated_by_user_id, status_note,
+                resolved_at, resolved_by_user_id, first_occurred_at, last_occurred_at, repeat_count, latest_message,
+                metadata_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1302,
+                "process.warning",
+                "warning",
+                "resolved",
+                "2026-04-10T10:25:00.000+09:00",
+                1,
+                "resolved note",
+                "2026-04-10T10:25:00.000+09:00",
+                1,
+                "2026-04-10T10:24:00.000+09:00",
+                "2026-04-10T10:24:30.000+09:00",
+                1,
+                "resolved message",
+                json.dumps({"state": "up"}),
+                "2026-04-10T10:24:00.000+09:00",
+                "2026-04-10T10:25:00.000+09:00",
+            ),
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    active_response = seeded_client.get("/api/views/1/alerts?limit=10")
+    resolved_response = seeded_client.get("/api/views/1/alerts?limit=10&status=resolved")
+
+    assert active_response.status_code == 200
+    assert len(active_response.get_json()["items"]) == 1
+    assert active_response.get_json()["items"][0]["status"] == "in_progress"
+    assert active_response.get_json()["items"][0]["status_note"] == "triage"
+
+    assert resolved_response.status_code == 200
+    assert len(resolved_response.get_json()["items"]) == 1
+    assert resolved_response.get_json()["items"][0]["status"] == "resolved"
+    assert resolved_response.get_json()["items"][0]["resolved_by_username"] == "admin"
+
+
+def test_alerts_reject_invalid_status_filter(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/1/alerts?status=invalid")
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+
+
 def test_alerts_reject_out_of_range_limits(seeded_client) -> None:
     login(seeded_client)
 

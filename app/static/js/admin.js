@@ -59,6 +59,7 @@ const alertRuleObjectTypeFilter = document.getElementById("alert-rule-object-typ
 const alertRuleScopeFilter = document.getElementById("alert-rule-scope-filter");
 const alertRuleStateFilter = document.getElementById("alert-rule-state-filter");
 const alertRuleEnabledFilter = document.getElementById("alert-rule-enabled-filter");
+const alertStatusFilter = document.getElementById("alert-status-filter");
 const alertAckFilter = document.getElementById("alert-ack-filter");
 
 let metamodelVersions = [];
@@ -385,7 +386,7 @@ function renderEventDetailPanel() {
 
 function renderAlerts(items) {
     if (items.length === 0) {
-        alertsList.innerHTML = '<p class="section-copy">현재 열린 alert가 없습니다.</p>';
+        alertsList.innerHTML = '<p class="section-copy">표시할 alert가 없습니다.</p>';
         return;
     }
 
@@ -398,21 +399,52 @@ function renderAlerts(items) {
                         <div class="toolbar-inline">
                             <span class="meta-pill">${escapeHtml(item.alert_code)}</span>
                             <span class="meta-pill">${escapeHtml(item.severity)}</span>
+                            <span class="meta-pill">${escapeHtml(item.status)}</span>
                             ${item.is_acknowledged ? '<span class="meta-pill">ACK</span>' : ""}
                             <button class="button ghost small toggle-alert-ack-button" type="button" data-alert-id="${escapeHtml(item.id)}" data-acknowledged="${item.is_acknowledged ? "true" : "false"}" data-ack-note="${escapeHtml(item.ack_note || "")}">${item.is_acknowledged ? "ACK 해제" : "ACK"}</button>
+                            ${buildAlertStatusButtons(item)}
                         </div>
                     </div>
                     <p class="admin-meta">object=${escapeHtml(item.monitored_object_id)} | binding=${escapeHtml(item.runtime_binding_key || "-")} | type=${escapeHtml(item.semantic_type_code || "-")}</p>
                     <p class="admin-meta">rule=${escapeHtml(item.source_rule_metric_key || item.alert_code)} | target=${escapeHtml(item.source_rule_target_label || "-")}</p>
                     <p class="admin-meta">반복 ${escapeHtml(item.repeat_count)}회 | 최근 ${escapeHtml(formatTimestamp(item.last_occurred_at))}</p>
                     <p class="admin-meta">${escapeHtml(item.latest_message || "메시지 없음")}</p>
-                    ${
-                        item.is_acknowledged
-                            ? `<p class="admin-meta">ACK ${escapeHtml(item.acknowledged_by_username || "-")} | ${escapeHtml(formatTimestamp(item.acknowledged_at))}${item.ack_note ? ` | ${escapeHtml(item.ack_note)}` : ""}</p>`
-                            : '<p class="admin-meta">ACK 대기 중</p>'
-                    }
+                      ${
+                          item.is_acknowledged
+                              ? `<p class="admin-meta">ACK ${escapeHtml(item.acknowledged_by_username || "-")} | ${escapeHtml(formatTimestamp(item.acknowledged_at))}${item.ack_note ? ` | ${escapeHtml(item.ack_note)}` : ""}</p>`
+                              : '<p class="admin-meta">ACK 대기 중</p>'
+                      }
+                      <p class="admin-meta">상태 업데이트 ${escapeHtml(item.status_updated_by_username || "-")} | ${escapeHtml(formatTimestamp(item.status_updated_at))}${item.status_note ? ` | ${escapeHtml(item.status_note)}` : ""}</p>
+                      ${
+                          item.resolved_at
+                              ? `<p class="admin-meta">해결 ${escapeHtml(item.resolved_by_username || "-")} | ${escapeHtml(formatTimestamp(item.resolved_at))}</p>`
+                              : ""
+                      }
                 </article>
             `
+        )
+        .join("");
+}
+
+function buildAlertStatusButtons(item) {
+    const buttonSpecs = [];
+    if (item.status !== "open") {
+        buttonSpecs.push(["open", "재오픈"]);
+    }
+    if (item.status !== "in_progress") {
+        buttonSpecs.push(["in_progress", "처리중"]);
+    }
+    if (item.status !== "suppressed") {
+        buttonSpecs.push(["suppressed", "억제"]);
+    }
+    if (item.status !== "resolved") {
+        buttonSpecs.push(["resolved", "해결"]);
+    }
+
+    return buttonSpecs
+        .map(
+            ([nextStatus, label]) =>
+                `<button class="button ghost small change-alert-status-button" type="button" data-alert-id="${escapeHtml(item.id)}" data-next-status="${escapeHtml(nextStatus)}" data-status-note="${escapeHtml(item.status_note || "")}">${escapeHtml(label)}</button>`
         )
         .join("");
 }
@@ -711,7 +743,7 @@ async function loadEvents() {
 }
 
 async function loadAlerts() {
-    const params = new URLSearchParams({ limit: "10", status: "open" });
+    const params = new URLSearchParams({ limit: "10", status: alertStatusFilter?.value || "active" });
     if (alertAckFilter.value) {
         params.set("is_acknowledged", alertAckFilter.value);
     }
@@ -888,6 +920,21 @@ async function updateAlertAcknowledgement(alertId, acknowledged, currentNote) {
     });
 }
 
+async function updateAlertStatus(alertId, nextStatus, currentNote) {
+    const statusNote = window.prompt("상태 메모를 입력하세요.", currentNote || "");
+    if (statusNote === null) {
+        return;
+    }
+
+    await apiFetch(`/api/admin/alerts/${alertId}/status`, {
+        method: "PATCH",
+        body: {
+            status: nextStatus,
+            status_note: statusNote,
+        },
+    });
+}
+
 async function refreshAll() {
     clearBanner();
     try {
@@ -921,6 +968,7 @@ alertRuleScopeFilter?.addEventListener("change", loadAlertRules);
 alertRuleStateFilter?.addEventListener("change", loadAlertRules);
 alertRuleEnabledFilter?.addEventListener("change", loadAlertRules);
 alertRuleObjectTypeFilter?.addEventListener("change", loadAlertRules);
+alertStatusFilter?.addEventListener("change", loadAlerts);
 alertAckFilter?.addEventListener("change", loadAlerts);
 eventsList?.addEventListener("click", async (event) => {
     const card = event.target instanceof Element ? event.target.closest("[data-grouped-event-id]") : null;
@@ -997,18 +1045,32 @@ alertRulesList?.addEventListener("click", (event) => {
 });
 
 alertsList?.addEventListener("click", (event) => {
-    const button = event.target instanceof HTMLElement ? event.target.closest(".toggle-alert-ack-button") : null;
-    if (!button) {
+    const ackButton = event.target instanceof HTMLElement ? event.target.closest(".toggle-alert-ack-button") : null;
+    if (ackButton) {
+        const alertId = Number(ackButton.dataset.alertId);
+        const acknowledged = ackButton.dataset.acknowledged !== "true";
+        const currentNote = ackButton.dataset.ackNote || "";
+        updateAlertAcknowledgement(alertId, acknowledged, currentNote)
+            .then(async () => {
+                await Promise.all([loadAlerts(), loadSummary()]);
+                showBanner(`alert를 ${acknowledged ? "ACK" : "ACK 해제"}했습니다.`, "success");
+            })
+            .catch((error) => showBanner(error.message, "error"));
         return;
     }
 
-    const alertId = Number(button.dataset.alertId);
-    const acknowledged = button.dataset.acknowledged !== "true";
-    const currentNote = button.dataset.ackNote || "";
-    updateAlertAcknowledgement(alertId, acknowledged, currentNote)
+    const statusButton = event.target instanceof HTMLElement ? event.target.closest(".change-alert-status-button") : null;
+    if (!statusButton) {
+        return;
+    }
+
+    const alertId = Number(statusButton.dataset.alertId);
+    const nextStatus = statusButton.dataset.nextStatus || "open";
+    const currentNote = statusButton.dataset.statusNote || "";
+    updateAlertStatus(alertId, nextStatus, currentNote)
         .then(async () => {
             await Promise.all([loadAlerts(), loadSummary()]);
-            showBanner(`alert를 ${acknowledged ? "ACK" : "ACK 해제"}했습니다.`, "success");
+            showBanner(`alert 상태를 ${nextStatus}(으)로 변경했습니다.`, "success");
         })
         .catch((error) => showBanner(error.message, "error"));
 });

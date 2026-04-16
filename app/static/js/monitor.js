@@ -290,7 +290,7 @@ function renderEventDetails() {
 
 function renderAlerts() {
     if (state.alerts.length === 0) {
-        alertsList.innerHTML = '<p class="section-copy">현재 열린 alert가 없습니다.</p>';
+        alertsList.innerHTML = '<p class="section-copy">현재 표시할 alert가 없습니다.</p>';
         return;
     }
 
@@ -300,12 +300,18 @@ function renderAlerts() {
             <article class="event-item alert-item severity-${escapeHtml(alert.severity)}">
                 <h3>${escapeHtml(alert.alert_code)}</h3>
                 <p>${escapeHtml(alert.latest_message || "메시지 없음")}</p>
-                <p>object ${escapeHtml(alert.monitored_object_id)} | ${escapeHtml(alert.severity)} | 반복 ${escapeHtml(alert.repeat_count)}회</p>
+                <p>object ${escapeHtml(alert.monitored_object_id)} | ${escapeHtml(alert.severity)} | 상태 ${escapeHtml(alert.status)} | 반복 ${escapeHtml(alert.repeat_count)}회</p>
                 <p>rule ${escapeHtml(alert.source_rule_metric_key || "-")} | target ${escapeHtml(alert.source_rule_target_label || "-")}</p>
                 ${
                     alert.is_acknowledged
                         ? `<p>ACK ${escapeHtml(alert.acknowledged_by_username || "-")} | ${escapeHtml(formatTimestamp(alert.acknowledged_at))}${alert.ack_note ? ` | ${escapeHtml(alert.ack_note)}` : ""}</p>`
                         : '<p>ACK 대기 중</p>'
+                }
+                <p>상태 업데이트 ${escapeHtml(alert.status_updated_by_username || "-")} | ${escapeHtml(formatTimestamp(alert.status_updated_at))}${alert.status_note ? ` | ${escapeHtml(alert.status_note)}` : ""}</p>
+                ${
+                    alert.resolved_at
+                        ? `<p>해결 ${escapeHtml(alert.resolved_by_username || "-")} | ${escapeHtml(formatTimestamp(alert.resolved_at))}</p>`
+                        : ""
                 }
                 <p>${escapeHtml(formatTimestamp(alert.last_occurred_at))}</p>
             </article>

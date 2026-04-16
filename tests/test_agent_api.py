@@ -594,6 +594,118 @@ def test_alert_instance_resolves_when_process_recovers(seeded_app, seeded_client
     assert resolved_count == 1
 
 
+def test_alert_instance_preserves_manual_in_progress_status_until_resolution(seeded_app, seeded_client) -> None:
+    warning_batch = {
+        "agent_id": "agent_local",
+        "boot_id": "boot_manual_state",
+        "seq_start": 53,
+        "seq_end": 53,
+        "sent_at": "2026-04-10T10:52:00.150+09:00",
+        "items": [
+            {
+                "seq": 53,
+                "payload_type": "process_event",
+                "occurred_at": "2026-04-10T10:52:00.100+09:00",
+                "target_id": "app_main",
+                "payload": {
+                    "event_type": "process_restarted",
+                    "severity": "warning",
+                    "message": "process restarted",
+                },
+            }
+        ],
+    }
+    repeat_batch = {
+        **warning_batch,
+        "seq_start": 54,
+        "seq_end": 54,
+        "items": [
+            {
+                **warning_batch["items"][0],
+                "seq": 54,
+                "occurred_at": "2026-04-10T10:52:05.100+09:00",
+            }
+        ],
+    }
+    recover_batch = {
+        **warning_batch,
+        "seq_start": 55,
+        "seq_end": 55,
+        "items": [
+            {
+                "seq": 55,
+                "payload_type": "process_snapshot",
+                "occurred_at": "2026-04-10T10:52:10.100+09:00",
+                "target_id": "app_main",
+                "payload": {
+                    "pid": 1234,
+                    "state": "running",
+                    "cpu_usage": 1.0,
+                    "memory_rss": 4096,
+                },
+            }
+        ],
+    }
+
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=warning_batch).status_code == 202
+    with seeded_app.app_context():
+        first_result = process_pending_ingest(limit=10)
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET status = 'in_progress', status_updated_at = ?, status_updated_by_user_id = ?, status_note = ?, updated_at = ?
+            WHERE monitored_object_id = ? AND alert_code = 'process.warning'
+            """,
+            (
+                "2026-04-10T10:52:02.000+09:00",
+                1,
+                "investigating",
+                "2026-04-10T10:52:02.000+09:00",
+                1302,
+            ),
+        )
+        db_conn.commit()
+    assert first_result["processed_items"] == 1
+
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=repeat_batch).status_code == 202
+    with seeded_app.app_context():
+        second_result = process_pending_ingest(limit=10)
+        db_conn = get_db()
+        repeated_alert = db_conn.execute(
+            """
+            SELECT status, repeat_count, status_note
+            FROM alert_instances
+            WHERE monitored_object_id = ? AND alert_code = 'process.warning'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (1302,),
+        ).fetchone()
+    assert second_result["processed_items"] == 1
+    assert repeated_alert["status"] == "in_progress"
+    assert repeated_alert["repeat_count"] == 2
+    assert repeated_alert["status_note"] == "investigating"
+
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=recover_batch).status_code == 202
+    with seeded_app.app_context():
+        third_result = process_pending_ingest(limit=10)
+        db_conn = get_db()
+        resolved_alert = db_conn.execute(
+            """
+            SELECT status, resolved_at
+            FROM alert_instances
+            WHERE monitored_object_id = ? AND alert_code = 'process.warning'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (1302,),
+        ).fetchone()
+    assert third_result["processed_items"] == 1
+    assert resolved_alert["status"] == "resolved"
+    assert resolved_alert["resolved_at"] is not None
+
+
 def test_process_threshold_alert_opens_on_exact_warning_and_critical_boundaries(seeded_app, seeded_client) -> None:
     warning_batch = {
         "agent_id": "agent_local",
