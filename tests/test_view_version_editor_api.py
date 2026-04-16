@@ -19,6 +19,25 @@ def create_draft(client):
     return response.get_json()
 
 
+def test_view_version_metamodel_returns_owned_snapshot(seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+
+    response = seeded_client.get(f"/api/view-versions/{version_id}/metamodel")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["version"]["id"] == version_id
+    assert payload["metamodel"]["version"]["version_code"] == "seed-v1"
+    assert any(item["code"] == "VirtualMachine" for item in payload["metamodel"]["semantic_types"])
+    assert any(
+        item["child_type_code"] == "VirtualMachine" and item["parent_type_code"] == "PhysicalServer"
+        for item in payload["metamodel"]["containment_rules"]
+    )
+    assert any(item["semantic_type_code"] == "VirtualMachine" for item in payload["metamodel"]["palette_groups"][0]["items"])
+
+
 def test_create_version_node_returns_backend_generated_id_and_revision(seeded_client) -> None:
     login(seeded_client)
     draft_payload = create_draft(seeded_client)
@@ -52,6 +71,36 @@ def test_create_version_node_returns_backend_generated_id_and_revision(seeded_cl
     assert payload["revision"] == draft_payload["version"]["revision"] + 1
 
 
+def test_create_version_node_allows_metamodel_defined_virtual_machine(seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+    server_node = next(node for node in draft_payload["nodes"] if node["node_type"] == "PhysicalServer")
+
+    response = seeded_client.post(
+        f"/api/view-versions/{version_id}/nodes",
+        json={
+            "revision": draft_payload["version"]["revision"],
+            "node_type": "VirtualMachine",
+            "parent_node_id": server_node["id"],
+            "display_name": "Worker VM",
+            "target_id": "vm_worker_1",
+            "x": 90,
+            "y": 170,
+            "width": 240,
+            "height": 160,
+            "style": {"shape": "rect"},
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert payload["node"]["node_type"] == "VirtualMachine"
+    assert payload["node"]["semantic_type_code"] == "VirtualMachine"
+    assert payload["node"]["notation_code"] == "vm.logical.rect"
+    assert payload["node"]["parent_node_id"] == server_node["id"]
+
+
 def test_create_version_node_rejects_invalid_node_type(seeded_client) -> None:
     login(seeded_client)
     draft_payload = create_draft(seeded_client)
@@ -67,6 +116,28 @@ def test_create_version_node_rejects_invalid_node_type(seeded_client) -> None:
             "y": 10,
             "width": 100,
             "height": 50,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_create_version_node_rejects_missing_required_parent_by_containment(seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+
+    response = seeded_client.post(
+        f"/api/view-versions/{version_id}/nodes",
+        json={
+            "revision": draft_payload["version"]["revision"],
+            "node_type": "VirtualMachine",
+            "display_name": "Detached VM",
+            "x": 10,
+            "y": 10,
+            "width": 200,
+            "height": 120,
         },
     )
 

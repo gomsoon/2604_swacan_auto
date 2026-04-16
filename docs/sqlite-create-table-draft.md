@@ -188,8 +188,7 @@ PRAGMA synchronous = NORMAL;
 - `metamodel_versions.status`는 `draft`, `published`, `deprecated`만 허용한다.
 - `semantic_types.kind`는 `node`, `edge`, `container`, `runtime-only`만 허용한다.
 - `notation_definitions.render_primitive`는 현재 whitelist primitive만 허용한다.
-- `view_nodes.node_type`는 현재 `PhysicalServer`, `SoftwareProcess`, `MonitoringAgent`만 허용한다.
-- `view_edges.edge_type`는 현재 `CommunicationLink`만 허용한다.
+- `view_nodes.node_type`와 `view_edges.edge_type`는 더 이상 하드코딩 집합으로 제한하지 않고, metamodel registry의 `semantic_type_code`와 함께 해석한다.
 - `ingest_inbox.status`는 `pending`, `processing`, `processed`, `failed`만 허용한다.
 - `latest_states.state_type`는 `process`, `agent`, `host`만 허용한다.
 - `raw_events.event_type`는 현재 minimal/MVP 핵심 이벤트 집합만 허용한다.

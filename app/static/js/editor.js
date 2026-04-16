@@ -1,6 +1,6 @@
 ﻿import { apiFetch, clearBanner, readNumber, showBanner, slugify } from "./common.js";
 import { clientToSvg, renderDiagram } from "./diagram.js";
-import { loadMetamodelRegistry } from "./metamodel.js";
+import { loadViewVersionMetamodel } from "./metamodel.js";
 const appRoot = document.getElementById("editor-app");
 const svg = document.getElementById("editor-canvas");
 const selectionKind = document.getElementById("selection-kind");
@@ -27,7 +27,10 @@ const state = {
     revision: 0,
     metamodelVersionCode: null,
     metamodelVersionId: null,
+    semanticTypesByCode: new Map(),
     paletteGroups: [],
+    containmentRules: [],
+    associations: [],
     notationDefinitionsByCode: new Map(),
     paletteItemsByType: new Map(),
     edgeToolLabel: "통신선 시작",
@@ -40,35 +43,14 @@ const state = {
     lastDragAt: 0,
 };
 
-const SUPPORTED_NODE_TYPES = new Set(["PhysicalServer", "SoftwareProcess", "MonitoringAgent"]);
-const SUPPORTED_EDGE_TYPES = new Set(["CommunicationLink"]);
-const NODE_BUTTON_ID_BY_TYPE = {
-    PhysicalServer: "add-server-button",
-    SoftwareProcess: "add-process-button",
-    MonitoringAgent: "add-agent-button",
-};
 const NODE_BUTTON_LABEL_BY_TYPE = {
     PhysicalServer: "물리 서버 추가",
+    VirtualMachine: "가상 머신 추가",
     SoftwareProcess: "프로세스 추가",
     MonitoringAgent: "에이전트 추가",
 };
-const EDGE_BUTTON_LABEL_BY_TYPE = {
+const EDGE_TOOL_LABEL_BY_TYPE = {
     CommunicationLink: "통신선 시작",
-};
-const DEFAULT_DISPLAY_NAME_BY_TYPE = {
-    PhysicalServer: "Physical Server",
-    SoftwareProcess: "Software Process",
-    MonitoringAgent: "Monitoring Agent",
-};
-const DEFAULT_TARGET_PREFIX_BY_TYPE = {
-    SoftwareProcess: "process",
-    MonitoringAgent: "agent",
-};
-const DEFAULT_NOTATION_BY_TYPE = {
-    PhysicalServer: "server.physical.rect",
-    SoftwareProcess: "process.rounded_rect",
-    MonitoringAgent: "agent.rounded_rect.double_border",
-    CommunicationLink: "communication.line",
 };
 
 const formFields = {
@@ -99,6 +81,74 @@ function getVersionApiBase() {
     return `/api/view-versions/${state.viewVersionId}`;
 }
 
+function getSemanticType(code) {
+    return state.semanticTypesByCode.get(code) || null;
+}
+
+function isNodeSemanticType(code) {
+    const semanticType = getSemanticType(code);
+    return Boolean(semanticType && semanticType.is_active && semanticType.kind !== "edge");
+}
+
+function isEdgeSemanticType(code) {
+    const semanticType = getSemanticType(code);
+    return Boolean(semanticType && semanticType.is_active && semanticType.kind === "edge");
+}
+
+function getAllowedParentTypeCodes(childTypeCode) {
+    return state.containmentRules
+        .filter((rule) => rule.child_type_code === childTypeCode)
+        .map((rule) => rule.parent_type_code);
+}
+
+function findCandidateParentId(childTypeCode) {
+    const allowedParentTypeCodes = getAllowedParentTypeCodes(childTypeCode);
+    if (allowedParentTypeCodes.length === 0) {
+        return null;
+    }
+
+    const selectedNode = getNode(state.selectedNodeId);
+    if (selectedNode && allowedParentTypeCodes.includes(selectedNode.semantic_type_code || selectedNode.node_type)) {
+        return selectedNode.id;
+    }
+
+    const candidate = state.nodes.find((node) =>
+        allowedParentTypeCodes.includes(node.semantic_type_code || node.node_type)
+    );
+    return candidate?.id || null;
+}
+
+function findAssociationForNodes(sourceNode, targetNode) {
+    const sourceTypeCode = sourceNode.semantic_type_code || sourceNode.node_type;
+    const targetTypeCode = targetNode.semantic_type_code || targetNode.node_type;
+    return (
+        state.associations.find(
+            (item) =>
+                item.source_type_code === sourceTypeCode &&
+                item.target_type_code === targetTypeCode
+        ) ||
+        state.associations.find(
+            (item) =>
+                item.direction === "undirected" &&
+                item.source_type_code === targetTypeCode &&
+                item.target_type_code === sourceTypeCode
+        ) ||
+        null
+    );
+}
+
+function getFirstEdgePaletteItem() {
+    return state.paletteGroups
+        .flatMap((group) => group.items || [])
+        .find((item) => isEdgeSemanticType(item.semantic_type_code)) || null;
+}
+
+function getNodePaletteItems() {
+    return state.paletteGroups.flatMap((group) =>
+        (group.items || []).filter((item) => isNodeSemanticType(item.semantic_type_code))
+    );
+}
+
 function isEditableVersion() {
     return state.viewVersionStatus === "draft";
 }
@@ -112,12 +162,16 @@ function refreshVersionPills() {
     }
 }
 
+function refreshPaletteInteractivity() {
+    const paletteButtons = paletteGroupsRoot?.querySelectorAll(".palette-button") || [];
+    paletteButtons.forEach((button) => {
+        button.disabled = !isEditableVersion() || !canCreateNodeType(button.dataset.semanticType);
+    });
+}
+
 function updateEditorMode() {
     const editable = isEditableVersion();
-    const paletteButtons = paletteGroupsRoot?.querySelectorAll("button") || [];
-    paletteButtons.forEach((button) => {
-        button.disabled = !editable;
-    });
+    refreshPaletteInteractivity();
     if (startConnectButton) {
         startConnectButton.disabled = !editable;
     }
@@ -167,18 +221,6 @@ function getDescendantIds(nodeId) {
     return result;
 }
 
-function getSelectedServerId() {
-    const selectedNode = getNode(state.selectedNodeId);
-    if (selectedNode?.node_type === "PhysicalServer") {
-        return selectedNode.id;
-    }
-    if (selectedNode?.parent_node_id) {
-        return selectedNode.parent_node_id;
-    }
-    const firstServer = state.nodes.find((node) => node.node_type === "PhysicalServer");
-    return firstServer?.id || null;
-}
-
 function nextTargetId(prefix, displayName) {
     return `${prefix}_${slugify(displayName)}_${Date.now()}`;
 }
@@ -213,46 +255,53 @@ function getPaletteItemByType(nodeType) {
 }
 
 function getNodeButtonLabel(nodeType, item) {
-    return NODE_BUTTON_LABEL_BY_TYPE[nodeType] || item?.display_name || nodeType;
+    return NODE_BUTTON_LABEL_BY_TYPE[nodeType] || `${item?.display_name || nodeType} 추가`;
+}
+
+function getEdgeToolLabel(edgeType, item) {
+    return EDGE_TOOL_LABEL_BY_TYPE[edgeType] || `${item?.display_name || edgeType} 시작`;
 }
 
 function getDefaultNodePayload(nodeType, item = getPaletteItemByType(nodeType)) {
-    if (nodeType === "PhysicalServer") {
-        const serverCount = state.nodes.filter((node) => node.node_type === "PhysicalServer").length;
-        const size = getDefaultSizeFromPaletteItem(item, 480, 260);
+    const semanticType = getSemanticType(nodeType);
+    const allowedParentTypeCodes = getAllowedParentTypeCodes(nodeType);
+    const parentId = findCandidateParentId(nodeType);
+    const displayName = item?.display_name || semanticType?.display_name || nodeType;
+    const runtimePrefix = semanticType?.runtime_kind ? slugify(semanticType.runtime_kind) : slugify(nodeType);
+
+    if (allowedParentTypeCodes.length === 0) {
+        const rootCount = state.nodes.filter((node) => node.parent_node_id === null).length;
+        const size = getDefaultSizeFromPaletteItem(item, 360, 220);
         return {
             parent_node_id: null,
             semantic_type_code: item?.semantic_type_code || nodeType,
-            notation_code: item?.notation_code || DEFAULT_NOTATION_BY_TYPE[nodeType],
-            display_name: `Host ${String.fromCharCode(65 + serverCount)}`,
+            notation_code: item?.notation_code || semanticType?.default_notation_code || null,
+            display_name: displayName,
             target_id: null,
-            x: 60 + serverCount * 80,
-            y: 60 + serverCount * 40,
+            x: 60 + rootCount * 80,
+            y: 60 + rootCount * 40,
             width: size.width,
             height: size.height,
             style: renderStyleFromPaletteItem(item),
         };
     }
 
-    const parentId = getSelectedServerId();
     if (!parentId) {
-        throw new Error("프로세스와 에이전트는 서버를 먼저 선택한 뒤 생성해야 합니다.");
+        throw new Error(`${displayName}을(를) 배치할 수 있는 상위 요소가 없습니다.`);
     }
 
     const parent = getNode(parentId);
     const siblings = state.nodes.filter((node) => node.parent_node_id === parentId).length;
     const baseX = parent.x + 40;
     const baseY = parent.y + 80 + siblings * 74;
-    const defaultSize = getDefaultSizeFromPaletteItem(item, nodeType === "MonitoringAgent" ? 170 : 180, 56);
-    const displayName = item?.display_name || DEFAULT_DISPLAY_NAME_BY_TYPE[nodeType] || nodeType;
-    const targetPrefix = DEFAULT_TARGET_PREFIX_BY_TYPE[nodeType] || "node";
+    const defaultSize = getDefaultSizeFromPaletteItem(item, 180, 72);
 
     return {
         parent_node_id: parentId,
         semantic_type_code: item?.semantic_type_code || nodeType,
-        notation_code: item?.notation_code || DEFAULT_NOTATION_BY_TYPE[nodeType],
+        notation_code: item?.notation_code || semanticType?.default_notation_code || null,
         display_name: displayName,
-        target_id: nextTargetId(targetPrefix, displayName),
+        target_id: semanticType?.allows_runtime_binding ? nextTargetId(runtimePrefix || "node", displayName) : null,
         x: baseX,
         y: baseY,
         width: defaultSize.width,
@@ -261,8 +310,15 @@ function getDefaultNodePayload(nodeType, item = getPaletteItemByType(nodeType)) 
     };
 }
 
-function isSupportedPaletteItem(item) {
-    return SUPPORTED_NODE_TYPES.has(item.semantic_type_code) || SUPPORTED_EDGE_TYPES.has(item.semantic_type_code);
+function canCreateNodeType(nodeType) {
+    if (!isNodeSemanticType(nodeType)) {
+        return false;
+    }
+    const allowedParentTypeCodes = getAllowedParentTypeCodes(nodeType);
+    if (allowedParentTypeCodes.length === 0) {
+        return true;
+    }
+    return Boolean(findCandidateParentId(nodeType));
 }
 
 function renderPalette() {
@@ -272,11 +328,16 @@ function renderPalette() {
 
     paletteGroupsRoot.replaceChildren();
     state.paletteItemsByType = new Map();
+    state.paletteGroups.forEach((group) => {
+        (group.items || []).forEach((item) => {
+            state.paletteItemsByType.set(item.semantic_type_code, item);
+        });
+    });
 
     const supportedGroups = state.paletteGroups
         .map((group) => ({
             ...group,
-            items: group.items.filter(isSupportedPaletteItem),
+            items: (group.items || []).filter((item) => isNodeSemanticType(item.semantic_type_code)),
         }))
         .filter((group) => group.items.length > 0);
 
@@ -293,20 +354,14 @@ function renderPalette() {
         itemsEl.className = "palette-items";
 
         for (const item of group.items) {
-            state.paletteItemsByType.set(item.semantic_type_code, item);
-
-            if (!SUPPORTED_NODE_TYPES.has(item.semantic_type_code)) {
-                continue;
-            }
-
             const button = document.createElement("button");
             button.type = "button";
             button.className = `button ${item.semantic_type_code === "PhysicalServer" ? "primary" : "ghost"} palette-button`;
             button.dataset.semanticType = item.semantic_type_code;
             button.dataset.notationCode = item.notation_code;
             button.dataset.primitive = item.render_primitive;
-            button.id = NODE_BUTTON_ID_BY_TYPE[item.semantic_type_code] || "";
             button.textContent = getNodeButtonLabel(item.semantic_type_code, item);
+            button.disabled = !canCreateNodeType(item.semantic_type_code) || !isEditableVersion();
             button.addEventListener("click", () => addNode(item.semantic_type_code));
             itemsEl.appendChild(button);
         }
@@ -317,7 +372,10 @@ function renderPalette() {
         }
     }
 
-    state.edgeToolLabel = EDGE_BUTTON_LABEL_BY_TYPE.CommunicationLink;
+    const edgePaletteItem = getFirstEdgePaletteItem();
+    state.edgeToolLabel = edgePaletteItem
+        ? getEdgeToolLabel(edgePaletteItem.semantic_type_code, edgePaletteItem)
+        : "관계선 시작";
     if (startConnectButton) {
         startConnectButton.textContent = state.edgeToolLabel;
     }
@@ -330,10 +388,13 @@ function renderPalette() {
 }
 
 async function loadPalette(metamodelVersionCode) {
-    const registry = await loadMetamodelRegistry(metamodelVersionCode);
+    const registry = await loadViewVersionMetamodel(state.viewVersionId, metamodelVersionCode);
     state.metamodelVersionId = registry.versionId;
     state.metamodelVersionCode = registry.versionCode;
+    state.semanticTypesByCode = registry.semanticTypesByCode;
     state.paletteGroups = registry.paletteGroups;
+    state.containmentRules = registry.containmentRules;
+    state.associations = registry.associations;
     state.notationDefinitionsByCode = registry.notationDefinitionsByCode;
     renderPalette();
 
@@ -391,6 +452,7 @@ function render() {
         onEdgeClick: handleEdgeClick,
     });
     syncSelectionPanel();
+    refreshPaletteInteractivity();
 }
 
 async function loadView() {
@@ -432,7 +494,11 @@ async function loadView() {
         state.viewVersionStatus = payload.version.status;
 
         const metamodelVersionCode = payload.version?.metamodel_version_code || payload.view.metamodel_version;
-        if (state.metamodelVersionCode !== metamodelVersionCode || state.paletteGroups.length === 0) {
+        if (
+            state.metamodelVersionCode !== metamodelVersionCode ||
+            state.metamodelVersionId !== payload.version.metamodel_version_id ||
+            state.paletteGroups.length === 0
+        ) {
             await loadPalette(metamodelVersionCode);
         }
         state.nodes = payload.nodes;
@@ -503,19 +569,27 @@ async function createEdge(targetNodeId) {
 
     clearBanner();
     try {
-        const edgeItem = getPaletteItemByType("CommunicationLink");
+        const sourceNode = getNode(state.connectSourceId);
+        const targetNode = getNode(targetNodeId);
+        const matchedAssociation = sourceNode && targetNode ? findAssociationForNodes(sourceNode, targetNode) : null;
+        const matchedEdgeType = matchedAssociation?.semantics?.default_edge_type;
+        const edgeItem = getPaletteItemByType(matchedEdgeType) || getFirstEdgePaletteItem();
+        if (!edgeItem) {
+            throw new Error("현재 메타모델에는 생성 가능한 관계선이 없습니다.");
+        }
         const payload = await apiFetch(`${getVersionApiBase()}/edges`, {
             method: "POST",
             body: {
                 revision: state.revision,
-                edge_type: "CommunicationLink",
-                semantic_type_code: edgeItem?.semantic_type_code || "CommunicationLink",
-                notation_code: edgeItem?.notation_code || DEFAULT_NOTATION_BY_TYPE.CommunicationLink,
+                edge_type: edgeItem.semantic_type_code,
+                association_code: matchedAssociation?.code || null,
+                semantic_type_code: edgeItem.semantic_type_code,
+                notation_code: edgeItem.notation_code,
                 source_node_id: state.connectSourceId,
                 target_node_id: targetNodeId,
                 source_anchor: "right",
                 target_anchor: "left",
-                label: "communication",
+                label: matchedAssociation?.display_name || edgeItem.display_name || "communication",
                 control_points: [],
                 style: { strokeStyle: "solid" },
             },
@@ -526,7 +600,7 @@ async function createEdge(targetNodeId) {
         state.connectSourceId = null;
         updateRevision(payload.revision);
         render();
-        setStatus("통신선이 추가되었습니다.");
+        setStatus(`${edgeItem.display_name || "관계선"}이 추가되었습니다.`);
     } catch (error) {
         showBanner(error.message, "error");
         state.connectSourceId = null;

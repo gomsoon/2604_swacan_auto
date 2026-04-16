@@ -8,14 +8,10 @@ from flask import Blueprint, g, request
 
 from .auth import error_response, login_required
 from .editor_api import (
-    EDGE_METAMODEL_DEFAULTS,
     EDGE_MUTABLE_FIELDS,
-    NODE_METAMODEL_DEFAULTS,
     NODE_MUTABLE_FIELDS,
     next_layer_order,
     resolve_layer_order,
-    validate_edges,
-    validate_nodes,
 )
 from .view_versioning import (
     get_owned_view_version,
@@ -23,10 +19,14 @@ from .view_versioning import (
     sync_primary_node_binding,
     serialize_view_version_edge,
     serialize_view_version_node,
+    serialize_view_version,
 )
+from .view_metamodel import fetch_metamodel_version_snapshot
 from .db import get_db
 
 bp = Blueprint("view_version_editor_api", __name__, url_prefix="/api/view-versions")
+
+NODE_SEMANTIC_KINDS = {"node", "container", "runtime-only"}
 
 
 def slugify(value: str) -> str:
@@ -50,6 +50,167 @@ def require_draft_version(version_id: int):
     if version_row["status"] != "draft":
         return None, error_response("version_state_conflict", "only draft versions can be edited", 409)
     return version_row, None
+
+
+def fetch_version_metamodel(version_row) -> dict[str, Any] | None:
+    metamodel_version_id = version_row["metamodel_version_id"]
+    if metamodel_version_id is None:
+        return None
+    return fetch_metamodel_version_snapshot(metamodel_version_id)
+
+
+def build_editor_metamodel(version_row) -> dict[str, Any]:
+    snapshot = fetch_version_metamodel(version_row) or {
+        "version": None,
+        "semantic_types": [],
+        "containment_rules": [],
+        "associations": [],
+        "notations": [],
+        "palette_groups": [],
+    }
+    semantic_types_by_code = {item["code"]: item for item in snapshot["semantic_types"]}
+    notation_by_code = {item["code"]: item for item in snapshot["notations"]}
+    allowed_node_types = {
+        item["code"]
+        for item in snapshot["semantic_types"]
+        if item["is_active"] and item["kind"] in NODE_SEMANTIC_KINDS
+    }
+    allowed_edge_types = {
+        item["code"]
+        for item in snapshot["semantic_types"]
+        if item["is_active"] and item["kind"] == "edge"
+    }
+    containment_pairs = {
+        (item["parent_type_code"], item["child_type_code"])
+        for item in snapshot["containment_rules"]
+    }
+    allowed_parent_codes_by_child: dict[str, set[str]] = {}
+    for item in snapshot["containment_rules"]:
+        allowed_parent_codes_by_child.setdefault(item["child_type_code"], set()).add(item["parent_type_code"])
+    return {
+        "snapshot": snapshot,
+        "semantic_types_by_code": semantic_types_by_code,
+        "notation_by_code": notation_by_code,
+        "allowed_node_types": allowed_node_types,
+        "allowed_edge_types": allowed_edge_types,
+        "containment_pairs": containment_pairs,
+        "allowed_parent_codes_by_child": allowed_parent_codes_by_child,
+    }
+
+
+def resolve_node_defaults(editor_metamodel: dict[str, Any], node_type: str) -> dict[str, Any] | None:
+    semantic_type = editor_metamodel["semantic_types_by_code"].get(node_type)
+    if semantic_type is None or semantic_type["code"] not in editor_metamodel["allowed_node_types"]:
+        return None
+    return {
+        "semantic_type_code": semantic_type["code"],
+        "notation_code": semantic_type.get("default_notation_code"),
+    }
+
+
+def resolve_edge_defaults(editor_metamodel: dict[str, Any], edge_type: str) -> dict[str, Any] | None:
+    semantic_type = editor_metamodel["semantic_types_by_code"].get(edge_type)
+    if semantic_type is None or semantic_type["code"] not in editor_metamodel["allowed_edge_types"]:
+        return None
+    return {
+        "semantic_type_code": semantic_type["code"],
+        "notation_code": semantic_type.get("default_notation_code"),
+    }
+
+
+def validate_nodes_against_metamodel(nodes: list[dict[str, Any]], editor_metamodel: dict[str, Any]) -> str | None:
+    node_map: dict[int, dict[str, Any]] = {}
+    required = {"id", "node_type", "display_name", "x", "y", "width", "height"}
+
+    for node in nodes:
+        missing = required - node.keys()
+        if missing:
+            return f"node is missing required fields: {', '.join(sorted(missing))}"
+
+        node_type = node["node_type"]
+        defaults = resolve_node_defaults(editor_metamodel, node_type)
+        if defaults is None:
+            return "invalid node_type"
+
+        if node.get("semantic_type_code", defaults["semantic_type_code"]) != defaults["semantic_type_code"]:
+            return "semantic_type_code does not match node_type"
+
+        notation_code = node.get("notation_code", defaults["notation_code"])
+        notation = editor_metamodel["notation_by_code"].get(notation_code)
+        if notation is None or notation["semantic_type_code"] != defaults["semantic_type_code"] or notation["kind"] != "node":
+            return "notation_code does not match node_type"
+
+        if not isinstance(node["id"], int):
+            return "node id must be an integer"
+        if node["id"] in node_map:
+            return "duplicate node id is not allowed"
+        if "layer_order" in node and not isinstance(node["layer_order"], int):
+            return "layer_order must be an integer"
+
+        node_map[node["id"]] = node
+
+    allowed_parent_codes_by_child = editor_metamodel["allowed_parent_codes_by_child"]
+    containment_pairs = editor_metamodel["containment_pairs"]
+
+    for node in nodes:
+        child_type = node["node_type"]
+        parent_id = node.get("parent_node_id")
+        allowed_parents = allowed_parent_codes_by_child.get(child_type, set())
+        if not allowed_parents:
+            if parent_id is not None:
+                return f"{child_type} must not have a parent_node_id"
+            continue
+        if parent_id is None:
+            return f"{child_type} must have a parent_node_id"
+
+        parent_node = node_map.get(parent_id)
+        if parent_node is None:
+            return "parent_node_id must reference an existing node"
+        if (parent_node["node_type"], child_type) not in containment_pairs:
+            return "parent_node_id does not satisfy containment rules"
+
+    return None
+
+
+def validate_edges_against_metamodel(
+    edges: list[dict[str, Any]],
+    nodes: list[dict[str, Any]],
+    editor_metamodel: dict[str, Any],
+) -> str | None:
+    node_ids = {node["id"] for node in nodes}
+    seen_ids: set[int] = set()
+
+    for edge in edges:
+        missing = {"id", "edge_type", "source_node_id", "target_node_id"} - edge.keys()
+        if missing:
+            return f"edge is missing required fields: {', '.join(sorted(missing))}"
+
+        edge_type = edge["edge_type"]
+        defaults = resolve_edge_defaults(editor_metamodel, edge_type)
+        if defaults is None:
+            return "invalid edge_type"
+        if edge.get("semantic_type_code", defaults["semantic_type_code"]) != defaults["semantic_type_code"]:
+            return "semantic_type_code does not match edge_type"
+        notation_code = edge.get("notation_code", defaults["notation_code"])
+        notation = editor_metamodel["notation_by_code"].get(notation_code)
+        if notation is None or notation["semantic_type_code"] != defaults["semantic_type_code"] or notation["kind"] != "edge":
+            return "notation_code does not match edge_type"
+        if not isinstance(edge["id"], int):
+            return "edge id must be an integer"
+        if edge["id"] in seen_ids:
+            return "duplicate edge id is not allowed"
+        seen_ids.add(edge["id"])
+        if "layer_order" in edge and not isinstance(edge["layer_order"], int):
+            return "layer_order must be an integer"
+        if edge["source_node_id"] not in node_ids or edge["target_node_id"] not in node_ids:
+            return "edge must reference existing nodes"
+
+        association_code = edge.get("association_code")
+        if association_code:
+            if not any(item["code"] == association_code for item in editor_metamodel["snapshot"]["associations"]):
+                return "association_code is invalid"
+
+    return None
 
 
 def require_revision(version_row, payload: dict[str, Any]):
@@ -231,6 +392,27 @@ def replace_version_layout(version_id: int, nodes: list[dict[str, Any]], edges: 
         )
 
 
+@bp.get("/<int:version_id>/metamodel")
+@login_required
+def get_version_metamodel(version_id: int):
+    version_row = get_owned_view_version(version_id, g.user["id"])
+    if version_row is None:
+        return error_response("not_found", "view version not found", 404)
+    snapshot = fetch_version_metamodel(version_row)
+    if snapshot is None:
+        return error_response("metamodel_not_found", "view version metamodel not found", 404)
+    version_payload = serialize_view_version(
+        {
+            **dict(version_row),
+            "metamodel_version_code": snapshot["version"]["version_code"],
+        }
+    )
+    return {
+        "version": version_payload,
+        "metamodel": snapshot,
+    }
+
+
 @bp.post("/<int:version_id>/nodes")
 @login_required
 def create_node(version_id: int):
@@ -246,7 +428,9 @@ def create_node(version_id: int):
     missing = {"node_type", "display_name", "x", "y", "width", "height"} - payload.keys()
     if missing:
         return error_response("validation_error", f"node is missing required fields: {', '.join(sorted(missing))}", 400)
-    if payload["node_type"] not in NODE_METAMODEL_DEFAULTS:
+    editor_metamodel = build_editor_metamodel(version_row)
+    node_defaults = resolve_node_defaults(editor_metamodel, payload["node_type"])
+    if node_defaults is None:
         return error_response("validation_error", "invalid node_type", 400)
 
     current_nodes = get_current_nodes(version_id)
@@ -257,15 +441,14 @@ def create_node(version_id: int):
         return error_response("validation_error", str(exc), 400)
 
     node_type = payload["node_type"]
-    metamodel_defaults = NODE_METAMODEL_DEFAULTS[node_type]
     existing_keys = {node["element_key"] for node in current_nodes}
     candidate = {
         "id": temp_id,
         "element_key": payload.get("element_key") or make_element_key(node_type.lower(), payload["display_name"], existing_keys),
         "parent_node_id": payload.get("parent_node_id"),
         "node_type": node_type,
-        "semantic_type_code": payload.get("semantic_type_code", metamodel_defaults["semantic_type_code"]),
-        "notation_code": payload.get("notation_code", metamodel_defaults["notation_code"]),
+        "semantic_type_code": payload.get("semantic_type_code", node_defaults["semantic_type_code"]),
+        "notation_code": payload.get("notation_code", node_defaults["notation_code"]),
         "display_name": payload["display_name"],
         "target_id": payload.get("target_id"),
         "layer_order": layer_order,
@@ -278,7 +461,7 @@ def create_node(version_id: int):
     if "style" in payload:
         candidate["style"] = payload["style"]
 
-    validation_error = validate_nodes(current_nodes + [candidate])
+    validation_error = validate_nodes_against_metamodel(current_nodes + [candidate], editor_metamodel)
     if validation_error:
         return error_response("validation_error", validation_error, 400)
 
@@ -342,6 +525,7 @@ def update_node(version_id: int, node_id: int):
     node_row = get_node_row(version_id, node_id)
     if node_row is None:
         return error_response("not_found", "node not found", 404)
+    editor_metamodel = build_editor_metamodel(version_row)
 
     unknown = set(payload.keys()) - (NODE_MUTABLE_FIELDS | {"revision"})
     if unknown:
@@ -353,7 +537,10 @@ def update_node(version_id: int, node_id: int):
         if field in payload:
             merged[field] = payload[field]
 
-    validation_error = validate_nodes([merged if node["id"] == node_id else node for node in current_nodes])
+    validation_error = validate_nodes_against_metamodel(
+        [merged if node["id"] == node_id else node for node in current_nodes],
+        editor_metamodel,
+    )
     if validation_error:
         return error_response("validation_error", validation_error, 400)
 
@@ -434,7 +621,9 @@ def create_edge(version_id: int):
     missing = {"edge_type", "source_node_id", "target_node_id"} - payload.keys()
     if missing:
         return error_response("validation_error", f"edge is missing required fields: {', '.join(sorted(missing))}", 400)
-    if payload["edge_type"] not in EDGE_METAMODEL_DEFAULTS:
+    editor_metamodel = build_editor_metamodel(version_row)
+    edge_defaults = resolve_edge_defaults(editor_metamodel, payload["edge_type"])
+    if edge_defaults is None:
         return error_response("validation_error", "invalid edge_type", 400)
 
     current_nodes = get_current_nodes(version_id)
@@ -446,7 +635,6 @@ def create_edge(version_id: int):
         return error_response("validation_error", str(exc), 400)
 
     edge_type = payload["edge_type"]
-    metamodel_defaults = EDGE_METAMODEL_DEFAULTS[edge_type]
     existing_keys = {edge["element_key"] for edge in current_edges}
     source_element = next((node["element_key"] for node in current_nodes if node["id"] == payload["source_node_id"]), None)
     target_element = next((node["element_key"] for node in current_nodes if node["id"] == payload["target_node_id"]), None)
@@ -455,8 +643,8 @@ def create_edge(version_id: int):
         "element_key": payload.get("element_key") or make_element_key("edge", payload.get("label") or edge_type, existing_keys),
         "edge_type": edge_type,
         "association_code": payload.get("association_code"),
-        "semantic_type_code": payload.get("semantic_type_code", metamodel_defaults["semantic_type_code"]),
-        "notation_code": payload.get("notation_code", metamodel_defaults["notation_code"]),
+        "semantic_type_code": payload.get("semantic_type_code", edge_defaults["semantic_type_code"]),
+        "notation_code": payload.get("notation_code", edge_defaults["notation_code"]),
         "source_node_id": payload["source_node_id"],
         "target_node_id": payload["target_node_id"],
         "source_element_key": payload.get("source_element_key", source_element),
@@ -471,7 +659,11 @@ def create_edge(version_id: int):
     if "style" in payload:
         candidate["style"] = payload["style"]
 
-    validation_error = validate_edges(current_edges + [candidate], {node["id"] for node in current_nodes})
+    validation_error = validate_edges_against_metamodel(
+        current_edges + [candidate],
+        current_nodes,
+        editor_metamodel,
+    )
     if validation_error:
         return error_response("validation_error", validation_error, 400)
 
@@ -532,6 +724,7 @@ def update_edge(version_id: int, edge_id: int):
     edge_row = get_edge_row(version_id, edge_id)
     if edge_row is None:
         return error_response("not_found", "edge not found", 404)
+    editor_metamodel = build_editor_metamodel(version_row)
 
     unknown = set(payload.keys()) - (EDGE_MUTABLE_FIELDS | {"revision"})
     if unknown:
@@ -544,7 +737,11 @@ def update_edge(version_id: int, edge_id: int):
         if field in payload:
             merged[field] = payload[field]
 
-    validation_error = validate_edges([merged if edge["id"] == edge_id else edge for edge in current_edges], {node["id"] for node in current_nodes})
+    validation_error = validate_edges_against_metamodel(
+        [merged if edge["id"] == edge_id else edge for edge in current_edges],
+        current_nodes,
+        editor_metamodel,
+    )
     if validation_error:
         return error_response("validation_error", validation_error, 400)
 
@@ -624,10 +821,13 @@ def replace_version(version_id: int):
     if not isinstance(nodes, list) or not isinstance(edges, list):
         return error_response("validation_error", "nodes and edges must be lists", 400)
 
-    existing_node_ids = {node["id"] for node in get_current_nodes(version_id)}
-    existing_edge_ids = {edge["id"] for edge in get_current_edges(version_id)}
-    existing_node_keys = {node["element_key"] for node in get_current_nodes(version_id)}
-    existing_edge_keys = {edge["element_key"] for edge in get_current_edges(version_id)}
+    editor_metamodel = build_editor_metamodel(version_row)
+    current_nodes = get_current_nodes(version_id)
+    current_edges = get_current_edges(version_id)
+    existing_node_ids = {node["id"] for node in current_nodes}
+    existing_edge_ids = {edge["id"] for edge in current_edges}
+    existing_node_keys = {node["element_key"] for node in current_nodes}
+    existing_edge_keys = {edge["element_key"] for edge in current_edges}
 
     normalized_nodes: list[dict[str, Any]] = []
     used_node_ids: set[int] = set()
@@ -639,7 +839,8 @@ def replace_version(version_id: int):
             return error_response("validation_error", "each node must be an object", 400)
         normalized = dict(node)
         node_type = normalized.get("node_type")
-        if node_type not in NODE_METAMODEL_DEFAULTS:
+        node_defaults = resolve_node_defaults(editor_metamodel, node_type)
+        if node_defaults is None:
             return error_response("validation_error", "invalid node_type", 400)
         if not isinstance(normalized.get("id"), int):
             next_generated_node_id += 1
@@ -654,11 +855,11 @@ def replace_version(version_id: int):
         if element_key in used_node_keys:
             return error_response("validation_error", "duplicate node element_key is not allowed", 400)
         used_node_keys.add(element_key)
-        normalized.setdefault("semantic_type_code", NODE_METAMODEL_DEFAULTS[node_type]["semantic_type_code"])
-        normalized.setdefault("notation_code", NODE_METAMODEL_DEFAULTS[node_type]["notation_code"])
+        normalized.setdefault("semantic_type_code", node_defaults["semantic_type_code"])
+        normalized.setdefault("notation_code", node_defaults["notation_code"])
         normalized_nodes.append(normalized)
 
-    node_validation_error = validate_nodes(normalized_nodes)
+    node_validation_error = validate_nodes_against_metamodel(normalized_nodes, editor_metamodel)
     if node_validation_error:
         return error_response("validation_error", node_validation_error, 400)
 
@@ -673,7 +874,8 @@ def replace_version(version_id: int):
             return error_response("validation_error", "each edge must be an object", 400)
         normalized = dict(edge)
         edge_type = normalized.get("edge_type")
-        if edge_type not in EDGE_METAMODEL_DEFAULTS:
+        edge_defaults = resolve_edge_defaults(editor_metamodel, edge_type)
+        if edge_defaults is None:
             return error_response("validation_error", "invalid edge_type", 400)
         if not isinstance(normalized.get("id"), int):
             next_generated_edge_id += 1
@@ -688,13 +890,17 @@ def replace_version(version_id: int):
         if element_key in used_edge_keys:
             return error_response("validation_error", "duplicate edge element_key is not allowed", 400)
         used_edge_keys.add(element_key)
-        normalized.setdefault("semantic_type_code", EDGE_METAMODEL_DEFAULTS[edge_type]["semantic_type_code"])
-        normalized.setdefault("notation_code", EDGE_METAMODEL_DEFAULTS[edge_type]["notation_code"])
+        normalized.setdefault("semantic_type_code", edge_defaults["semantic_type_code"])
+        normalized.setdefault("notation_code", edge_defaults["notation_code"])
         normalized.setdefault("source_element_key", node_key_by_id.get(normalized.get("source_node_id")))
         normalized.setdefault("target_element_key", node_key_by_id.get(normalized.get("target_node_id")))
         normalized_edges.append(normalized)
 
-    edge_validation_error = validate_edges(normalized_edges, {node["id"] for node in normalized_nodes})
+    edge_validation_error = validate_edges_against_metamodel(
+        normalized_edges,
+        normalized_nodes,
+        editor_metamodel,
+    )
     if edge_validation_error:
         return error_response("validation_error", edge_validation_error, 400)
 

@@ -15,6 +15,7 @@
 - `latest_states`는 현재 스냅샷, `raw_events`는 append-only 이벤트로 구분한다.
 - metamodel/notation registry는 현재 seed 기반 published version을 조회하는 구조로 시작한다.
 - `view_nodes`, `view_edges`는 기존 `node_type`, `edge_type`를 유지하면서도 `semantic_type_code`, `notation_code`를 함께 저장해 metamodel registry와 점진 연결한다.
+- `node_type`, `edge_type` 자체는 더 이상 하드코딩된 소수 타입 집합으로 제한하지 않고, 현재 연결된 metamodel version의 semantic type을 따라간다.
 
 ## 2. 현재 핵심 테이블
 

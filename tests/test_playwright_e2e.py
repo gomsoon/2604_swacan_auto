@@ -56,6 +56,12 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     server_shape = page.locator('g.diagram-node[data-node-type="PhysicalServer"] .node-shape').first
     expect(server_shape).to_be_visible()
     expect(page.locator('g.diagram-node[data-node-type="PhysicalServer"]')).to_have_count(1)
+    expect(page.get_by_role("button", name="가상 머신 추가")).to_be_visible()
+
+    server_shape.click(force=True)
+    page.get_by_role("button", name="가상 머신 추가").click()
+    expect(page.locator('g.diagram-node[data-node-type="VirtualMachine"]')).to_have_count(1)
+    expect(page.locator('g.diagram-node[data-notation-code="vm.logical.rect"]')).to_have_count(1)
 
     server_shape.click(force=True)
     page.get_by_role("button", name="프로세스 추가").click()
