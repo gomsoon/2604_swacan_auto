@@ -20,8 +20,8 @@ def seed_regular_user(app) -> None:
         db_conn = get_db()
         db_conn.execute(
             """
-            INSERT INTO users (id, username, password_hash, role, is_active, created_at, updated_at)
-            VALUES (?, ?, ?, 'user', 1, ?, ?)
+            INSERT INTO users (id, username, password_hash, role, metamodel_permission, is_active, created_at, updated_at)
+            VALUES (?, ?, ?, 'user', 'view', 1, ?, ?)
             """,
             (
                 2,

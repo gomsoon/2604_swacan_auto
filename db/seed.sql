@@ -5,6 +5,7 @@ INSERT INTO users (
     username,
     password_hash,
     role,
+    metamodel_permission,
     is_active,
     created_at,
     updated_at
@@ -13,6 +14,7 @@ INSERT INTO users (
     'admin',
     'scrypt:32768:8:1$1E9IY1SSOJA4WLLL$037b286549ea05d116f801c379e320b9922771e5987ae33aa3403c6ebfc1cfad487a58637f2661b1a5efb00065c5ef6876d3a8ae12bd8e6d8bd1cbe8b4cf589f',
     'admin',
+    'publish',
     1,
     '2026-04-12T10:00:00.000+09:00',
     '2026-04-12T10:00:00.000+09:00'

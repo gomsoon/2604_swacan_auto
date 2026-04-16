@@ -1,5 +1,6 @@
 ﻿import { apiFetch, clearBanner, formatTimestamp, showBanner } from "./common.js";
 
+const adminApp = document.getElementById("admin-app");
 const summaryCards = document.getElementById("admin-summary-cards");
 const generatedAt = document.getElementById("admin-generated-at");
 const debugStatus = document.getElementById("admin-debug-status");
@@ -11,6 +12,8 @@ const cleanupSummary = document.getElementById("admin-cleanup-summary");
 const metamodelVersionsList = document.getElementById("admin-metamodel-versions-list");
 const metamodelVersionCount = document.getElementById("metamodel-version-count");
 const metamodelValidationPanel = document.getElementById("metamodel-validation-panel");
+const metamodelPermissionPill = document.getElementById("metamodel-permission-pill");
+const metamodelAuditList = document.getElementById("admin-metamodel-audit-list");
 const metamodelSemanticTypesList = document.getElementById("admin-metamodel-semantic-types-list");
 const metamodelSemanticTypeCount = document.getElementById("metamodel-semantic-type-count");
 const metamodelPropertiesList = document.getElementById("admin-metamodel-properties-list");
@@ -58,6 +61,7 @@ const refreshAlertHistoryButton = document.getElementById("refresh-alert-history
 const refreshDebugButton = document.getElementById("refresh-debug-button");
 const refreshCleanupButton = document.getElementById("refresh-cleanup-button");
 const refreshMetamodelVersionsButton = document.getElementById("refresh-metamodel-versions-button");
+const refreshMetamodelAuditButton = document.getElementById("refresh-metamodel-audit-button");
 const refreshMetamodelSemanticTypesButton = document.getElementById("refresh-metamodel-semantic-types-button");
 const refreshMetamodelPropertiesButton = document.getElementById("refresh-metamodel-properties-button");
 const refreshMetamodelContainmentRulesButton = document.getElementById("refresh-metamodel-containment-rules-button");
@@ -192,6 +196,7 @@ let selectedMetamodelAssociationId = null;
 let selectedMetamodelValidation = null;
 let selectedMetamodelDiff = null;
 let selectedMetamodelWorkspace = null;
+let metamodelAuditLogs = [];
 let metamodelEditorFocusTimer = null;
 let metamodelWorkspaceInteractionMode = "select";
 let metamodelWorkspacePendingTypeId = null;
@@ -200,6 +205,9 @@ let metamodelWorkspaceNodePositions = {};
 let metamodelWorkspaceLayoutVersionId = null;
 let metamodelWorkspaceDragState = null;
 let metamodelWorkspaceSuppressClickUntil = 0;
+
+const METAMODEL_PERMISSION_LEVELS = { view: 1, edit: 2, publish: 3 };
+const currentMetamodelPermission = adminApp?.dataset.metamodelPermission || "view";
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -237,6 +245,45 @@ function formatBytes(value) {
         return `${(numeric / 1024).toFixed(1)} KiB`;
     }
     return `${numeric} B`;
+}
+
+function hasMetamodelPermission(requiredPermission) {
+    return (METAMODEL_PERMISSION_LEVELS[currentMetamodelPermission] || 0) >= (METAMODEL_PERMISSION_LEVELS[requiredPermission] || 0);
+}
+
+function renderMetamodelPermissionPill() {
+    if (!metamodelPermissionPill) {
+        return;
+    }
+    metamodelPermissionPill.textContent = `메타모델 권한: ${currentMetamodelPermission}`;
+}
+
+function applyMetamodelPermissionUiState() {
+    const editEnabled = hasMetamodelPermission("edit");
+    const publishEnabled = hasMetamodelPermission("publish");
+
+    [
+        "create-metamodel-version-button",
+        "save-metamodel-semantic-type-button",
+        "save-metamodel-property-button",
+        "save-metamodel-containment-rule-button",
+        "save-metamodel-notation-button",
+        "save-metamodel-association-button",
+        "metamodel-workspace-create-semantic-type-button",
+        "metamodel-workspace-create-containment-mode",
+        "metamodel-workspace-create-association-mode",
+    ].forEach((id) => {
+        const element = document.getElementById(id);
+        if (element instanceof HTMLButtonElement) {
+            element.disabled = !editEnabled;
+        }
+    });
+
+    document.querySelectorAll(".publish-metamodel-button").forEach((button) => {
+        if (button instanceof HTMLButtonElement) {
+            button.disabled = !publishEnabled;
+        }
+    });
 }
 
 function setTemporarySectionFocus(section) {
@@ -1518,6 +1565,37 @@ function renderMetamodelSelectOptions() {
     metamodelDraftVersionSelect.disabled = draftVersions.length === 0;
 }
 
+function renderMetamodelAuditLogs(items) {
+    metamodelAuditLogs = items;
+    if (!metamodelAuditList) {
+        return;
+    }
+    if (!items.length) {
+        metamodelAuditList.innerHTML = '<p class="section-copy">메타모델 감사 로그가 아직 없습니다.</p>';
+        return;
+    }
+
+    metamodelAuditList.innerHTML = items
+        .map(
+            (item) => `
+                <article class="list-card">
+                    <div class="list-card-header">
+                        <strong>${escapeHtml(item.summary)}</strong>
+                        <span class="meta-pill">${escapeHtml(item.action_type)}</span>
+                    </div>
+                    <div class="list-card-body">
+                        <div class="meta-row">
+                            <span>${escapeHtml(item.actor_username || "system")}</span>
+                            <span>${escapeHtml(item.metamodel_version_code || "-")}</span>
+                            <span>${escapeHtml(formatTimestamp(item.created_at))}</span>
+                        </div>
+                    </div>
+                </article>
+            `
+        )
+        .join("");
+}
+
 function renderMetamodelVersions(items) {
     metamodelVersions = items;
     metamodelVersionCount.textContent = `${items.length}개`;
@@ -1557,6 +1635,7 @@ function renderMetamodelVersions(items) {
             `;
         })
         .join("");
+    applyMetamodelPermissionUiState();
 }
 
 function renderMetamodelDiffItems(label, items, kind) {
@@ -2966,6 +3045,11 @@ async function loadMetamodelVersions() {
     renderMetamodelVersions(payload.items);
 }
 
+async function loadMetamodelAuditLogs() {
+    const payload = await apiFetch("/api/admin/metamodel/audit-logs?limit=20");
+    renderMetamodelAuditLogs(payload.items || []);
+}
+
 async function loadMetamodelValidation(versionId) {
     const payload = await apiFetch(`/api/admin/metamodel/versions/${versionId}/validation`);
     if (selectedMetamodelDiff?.version?.id && Number(selectedMetamodelDiff.version.id) !== Number(versionId)) {
@@ -3742,9 +3826,11 @@ async function resolveAlert(alertId, currentReason) {
 
 async function refreshAll() {
     clearBanner();
+    renderMetamodelPermissionPill();
     try {
         await Promise.all([
             loadMetamodelVersions(),
+            loadMetamodelAuditLogs(),
             loadMetamodelSemanticTypes(),
             loadMonitoredObjects(),
             loadAlertRules(),
@@ -3762,6 +3848,7 @@ async function refreshAll() {
         await loadMetamodelPaletteGroups();
         await loadMetamodelNotations();
         await loadMetamodelAssociations();
+        applyMetamodelPermissionUiState();
     } catch (error) {
         showBanner(error.message, "error");
     }
@@ -3776,6 +3863,7 @@ refreshAlertHistoryButton?.addEventListener("click", loadAlertHistoryArchive);
 refreshDebugButton?.addEventListener("click", loadDebug);
 refreshCleanupButton?.addEventListener("click", loadCleanupRuns);
 refreshMetamodelVersionsButton?.addEventListener("click", loadMetamodelVersions);
+refreshMetamodelAuditButton?.addEventListener("click", loadMetamodelAuditLogs);
 refreshMetamodelSemanticTypesButton?.addEventListener("click", () => {
     loadMetamodelSemanticTypes()
         .then(async () => {

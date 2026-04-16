@@ -17,6 +17,7 @@ def test_login_success_returns_user(seeded_client) -> None:
             "id": 1,
             "username": "admin",
             "role": "admin",
+            "metamodel_permission": "publish",
         }
     }
 

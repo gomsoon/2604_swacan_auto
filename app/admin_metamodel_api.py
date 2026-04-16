@@ -6,11 +6,14 @@ from typing import Any
 
 from flask import Blueprint, request
 
-from .auth import admin_required, error_response
+from .auth import error_response, metamodel_permission_required
 from .db import get_db
+from .metamodel_audit import serialize_metamodel_audit_log, write_metamodel_audit_log
 
 bp = Blueprint("admin_metamodel_api", __name__, url_prefix="/api/admin/metamodel")
 
+DEFAULT_LIMIT = 20
+MAX_LIMIT = 100
 ALLOWED_VERSION_STATUSES = {"draft", "published", "deprecated"}
 ALLOWED_SEMANTIC_TYPE_KINDS = {"node", "edge", "container", "runtime-only"}
 ALLOWED_PROPERTY_VALUE_TYPES = {"string", "integer", "number", "boolean", "enum", "json"}
@@ -18,6 +21,10 @@ ALLOWED_CARDINALITY_SCOPES = {"group_total", "per_member"}
 ALLOWED_ASSOCIATION_DIRECTIONS = {"directed", "undirected"}
 ALLOWED_NOTATION_KINDS = {"node", "edge"}
 ALLOWED_RENDER_PRIMITIVES = {"rect", "rounded_rect", "line", "badge", "label"}
+
+metamodel_view_required = metamodel_permission_required("view")
+metamodel_edit_required = metamodel_permission_required("edit")
+metamodel_publish_required = metamodel_permission_required("publish")
 
 
 def now_iso() -> str:
@@ -28,6 +35,19 @@ def parse_json_or_none(raw_value: str | None) -> Any:
     if not raw_value:
         return None
     return json.loads(raw_value)
+
+
+def parse_limit() -> tuple[int | None, Any | None]:
+    raw_value = request.args.get("limit", default=str(DEFAULT_LIMIT))
+    try:
+        limit = int(raw_value)
+    except (TypeError, ValueError):
+        return None, error_response("validation_error", "limit must be an integer", 400)
+
+    if limit <= 0 or limit > MAX_LIMIT:
+        return None, error_response("validation_error", f"limit must be between 1 and {MAX_LIMIT}", 400)
+
+    return limit, None
 
 
 def fetch_version(version_id: int):
@@ -70,6 +90,27 @@ def serialize_version_summary(row) -> dict[str, Any]:
         "notation_count": row["notation_count"],
         "palette_group_count": row["palette_group_count"],
     }
+
+
+def fetch_metamodel_audit_log_rows(*, limit: int, metamodel_version_id: int | None = None):
+    params: list[Any] = []
+    sql = """
+        SELECT logs.id, logs.metamodel_version_id, logs.semantic_type_id, logs.entity_type, logs.entity_id,
+               logs.action_type, logs.actor_user_id, logs.summary, logs.details_json, logs.created_at,
+               mv.version_code AS metamodel_version_code,
+               st.code AS semantic_type_code,
+               users.username AS actor_username
+        FROM metamodel_audit_logs AS logs
+        LEFT JOIN metamodel_versions AS mv ON mv.id = logs.metamodel_version_id
+        LEFT JOIN semantic_types AS st ON st.id = logs.semantic_type_id
+        LEFT JOIN users ON users.id = logs.actor_user_id
+    """
+    if metamodel_version_id is not None:
+        sql += " WHERE logs.metamodel_version_id = ?"
+        params.append(metamodel_version_id)
+    sql += " ORDER BY logs.created_at DESC, logs.id DESC LIMIT ?"
+    params.append(limit)
+    return get_db().execute(sql, tuple(params)).fetchall()
 
 
 def require_namespace_id(namespace_code: str):
@@ -1440,8 +1481,29 @@ def clone_metamodel_version(*, source_version_id: int, namespace_id: int, versio
     return new_version_id
 
 
+@bp.get("/audit-logs")
+@metamodel_view_required
+def list_metamodel_audit_logs():
+    limit, error = parse_limit()
+    if error:
+        return error
+
+    version_id_raw = request.args.get("version_id")
+    version_id: int | None = None
+    if version_id_raw not in (None, ""):
+        try:
+            version_id = int(version_id_raw)
+        except (TypeError, ValueError):
+            return error_response("validation_error", "version_id must be an integer", 400)
+        if version_id <= 0:
+            return error_response("validation_error", "version_id must be a positive integer", 400)
+
+    rows = fetch_metamodel_audit_log_rows(limit=limit, metamodel_version_id=version_id)
+    return {"items": [serialize_metamodel_audit_log(row) for row in rows]}
+
+
 @bp.get("/versions")
-@admin_required
+@metamodel_view_required
 def list_versions():
     rows = get_db().execute(
         """
@@ -1462,7 +1524,7 @@ def list_versions():
 
 
 @bp.post("/versions")
-@admin_required
+@metamodel_edit_required
 def create_version():
     payload = request.get_json(silent=True) or {}
     namespace_code = payload.get("namespace_code")
@@ -1502,11 +1564,27 @@ def create_version():
         version_code=version_code,
         description=description,
     )
-    return {"version": serialize_version(fetch_version(new_version_id))}, 201
+    created_version = fetch_version(new_version_id)
+    db_conn = get_db()
+    write_metamodel_audit_log(
+        db_conn,
+        metamodel_version_id=new_version_id,
+        entity_type="metamodel_version",
+        entity_id=new_version_id,
+        action_type="create",
+        summary=f"Draft metamodel version '{created_version['version_code']}' created",
+        details={
+            "namespace_code": created_version["namespace_code"],
+            "based_on_version_id": based_on_version_id,
+            "based_on_version_code": source_version["version_code"],
+        },
+    )
+    db_conn.commit()
+    return {"version": serialize_version(created_version)}, 201
 
 
 @bp.get("/versions/<int:version_id>/validation")
-@admin_required
+@metamodel_view_required
 def validate_version(version_id: int):
     version = fetch_version(version_id)
     if version is None:
@@ -1519,7 +1597,7 @@ def validate_version(version_id: int):
 
 
 @bp.get("/versions/<int:version_id>/diff")
-@admin_required
+@metamodel_view_required
 def diff_version(version_id: int):
     version = fetch_version(version_id)
     if version is None:
@@ -1532,7 +1610,7 @@ def diff_version(version_id: int):
 
 
 @bp.post("/versions/<int:version_id>/publish")
-@admin_required
+@metamodel_publish_required
 def publish_version(version_id: int):
     version = fetch_version(version_id)
     if version is None:
@@ -1569,13 +1647,22 @@ def publish_version(version_id: int):
         """,
         (timestamp, timestamp, version_id),
     )
+    write_metamodel_audit_log(
+        db_conn,
+        metamodel_version_id=version_id,
+        entity_type="metamodel_version",
+        entity_id=version_id,
+        action_type="publish",
+        summary=f"Metamodel version '{version['version_code']}' published",
+        details={"namespace_code": version["namespace_code"]},
+    )
     db_conn.commit()
 
     return {"version": serialize_version(fetch_version(version_id))}
 
 
 @bp.get("/versions/<int:version_id>/semantic-types")
-@admin_required
+@metamodel_view_required
 def list_semantic_types(version_id: int):
     version = fetch_version(version_id)
     if version is None:
@@ -1607,7 +1694,7 @@ def list_semantic_types(version_id: int):
 
 
 @bp.post("/versions/<int:version_id>/semantic-types")
-@admin_required
+@metamodel_edit_required
 def create_semantic_type(version_id: int):
     version, error = require_draft_version(version_id)
     if error:
@@ -1659,14 +1746,29 @@ def create_semantic_type(version_id: int):
         """,
         (timestamp, version_id),
     )
+    created_type_id = int(cursor.lastrowid)
+    write_metamodel_audit_log(
+        db_conn,
+        metamodel_version_id=version_id,
+        semantic_type_id=created_type_id,
+        entity_type="semantic_type",
+        entity_id=created_type_id,
+        action_type="create",
+        summary=f"Semantic type '{payload['code']}' created",
+        details={
+            "code": payload["code"],
+            "kind": payload["kind"],
+            "runtime_kind": payload.get("runtime_kind"),
+        },
+    )
     db_conn.commit()
 
-    created = fetch_semantic_type_row(int(cursor.lastrowid))
+    created = fetch_semantic_type_row(created_type_id)
     return {"version": serialize_version(version), "semantic_type": serialize_semantic_type(created)}, 201
 
 
 @bp.patch("/semantic-types/<int:type_id>")
-@admin_required
+@metamodel_edit_required
 def update_semantic_type(type_id: int):
     existing = fetch_semantic_type_row(type_id)
     if existing is None:
@@ -1737,6 +1839,22 @@ def update_semantic_type(type_id: int):
         """,
         (timestamp, existing["metamodel_version_id"]),
     )
+    write_metamodel_audit_log(
+        db_conn,
+        metamodel_version_id=existing["metamodel_version_id"],
+        semantic_type_id=type_id,
+        entity_type="semantic_type",
+        entity_id=type_id,
+        action_type="update",
+        summary=f"Semantic type '{existing['code']}' updated",
+        details={
+            "previous_code": existing["code"],
+            "code": payload["code"],
+            "display_name": payload["display_name"],
+            "kind": payload["kind"],
+            "is_active": bool(payload["is_active"]),
+        },
+    )
     db_conn.commit()
 
     updated = fetch_semantic_type_row(type_id)
@@ -1744,7 +1862,7 @@ def update_semantic_type(type_id: int):
 
 
 @bp.post("/semantic-types/<int:type_id>/clone")
-@admin_required
+@metamodel_edit_required
 def clone_semantic_type(type_id: int):
     existing = fetch_semantic_type_row(type_id)
     if existing is None:
@@ -1911,6 +2029,20 @@ def clone_semantic_type(type_id: int):
         """,
         (timestamp, version_id),
     )
+    write_metamodel_audit_log(
+        db_conn,
+        metamodel_version_id=version_id,
+        semantic_type_id=cloned_type_id,
+        entity_type="semantic_type",
+        entity_id=cloned_type_id,
+        action_type="clone",
+        summary=f"Semantic type '{existing['code']}' cloned to '{clone_code}'",
+        details={
+            "source_semantic_type_id": type_id,
+            "source_code": existing["code"],
+            "code": clone_code,
+        },
+    )
     db_conn.commit()
 
     cloned = fetch_semantic_type_row(cloned_type_id)
@@ -1925,7 +2057,7 @@ def clone_semantic_type(type_id: int):
 
 
 @bp.delete("/semantic-types/<int:type_id>")
-@admin_required
+@metamodel_edit_required
 def delete_semantic_type(type_id: int):
     existing = fetch_semantic_type_row(type_id)
     if existing is None:
@@ -1955,6 +2087,16 @@ def delete_semantic_type(type_id: int):
         """,
         (timestamp, existing["metamodel_version_id"]),
     )
+    write_metamodel_audit_log(
+        db_conn,
+        metamodel_version_id=existing["metamodel_version_id"],
+        semantic_type_id=None,
+        entity_type="semantic_type",
+        entity_id=type_id,
+        action_type="delete",
+        summary=f"Semantic type '{existing['code']}' deleted",
+        details={"code": existing["code"]},
+    )
     db_conn.commit()
 
     return {
@@ -1964,7 +2106,7 @@ def delete_semantic_type(type_id: int):
 
 
 @bp.get("/semantic-types/<int:type_id>/properties")
-@admin_required
+@metamodel_view_required
 def list_property_definitions(type_id: int):
     semantic_type = fetch_semantic_type_row(type_id)
     if semantic_type is None:
@@ -1998,7 +2140,7 @@ def list_property_definitions(type_id: int):
 
 
 @bp.post("/semantic-types/<int:type_id>/properties")
-@admin_required
+@metamodel_edit_required
 def create_property_definition(type_id: int):
     semantic_type = fetch_semantic_type_row(type_id)
     if semantic_type is None:
@@ -2054,9 +2196,24 @@ def create_property_definition(type_id: int):
         """,
         (timestamp, semantic_type["metamodel_version_id"]),
     )
+    created_property_id = int(cursor.lastrowid)
+    write_metamodel_audit_log(
+        db_conn,
+        metamodel_version_id=semantic_type["metamodel_version_id"],
+        semantic_type_id=type_id,
+        entity_type="property_definition",
+        entity_id=created_property_id,
+        action_type="create",
+        summary=f"Property '{payload['code']}' created for semantic type '{semantic_type['code']}'",
+        details={
+            "code": payload["code"],
+            "value_type": payload["value_type"],
+            "is_runtime": bool(payload["is_runtime"]),
+        },
+    )
     db_conn.commit()
 
-    created = fetch_property_row(int(cursor.lastrowid))
+    created = fetch_property_row(created_property_id)
     return {
         "semantic_type": serialize_semantic_type(semantic_type),
         "property_definition": serialize_property_definition(created),
@@ -2064,7 +2221,7 @@ def create_property_definition(type_id: int):
 
 
 @bp.patch("/properties/<int:property_id>")
-@admin_required
+@metamodel_edit_required
 def update_property_definition(property_id: int):
     existing = fetch_property_row(property_id)
     if existing is None:
@@ -2141,6 +2298,21 @@ def update_property_definition(property_id: int):
         """,
         (timestamp, existing["metamodel_version_id"]),
     )
+    write_metamodel_audit_log(
+        db_conn,
+        metamodel_version_id=existing["metamodel_version_id"],
+        semantic_type_id=existing["semantic_type_id"],
+        entity_type="property_definition",
+        entity_id=property_id,
+        action_type="update",
+        summary=f"Property '{existing['code']}' updated",
+        details={
+            "previous_code": existing["code"],
+            "code": payload["code"],
+            "value_type": payload["value_type"],
+            "sort_order": payload["sort_order"],
+        },
+    )
     db_conn.commit()
 
     updated = fetch_property_row(property_id)
@@ -2148,7 +2320,7 @@ def update_property_definition(property_id: int):
 
 
 @bp.get("/versions/<int:version_id>/containment-rules")
-@admin_required
+@metamodel_view_required
 def list_containment_rules(version_id: int):
     version = fetch_version(version_id)
     if version is None:
@@ -2183,7 +2355,7 @@ def list_containment_rules(version_id: int):
 
 
 @bp.post("/versions/<int:version_id>/containment-rules")
-@admin_required
+@metamodel_edit_required
 def create_containment_rule(version_id: int):
     version, error = require_draft_version(version_id)
     if error:
@@ -2244,9 +2416,24 @@ def create_containment_rule(version_id: int):
         """,
         (timestamp, version_id),
     )
+    created_rule_id = int(cursor.lastrowid)
+    write_metamodel_audit_log(
+        db_conn,
+        metamodel_version_id=version_id,
+        semantic_type_id=payload["parent_type_id"],
+        entity_type="containment_rule",
+        entity_id=created_rule_id,
+        action_type="create",
+        summary="Containment rule created",
+        details={
+            "parent_type_id": payload["parent_type_id"],
+            "child_type_id": payload["child_type_id"],
+            "cardinality_scope": payload["cardinality_scope"],
+        },
+    )
     db_conn.commit()
 
-    created = fetch_containment_rule_row(int(cursor.lastrowid))
+    created = fetch_containment_rule_row(created_rule_id)
     return {
         "version": serialize_version(version),
         "containment_rule": serialize_containment_rule(created),
@@ -2254,7 +2441,7 @@ def create_containment_rule(version_id: int):
 
 
 @bp.patch("/containment-rules/<int:rule_id>")
-@admin_required
+@metamodel_edit_required
 def update_containment_rule(rule_id: int):
     existing = fetch_containment_rule_row(rule_id)
     if existing is None:
@@ -2335,6 +2522,21 @@ def update_containment_rule(rule_id: int):
         """,
         (timestamp, existing["metamodel_version_id"]),
     )
+    write_metamodel_audit_log(
+        db_conn,
+        metamodel_version_id=existing["metamodel_version_id"],
+        semantic_type_id=payload["parent_type_id"],
+        entity_type="containment_rule",
+        entity_id=rule_id,
+        action_type="update",
+        summary="Containment rule updated",
+        details={
+            "parent_type_id": payload["parent_type_id"],
+            "child_type_id": payload["child_type_id"],
+            "min_count": payload["min_count"],
+            "max_count": payload["max_count"],
+        },
+    )
     db_conn.commit()
 
     updated = fetch_containment_rule_row(rule_id)
@@ -2342,7 +2544,7 @@ def update_containment_rule(rule_id: int):
 
 
 @bp.delete("/containment-rules/<int:rule_id>")
-@admin_required
+@metamodel_edit_required
 def delete_containment_rule(rule_id: int):
     existing = fetch_containment_rule_row(rule_id)
     if existing is None:
@@ -2361,6 +2563,19 @@ def delete_containment_rule(rule_id: int):
         """,
         (timestamp, existing["metamodel_version_id"]),
     )
+    write_metamodel_audit_log(
+        db_conn,
+        metamodel_version_id=existing["metamodel_version_id"],
+        semantic_type_id=existing["parent_type_id"],
+        entity_type="containment_rule",
+        entity_id=rule_id,
+        action_type="delete",
+        summary="Containment rule deleted",
+        details={
+            "parent_type_id": existing["parent_type_id"],
+            "child_type_id": existing["child_type_id"],
+        },
+    )
     db_conn.commit()
 
     return {
@@ -2370,7 +2585,7 @@ def delete_containment_rule(rule_id: int):
 
 
 @bp.get("/versions/<int:version_id>/associations")
-@admin_required
+@metamodel_view_required
 def list_association_definitions(version_id: int):
     version = fetch_version(version_id)
     if version is None:
@@ -2406,7 +2621,7 @@ def list_association_definitions(version_id: int):
 
 
 @bp.post("/versions/<int:version_id>/associations")
-@admin_required
+@metamodel_edit_required
 def create_association_definition(version_id: int):
     version, error = require_draft_version(version_id)
     if error:
@@ -2470,9 +2685,25 @@ def create_association_definition(version_id: int):
         """,
         (timestamp, version_id),
     )
+    created_association_id = int(cursor.lastrowid)
+    write_metamodel_audit_log(
+        db_conn,
+        metamodel_version_id=version_id,
+        semantic_type_id=payload["source_type_id"],
+        entity_type="association_definition",
+        entity_id=created_association_id,
+        action_type="create",
+        summary=f"Association '{payload['code']}' created",
+        details={
+            "code": payload["code"],
+            "source_type_id": payload["source_type_id"],
+            "target_type_id": payload["target_type_id"],
+            "direction": payload["direction"],
+        },
+    )
     db_conn.commit()
 
-    created = fetch_association_definition_row(int(cursor.lastrowid))
+    created = fetch_association_definition_row(created_association_id)
     return {
         "version": serialize_version(version),
         "association_definition": serialize_association_definition(created),
@@ -2480,7 +2711,7 @@ def create_association_definition(version_id: int):
 
 
 @bp.patch("/associations/<int:association_id>")
-@admin_required
+@metamodel_edit_required
 def update_association_definition(association_id: int):
     existing = fetch_association_definition_row(association_id)
     if existing is None:
@@ -2565,6 +2796,21 @@ def update_association_definition(association_id: int):
         """,
         (timestamp, existing["metamodel_version_id"]),
     )
+    write_metamodel_audit_log(
+        db_conn,
+        metamodel_version_id=existing["metamodel_version_id"],
+        semantic_type_id=payload["source_type_id"],
+        entity_type="association_definition",
+        entity_id=association_id,
+        action_type="update",
+        summary=f"Association '{existing['code']}' updated",
+        details={
+            "previous_code": existing["code"],
+            "code": payload["code"],
+            "direction": payload["direction"],
+            "target_type_id": payload["target_type_id"],
+        },
+    )
     db_conn.commit()
 
     updated = fetch_association_definition_row(association_id)
@@ -2572,7 +2818,7 @@ def update_association_definition(association_id: int):
 
 
 @bp.delete("/associations/<int:association_id>")
-@admin_required
+@metamodel_edit_required
 def delete_association_definition(association_id: int):
     existing = fetch_association_definition_row(association_id)
     if existing is None:
@@ -2591,6 +2837,20 @@ def delete_association_definition(association_id: int):
         """,
         (timestamp, existing["metamodel_version_id"]),
     )
+    write_metamodel_audit_log(
+        db_conn,
+        metamodel_version_id=existing["metamodel_version_id"],
+        semantic_type_id=existing["source_type_id"],
+        entity_type="association_definition",
+        entity_id=association_id,
+        action_type="delete",
+        summary=f"Association '{existing['code']}' deleted",
+        details={
+            "code": existing["code"],
+            "source_type_id": existing["source_type_id"],
+            "target_type_id": existing["target_type_id"],
+        },
+    )
     db_conn.commit()
 
     return {
@@ -2600,7 +2860,7 @@ def delete_association_definition(association_id: int):
 
 
 @bp.get("/versions/<int:version_id>/palette-groups")
-@admin_required
+@metamodel_view_required
 def list_palette_groups(version_id: int):
     version = fetch_version(version_id)
     if version is None:
@@ -2633,7 +2893,7 @@ def list_palette_groups(version_id: int):
 
 
 @bp.get("/semantic-types/<int:type_id>/notations")
-@admin_required
+@metamodel_view_required
 def list_notations(type_id: int):
     semantic_type = fetch_semantic_type_row(type_id)
     if semantic_type is None:
@@ -2670,7 +2930,7 @@ def list_notations(type_id: int):
 
 
 @bp.post("/semantic-types/<int:type_id>/notations")
-@admin_required
+@metamodel_edit_required
 def create_notation(type_id: int):
     semantic_type = fetch_semantic_type_row(type_id)
     if semantic_type is None:
@@ -2746,6 +3006,20 @@ def create_notation(type_id: int):
         """,
         (timestamp, semantic_type["metamodel_version_id"]),
     )
+    write_metamodel_audit_log(
+        db_conn,
+        metamodel_version_id=semantic_type["metamodel_version_id"],
+        semantic_type_id=type_id,
+        entity_type="notation_definition",
+        entity_id=notation_id,
+        action_type="create",
+        summary=f"Notation '{payload['code']}' created",
+        details={
+            "code": payload["code"],
+            "render_primitive": payload["render_primitive"],
+            "is_default": bool(payload["is_default"]),
+        },
+    )
     db_conn.commit()
 
     created = fetch_notation_row(notation_id)
@@ -2756,7 +3030,7 @@ def create_notation(type_id: int):
 
 
 @bp.patch("/notations/<int:notation_id>")
-@admin_required
+@metamodel_edit_required
 def update_notation(notation_id: int):
     existing = fetch_notation_row(notation_id)
     if existing is None:
@@ -2858,6 +3132,21 @@ def update_notation(notation_id: int):
         """,
         (timestamp, existing["metamodel_version_id"]),
     )
+    write_metamodel_audit_log(
+        db_conn,
+        metamodel_version_id=existing["metamodel_version_id"],
+        semantic_type_id=payload["semantic_type_id"],
+        entity_type="notation_definition",
+        entity_id=notation_id,
+        action_type="update",
+        summary=f"Notation '{existing['code']}' updated",
+        details={
+            "previous_code": existing["code"],
+            "code": payload["code"],
+            "render_primitive": payload["render_primitive"],
+            "is_visible_in_palette": bool(payload["is_visible_in_palette"]),
+        },
+    )
     db_conn.commit()
 
     updated = fetch_notation_row(notation_id)
@@ -2865,7 +3154,7 @@ def update_notation(notation_id: int):
 
 
 @bp.post("/notations/<int:notation_id>/clone")
-@admin_required
+@metamodel_edit_required
 def clone_notation(notation_id: int):
     existing = fetch_notation_row(notation_id)
     if existing is None:
@@ -2935,9 +3224,24 @@ def clone_notation(notation_id: int):
         """,
         (timestamp, existing["metamodel_version_id"]),
     )
+    cloned_notation_id = int(cursor.lastrowid)
+    write_metamodel_audit_log(
+        db_conn,
+        metamodel_version_id=existing["metamodel_version_id"],
+        semantic_type_id=existing["semantic_type_id"],
+        entity_type="notation_definition",
+        entity_id=cloned_notation_id,
+        action_type="clone",
+        summary=f"Notation '{existing['code']}' cloned to '{clone_code}'",
+        details={
+            "source_notation_id": notation_id,
+            "source_code": existing["code"],
+            "code": clone_code,
+        },
+    )
     db_conn.commit()
 
-    cloned = fetch_notation_row(int(cursor.lastrowid))
+    cloned = fetch_notation_row(cloned_notation_id)
     return {
         "notation_definition": serialize_notation_definition(cloned),
         "clone_summary": {
@@ -2947,7 +3251,7 @@ def clone_notation(notation_id: int):
 
 
 @bp.delete("/notations/<int:notation_id>")
-@admin_required
+@metamodel_edit_required
 def delete_notation(notation_id: int):
     existing = fetch_notation_row(notation_id)
     if existing is None:
@@ -2975,6 +3279,16 @@ def delete_notation(notation_id: int):
         WHERE id = ?
         """,
         (timestamp, existing["metamodel_version_id"]),
+    )
+    write_metamodel_audit_log(
+        db_conn,
+        metamodel_version_id=existing["metamodel_version_id"],
+        semantic_type_id=existing["semantic_type_id"],
+        entity_type="notation_definition",
+        entity_id=notation_id,
+        action_type="delete",
+        summary=f"Notation '{existing['code']}' deleted",
+        details={"code": existing["code"]},
     )
     db_conn.commit()
 

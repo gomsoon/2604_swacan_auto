@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('admin', 'user')),
+    metamodel_permission TEXT NOT NULL DEFAULT 'publish'
+        CHECK (metamodel_permission IN ('view', 'edit', 'publish')),
     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -144,6 +146,31 @@ CREATE TABLE IF NOT EXISTS notation_definitions (
     FOREIGN KEY (semantic_type_id) REFERENCES semantic_types(id) ON DELETE CASCADE,
     FOREIGN KEY (palette_group_id) REFERENCES palette_groups(id),
     UNIQUE (metamodel_version_id, code)
+);
+
+CREATE TABLE IF NOT EXISTS metamodel_audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    metamodel_version_id INTEGER,
+    semantic_type_id INTEGER,
+    entity_type TEXT NOT NULL CHECK (
+        entity_type IN (
+            'metamodel_version',
+            'semantic_type',
+            'property_definition',
+            'notation_definition',
+            'containment_rule',
+            'association_definition'
+        )
+    ),
+    entity_id INTEGER,
+    action_type TEXT NOT NULL CHECK (action_type IN ('create', 'update', 'clone', 'delete', 'publish')),
+    actor_user_id INTEGER,
+    summary TEXT NOT NULL,
+    details_json TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (metamodel_version_id) REFERENCES metamodel_versions(id) ON DELETE SET NULL,
+    FOREIGN KEY (semantic_type_id) REFERENCES semantic_types(id) ON DELETE SET NULL,
+    FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS views (
@@ -528,6 +555,12 @@ CREATE INDEX IF NOT EXISTS idx_palette_groups_version_sort
 
 CREATE INDEX IF NOT EXISTS idx_notation_definitions_version_type_sort
     ON notation_definitions(metamodel_version_id, semantic_type_id, sort_order, id);
+
+CREATE INDEX IF NOT EXISTS idx_metamodel_audit_logs_version_created
+    ON metamodel_audit_logs(metamodel_version_id, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_metamodel_audit_logs_entity_created
+    ON metamodel_audit_logs(entity_type, entity_id, created_at DESC, id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_view_nodes_view_id
     ON view_nodes(view_id);

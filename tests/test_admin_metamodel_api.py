@@ -17,13 +17,33 @@ def seed_regular_user(app) -> None:
         db_conn = get_db()
         db_conn.execute(
             """
-            INSERT INTO users (id, username, password_hash, role, is_active, created_at, updated_at)
-            VALUES (?, ?, ?, 'user', 1, ?, ?)
+            INSERT INTO users (id, username, password_hash, role, metamodel_permission, is_active, created_at, updated_at)
+            VALUES (?, ?, ?, 'user', 'view', 1, ?, ?)
             """,
             (
                 2,
                 "viewer",
                 generate_password_hash("viewer123!"),
+                "2026-04-15T09:00:00.000+09:00",
+                "2026-04-15T09:00:00.000+09:00",
+            ),
+        )
+        db_conn.commit()
+
+
+def seed_admin_user(app, *, user_id: int, username: str, password: str, metamodel_permission: str) -> None:
+    with app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO users (id, username, password_hash, role, metamodel_permission, is_active, created_at, updated_at)
+            VALUES (?, ?, ?, 'admin', ?, 1, ?, ?)
+            """,
+            (
+                user_id,
+                username,
+                generate_password_hash(password),
+                metamodel_permission,
                 "2026-04-15T09:00:00.000+09:00",
                 "2026-04-15T09:00:00.000+09:00",
             ),
@@ -43,6 +63,64 @@ def test_admin_metamodel_versions_require_admin(seeded_app, seeded_client) -> No
     response = seeded_client.get("/api/admin/metamodel/versions")
     assert response.status_code == 403
     assert response.get_json()["error"]["code"] == "forbidden"
+
+
+def test_metamodel_view_permission_allows_read_but_blocks_edit(seeded_app, seeded_client) -> None:
+    seed_admin_user(
+        seeded_app,
+        user_id=3,
+        username="meta_viewer",
+        password="viewer123!",
+        metamodel_permission="view",
+    )
+    login_response = login(seeded_client, username="meta_viewer", password="viewer123!")
+    assert login_response.status_code == 200
+    assert login_response.get_json()["user"]["metamodel_permission"] == "view"
+
+    list_response = seeded_client.get("/api/admin/metamodel/versions")
+    create_response = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v2-view-blocked",
+            "based_on_version_id": 1,
+            "description": "should fail",
+        },
+    )
+
+    assert list_response.status_code == 200
+    assert create_response.status_code == 403
+    assert create_response.get_json()["error"]["code"] == "forbidden"
+
+
+def test_metamodel_edit_permission_allows_edit_but_blocks_publish(seeded_app, seeded_client) -> None:
+    seed_admin_user(
+        seeded_app,
+        user_id=4,
+        username="meta_editor",
+        password="editor123!",
+        metamodel_permission="edit",
+    )
+    login_response = login(seeded_client, username="meta_editor", password="editor123!")
+    assert login_response.status_code == 200
+    assert login_response.get_json()["user"]["metamodel_permission"] == "edit"
+
+    create_response = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v2-edit-allowed",
+            "based_on_version_id": 1,
+            "description": "edit allowed",
+        },
+    )
+    assert create_response.status_code == 201
+    version_id = create_response.get_json()["version"]["id"]
+
+    publish_response = seeded_client.post(f"/api/admin/metamodel/versions/{version_id}/publish")
+
+    assert publish_response.status_code == 403
+    assert publish_response.get_json()["error"]["code"] == "forbidden"
 
 
 def test_admin_can_list_metamodel_versions_with_counts(seeded_client) -> None:
@@ -147,6 +225,62 @@ def test_admin_can_publish_draft_and_deprecate_previous_published(seeded_app, se
     assert published_response.status_code == 200
     published_items = published_response.get_json()["items"]
     assert [item["version_code"] for item in published_items] == ["seed-v2-draft"]
+
+
+def test_admin_can_list_metamodel_audit_logs_for_recent_actions(seeded_client) -> None:
+    login(seeded_client)
+
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v2-audit-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for audit test",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    create_type = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPool",
+            "display_name": "Worker Pool",
+            "kind": "container",
+            "runtime_kind": "process-group",
+            "description": "Audit target",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+    assert create_type.status_code == 201
+
+    response = seeded_client.get(f"/api/admin/metamodel/audit-logs?version_id={version_id}&limit=20")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert len(payload["items"]) >= 2
+    assert payload["items"][0]["actor_username"] == "admin"
+    assert any(item["entity_type"] == "metamodel_version" and item["action_type"] == "create" for item in payload["items"])
+    assert any(item["entity_type"] == "semantic_type" and item["action_type"] == "create" for item in payload["items"])
+
+
+def test_admin_metamodel_audit_logs_limit_uses_boundary_validation(seeded_client) -> None:
+    login(seeded_client)
+
+    ok_min = seeded_client.get("/api/admin/metamodel/audit-logs?limit=1")
+    ok_max = seeded_client.get("/api/admin/metamodel/audit-logs?limit=100")
+    too_low = seeded_client.get("/api/admin/metamodel/audit-logs?limit=0")
+    too_high = seeded_client.get("/api/admin/metamodel/audit-logs?limit=101")
+    not_integer = seeded_client.get("/api/admin/metamodel/audit-logs?limit=abc")
+
+    assert ok_min.status_code == 200
+    assert ok_max.status_code == 200
+    assert too_low.status_code == 400
+    assert too_high.status_code == 400
+    assert not_integer.status_code == 400
 
 
 def test_admin_rejects_publish_for_non_draft_version(seeded_client) -> None:
