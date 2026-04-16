@@ -73,6 +73,8 @@ def test_editor_page_renders_after_login(seeded_client) -> None:
     assert "SVG".encode("utf-8") in response.data
     assert "Palette".encode("utf-8") in response.data
     assert "View Outline".encode("utf-8") in response.data
+    assert "모두 펼치기".encode("utf-8") in response.data
+    assert "모두 접기".encode("utf-8") in response.data
 
 
 def test_monitor_page_renders_after_login(seeded_client) -> None:

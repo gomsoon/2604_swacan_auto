@@ -411,6 +411,19 @@ a {
     gap: 8px;
 }
 
+.outline-toolbar {
+    display: grid;
+    gap: 10px;
+}
+
+.outline-search-field {
+    margin: 0;
+}
+
+.outline-search-field input {
+    min-height: 40px;
+}
+
 .outline-root-card {
     display: grid;
     gap: 4px;
@@ -427,6 +440,15 @@ a {
 .outline-root-meta {
     color: var(--muted);
     font-size: 0.9rem;
+}
+
+.outline-empty-state {
+    padding: 14px;
+    border-radius: 14px;
+    border: 1px dashed var(--line);
+    background: rgba(255, 253, 248, 0.78);
+    color: var(--muted);
+    text-align: center;
 }
 
 .outline-item {
@@ -467,6 +489,10 @@ a {
 
 .outline-item.is-connect-blocked {
     opacity: 0.72;
+}
+
+.outline-item[data-collapsed="true"] {
+    border-style: dashed;
 }
 
 .outline-item-main {

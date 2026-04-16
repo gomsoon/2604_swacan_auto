@@ -95,6 +95,12 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     expect(page.locator('#editor-outline-tree .outline-item-name', has_text="Worker Alpha")).to_be_visible()
     expect(page.locator('g.diagram-node[data-node-type="SoftwareProcess"] text.node-label', has_text="Worker Alpha")).to_be_visible()
     expect(page.locator("#editor-outline-tree")).to_contain_text("Worker Alpha")
+    page.get_by_role("button", name="모두 접기").click()
+    expect(page.locator('#editor-outline-tree .outline-item', has_text="Worker Alpha")).to_have_count(0)
+    page.locator("#outline-search-input").fill("Worker Alpha")
+    expect(page.locator('#editor-outline-tree .outline-item', has_text="Worker Alpha")).to_have_count(1)
+    page.get_by_role("button", name="모두 펼치기").click()
+    page.locator("#outline-search-input").fill("")
 
     page.locator('#editor-outline-tree .outline-item', has_text="Worker Alpha").click()
     expect(page.locator("#selection-kind")).to_contain_text("Software Process")

@@ -12,6 +12,9 @@ const paletteStatusLabel = document.getElementById("palette-status-label");
 const paletteGroupsRoot = document.getElementById("palette-groups");
 const outlineSummary = document.getElementById("outline-summary");
 const outlineTreeRoot = document.getElementById("editor-outline-tree");
+const outlineSearchInput = document.getElementById("outline-search-input");
+const outlineExpandAllButton = document.getElementById("outline-expand-all-button");
+const outlineCollapseAllButton = document.getElementById("outline-collapse-all-button");
 const nodeForm = document.getElementById("node-form");
 const dynamicPropertiesPanel = document.getElementById("node-dynamic-properties");
 const dynamicPropertiesFields = document.getElementById("node-dynamic-properties-fields");
@@ -45,6 +48,9 @@ const state = {
     selectedEdgeId: null,
     connectSourceId: null,
     previewCreateNodeType: null,
+    outlineQuery: "",
+    collapsedOutlineNodeIds: new Set(),
+    outlineSelectionNeedsScroll: false,
     drag: null,
     lastDragAt: 0,
 };
@@ -279,6 +285,18 @@ function getDescendantIds(nodeId) {
         result.push(...getDescendantIds(child.id));
     }
     return result;
+}
+
+function markOutlineSelectionForScroll() {
+    state.outlineSelectionNeedsScroll = true;
+}
+
+function expandOutlineAncestors(nodeId) {
+    let current = getNode(nodeId);
+    while (current?.parent_node_id) {
+        state.collapsedOutlineNodeIds.delete(current.parent_node_id);
+        current = getNode(current.parent_node_id);
+    }
 }
 
 function nextTargetId(prefix, displayName) {
@@ -591,17 +609,73 @@ function sortNodesForOutline(nodes) {
     });
 }
 
+function getOutlineSearchTerm() {
+    return state.outlineQuery.trim().toLowerCase();
+}
+
+function nodeMatchesOutlineSearch(node) {
+    const query = getOutlineSearchTerm();
+    if (!query) {
+        return true;
+    }
+    const semanticType = getSemanticType(node.semantic_type_code || node.node_type);
+    const searchableParts = [
+        node.display_name,
+        node.target_id,
+        node.semantic_type_code,
+        node.node_type,
+        semanticType?.display_name,
+    ];
+    return searchableParts.some((item) => String(item || "").toLowerCase().includes(query));
+}
+
+function branchMatchesOutlineSearch(node) {
+    if (nodeMatchesOutlineSearch(node)) {
+        return true;
+    }
+    return getChildren(node.id).some((child) => branchMatchesOutlineSearch(child));
+}
+
+function getOutlineNodesWithChildren() {
+    return new Set(
+        state.nodes
+            .filter((node) => getChildren(node.id).length > 0)
+            .map((node) => node.id)
+    );
+}
+
+function isOutlineNodeCollapsed(nodeId) {
+    return !getOutlineSearchTerm() && state.collapsedOutlineNodeIds.has(nodeId);
+}
+
+function collapseAllOutlineBranches() {
+    state.collapsedOutlineNodeIds = getOutlineNodesWithChildren();
+    render();
+    setStatus("Outline을 모두 접었습니다.");
+}
+
+function expandAllOutlineBranches() {
+    state.collapsedOutlineNodeIds = new Set();
+    render();
+    setStatus("Outline을 모두 펼쳤습니다.");
+}
+
 function countIncidentEdges(nodeId) {
     return state.edges.filter((edge) => edge.source_node_id === nodeId || edge.target_node_id === nodeId).length;
 }
 
 function renderOutlineNode(node, depth = 0, guides = {}) {
     const semanticType = getSemanticType(node.semantic_type_code || node.node_type);
+    const childCount = getChildren(node.id).length;
+    const isCollapsed = isOutlineNodeCollapsed(node.id);
     const item = document.createElement("button");
     item.type = "button";
     item.className = "outline-item";
     item.dataset.nodeId = String(node.id);
     item.dataset.depth = String(depth);
+    if (childCount > 0) {
+        item.dataset.collapsed = isCollapsed ? "true" : "false";
+    }
     if (node.id === state.selectedNodeId) {
         item.classList.add("is-selected");
     }
@@ -638,11 +712,10 @@ function renderOutlineNode(node, depth = 0, guides = {}) {
     const meta = document.createElement("span");
     meta.className = "outline-item-meta";
 
-    const childCount = getChildren(node.id).length;
     if (childCount > 0) {
         const childBadge = document.createElement("span");
         childBadge.className = "outline-badge";
-        childBadge.textContent = `자식 ${childCount}`;
+        childBadge.textContent = isCollapsed ? `자식 ${childCount} · 접힘` : `자식 ${childCount}`;
         meta.appendChild(childBadge);
     }
 
@@ -691,6 +764,8 @@ function renderOutlineNode(node, depth = 0, guides = {}) {
         state.selectedNodeId = node.id;
         state.selectedEdgeId = null;
         state.connectSourceId = null;
+        expandOutlineAncestors(node.id);
+        markOutlineSelectionForScroll();
         render();
         setStatus(`${node.display_name || node.node_type}을(를) outline에서 선택했습니다.`);
     });
@@ -700,9 +775,12 @@ function renderOutlineNode(node, depth = 0, guides = {}) {
 function renderOutlineBranch(nodes, depth = 0, guides = {}) {
     const fragment = document.createDocumentFragment();
     for (const node of sortNodesForOutline(nodes)) {
+        if (!branchMatchesOutlineSearch(node)) {
+            continue;
+        }
         fragment.appendChild(renderOutlineNode(node, depth, guides));
         const children = getChildren(node.id);
-        if (children.length > 0) {
+        if (children.length > 0 && !isOutlineNodeCollapsed(node.id)) {
             fragment.appendChild(renderOutlineBranch(children, depth + 1, guides));
         }
     }
@@ -716,8 +794,12 @@ function renderOutline(guides = {}) {
 
     outlineTreeRoot.replaceChildren();
 
+    const visibleNodeCount = state.nodes.filter((node) => branchMatchesOutlineSearch(node)).length;
+    const searchTerm = getOutlineSearchTerm();
     if (outlineSummary) {
-        outlineSummary.textContent = `${state.viewVersionCode || "draft"} · 노드 ${state.nodes.length}개 · 관계선 ${state.edges.length}개`;
+        outlineSummary.textContent = searchTerm
+            ? `${state.viewVersionCode || "draft"} · 검색 ${visibleNodeCount}/${state.nodes.length}개 · 관계선 ${state.edges.length}개`
+            : `${state.viewVersionCode || "draft"} · 노드 ${state.nodes.length}개 · 관계선 ${state.edges.length}개`;
     }
 
     const root = document.createElement("div");
@@ -734,7 +816,21 @@ function renderOutline(guides = {}) {
     root.appendChild(rootMeta);
 
     outlineTreeRoot.appendChild(root);
-    outlineTreeRoot.appendChild(renderOutlineBranch(getRootNodes(), 0, guides));
+    const branch = renderOutlineBranch(getRootNodes(), 0, guides);
+    if (!branch.childNodes.length) {
+        const empty = document.createElement("div");
+        empty.className = "outline-empty-state";
+        empty.textContent = "검색 조건에 맞는 객체가 없습니다.";
+        outlineTreeRoot.appendChild(empty);
+    } else {
+        outlineTreeRoot.appendChild(branch);
+    }
+
+    if (state.outlineSelectionNeedsScroll && state.selectedNodeId) {
+        const selectedItem = outlineTreeRoot.querySelector(`.outline-item[data-node-id="${state.selectedNodeId}"]`);
+        selectedItem?.scrollIntoView({ block: "nearest" });
+        state.outlineSelectionNeedsScroll = false;
+    }
 }
 
 async function loadPalette(metamodelVersionCode) {
@@ -985,6 +1081,7 @@ async function loadView() {
         state.selectedEdgeId = null;
         state.connectSourceId = null;
         state.previewCreateNodeType = null;
+        state.collapsedOutlineNodeIds = new Set();
         updateRevision(payload.version.revision);
         updateEditorMode();
         render();
@@ -1018,6 +1115,8 @@ async function addNode(nodeType) {
         state.selectedNodeId = payload.node.id;
         state.selectedEdgeId = null;
         state.previewCreateNodeType = null;
+        expandOutlineAncestors(payload.node.id);
+        markOutlineSelectionForScroll();
         updateRevision(payload.revision);
         render();
         setStatus(`${nodeType}가 추가되었습니다.`);
@@ -1207,6 +1306,8 @@ function handleNodeClick(node, event) {
 
     state.selectedNodeId = node.id;
     state.selectedEdgeId = null;
+    expandOutlineAncestors(node.id);
+    markOutlineSelectionForScroll();
     render();
     setStatus(`노드 ${node.id} 선택됨`);
 }
@@ -1351,5 +1452,11 @@ document.getElementById("reload-view-button")?.addEventListener("click", loadVie
 nodeForm?.addEventListener("submit", saveSelectedNode);
 publishVersionButton?.addEventListener("click", publishCurrentVersion);
 activateVersionButton?.addEventListener("click", activateCurrentVersion);
+outlineSearchInput?.addEventListener("input", (event) => {
+    state.outlineQuery = event.target.value || "";
+    render();
+});
+outlineExpandAllButton?.addEventListener("click", expandAllOutlineBranches);
+outlineCollapseAllButton?.addEventListener("click", collapseAllOutlineBranches);
 
 loadView();

@@ -42,6 +42,16 @@
             <div class="section-header">
                 <h2>View Outline</h2>
             </div>
+            <div class="outline-toolbar">
+                <label class="field outline-search-field">
+                    <span>검색</span>
+                    <input id="outline-search-input" type="search" placeholder="이름, 타입, target id">
+                </label>
+                <div class="toolbar-inline">
+                    <button id="outline-expand-all-button" class="button small ghost" type="button">모두 펼치기</button>
+                    <button id="outline-collapse-all-button" class="button small ghost" type="button">모두 접기</button>
+                </div>
+            </div>
             <p id="outline-summary" class="selection-kind">draft View Version 구조를 불러오는 중입니다.</p>
             <div id="editor-outline-tree" class="outline-tree" aria-label="architecture editor outline"></div>
             <div class="hint-box">
