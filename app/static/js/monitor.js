@@ -25,6 +25,7 @@ const state = {
     selectedEventId: null,
     eventDetails: [],
     selectedGroupedEvent: null,
+    selectedRawEventId: null,
     selectedNodeId: null,
 };
 
@@ -241,21 +242,48 @@ function renderEventDetails() {
         return;
     }
 
+    const selectedRawEvent =
+        rawEventItems.find((event) => event.id === state.selectedRawEventId) || rawEventItems[0];
+    state.selectedRawEventId = selectedRawEvent.id;
+    const payloadJson =
+        selectedRawEvent.event !== undefined
+            ? JSON.stringify(selectedRawEvent.event, null, 2)
+            : null;
+
     eventDetailPanel.innerHTML = `
         ${header}
-        <div class="event-list raw-event-list">
-            ${rawEventItems
-                .map(
-                    (event) => `
-                        <article class="event-item raw-event-item">
-                            <h4>${escapeHtml(event.event_type)}</h4>
-                            <p>${escapeHtml(event.message || "메시지 없음")}</p>
-                            <p>${escapeHtml(event.target_id)} | ${escapeHtml(event.severity)}</p>
-                            <p>${escapeHtml(formatTimestamp(event.occurred_at))}</p>
-                        </article>
-                    `
-                )
-                .join("")}
+        <div class="event-drilldown-layout">
+            <div class="event-list raw-event-list">
+                ${rawEventItems
+                    .map(
+                        (event) => `
+                            <article class="event-item raw-event-item is-interactive${event.id === state.selectedRawEventId ? " is-selected" : ""}" data-raw-event-id="${escapeHtml(event.id)}">
+                                <h4>${escapeHtml(event.event_type)}</h4>
+                                <p>${escapeHtml(event.message || "메시지 없음")}</p>
+                                <p>${escapeHtml(event.target_id)} | ${escapeHtml(event.severity)} | agent ${escapeHtml(event.agent_id || "-")}</p>
+                                <p>${escapeHtml(formatTimestamp(event.occurred_at))}</p>
+                            </article>
+                        `
+                    )
+                    .join("")}
+            </div>
+            <section class="raw-event-detail-panel">
+                <div class="section-header">
+                    <h4>Raw Event #${escapeHtml(selectedRawEvent.id)}</h4>
+                    <div class="toolbar-inline">
+                        <span class="meta-pill">${escapeHtml(selectedRawEvent.severity)}</span>
+                        <span class="meta-pill">agent ${escapeHtml(selectedRawEvent.agent_id || "-")}</span>
+                    </div>
+                </div>
+                <p class="admin-meta">target=${escapeHtml(selectedRawEvent.target_id || "-")} | object=${escapeHtml(selectedRawEvent.monitored_object_id ?? "-")}</p>
+                <p class="admin-meta">occurred=${escapeHtml(formatTimestamp(selectedRawEvent.occurred_at))} | received=${escapeHtml(formatTimestamp(selectedRawEvent.received_at))}</p>
+                <p>${escapeHtml(selectedRawEvent.message || "메시지 없음")}</p>
+                ${
+                    payloadJson
+                        ? `<details class="state-payload-block" open><summary>Payload JSON</summary><pre>${escapeHtml(payloadJson)}</pre></details>`
+                        : '<p class="section-copy">payload JSON이 없습니다.</p>'
+                }
+            </section>
         </div>
     `;
 }
@@ -387,6 +415,7 @@ async function loadEventDetails(groupedEventId) {
     state.selectedEventId = groupedEventId;
     state.selectedGroupedEvent = payload.grouped_event;
     state.eventDetails = payload.items;
+    state.selectedRawEventId = payload.items[0]?.id ?? null;
     render();
 }
 
@@ -439,6 +468,7 @@ async function loadRuntimeData() {
     state.selectedEventId = null;
     state.selectedGroupedEvent = null;
     state.eventDetails = [];
+    state.selectedRawEventId = null;
 }
 
 async function refreshAll() {
@@ -466,6 +496,14 @@ eventsList?.addEventListener("click", async (event) => {
     } catch (error) {
         showBanner(error.message, "error");
     }
+});
+eventDetailPanel?.addEventListener("click", (event) => {
+    const card = event.target instanceof Element ? event.target.closest("[data-raw-event-id]") : null;
+    if (!card) {
+        return;
+    }
+    state.selectedRawEventId = Number(card.dataset.rawEventId);
+    renderEventDetails();
 });
 agentSummary?.addEventListener("click", (event) => {
     const card = event.target.closest("[data-node-id]");

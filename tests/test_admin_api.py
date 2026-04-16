@@ -476,6 +476,8 @@ def test_admin_grouped_event_drill_down_returns_matching_raw_events(seeded_app, 
     assert payload["grouped_event"]["id"] == grouped_event_id
     assert payload["grouped_event"]["repeat_count"] == 2
     assert len(payload["items"]) == 2
+    assert payload["items"][0]["agent_id"] == "agent_local"
+    assert payload["items"][0]["event"]["retry"] == 2
     assert payload["items"][0]["message"] == "process still missing"
 
 

@@ -67,6 +67,7 @@ let groupedEvents = [];
 let selectedGroupedEventId = null;
 let selectedGroupedEvent = null;
 let selectedGroupedEventRawItems = [];
+let selectedRawEventId = null;
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -332,21 +333,49 @@ function renderEventDetailPanel() {
         return;
     }
 
+    const selectedRawEvent =
+        selectedGroupedEventRawItems.find((event) => event.id === selectedRawEventId) ||
+        selectedGroupedEventRawItems[0];
+    selectedRawEventId = selectedRawEvent.id;
+    const payloadJson =
+        selectedRawEvent.event !== undefined
+            ? JSON.stringify(selectedRawEvent.event, null, 2)
+            : null;
+
     eventDetailPanel.innerHTML = `
         ${header}
-        <div class="event-list raw-event-list">
-            ${selectedGroupedEventRawItems
-                .map(
-                    (event) => `
-                        <article class="event-item raw-event-item">
-                            <h4>${escapeHtml(event.event_type)}</h4>
-                            <p>${escapeHtml(event.message || "메시지 없음")}</p>
-                            <p>${escapeHtml(event.target_id)} | ${escapeHtml(event.severity)}</p>
-                            <p>${escapeHtml(formatTimestamp(event.occurred_at))}</p>
-                        </article>
-                    `
-                )
-                .join("")}
+        <div class="event-drilldown-layout">
+            <div class="event-list raw-event-list">
+                ${selectedGroupedEventRawItems
+                    .map(
+                        (event) => `
+                            <article class="event-item raw-event-item is-interactive${event.id === selectedRawEventId ? " is-selected" : ""}" data-raw-event-id="${escapeHtml(event.id)}">
+                                <h4>${escapeHtml(event.event_type)}</h4>
+                                <p>${escapeHtml(event.message || "메시지 없음")}</p>
+                                <p>${escapeHtml(event.target_id)} | ${escapeHtml(event.severity)} | agent ${escapeHtml(event.agent_id || "-")}</p>
+                                <p>${escapeHtml(formatTimestamp(event.occurred_at))}</p>
+                            </article>
+                        `
+                    )
+                    .join("")}
+            </div>
+            <section class="raw-event-detail-panel">
+                <div class="section-header">
+                    <h4>Raw Event #${escapeHtml(selectedRawEvent.id)}</h4>
+                    <div class="toolbar-inline">
+                        <span class="meta-pill">${escapeHtml(selectedRawEvent.severity)}</span>
+                        <span class="meta-pill">agent ${escapeHtml(selectedRawEvent.agent_id || "-")}</span>
+                    </div>
+                </div>
+                <p class="admin-meta">target=${escapeHtml(selectedRawEvent.target_id || "-")} | object=${escapeHtml(selectedRawEvent.monitored_object_id ?? "-")}</p>
+                <p class="admin-meta">occurred=${escapeHtml(formatTimestamp(selectedRawEvent.occurred_at))} | received=${escapeHtml(formatTimestamp(selectedRawEvent.received_at))}</p>
+                <p>${escapeHtml(selectedRawEvent.message || "메시지 없음")}</p>
+                ${
+                    payloadJson
+                        ? `<details class="state-payload-block" open><summary>Payload JSON</summary><pre>${escapeHtml(payloadJson)}</pre></details>`
+                        : '<p class="section-copy">payload JSON이 없습니다.</p>'
+                }
+            </section>
         </div>
     `;
 }
@@ -638,6 +667,7 @@ async function loadEvents() {
     selectedGroupedEventId = null;
     selectedGroupedEvent = null;
     selectedGroupedEventRawItems = [];
+    selectedRawEventId = null;
     renderEventDetailPanel();
 }
 
@@ -707,6 +737,7 @@ async function loadGroupedEventDetails(groupedEventId) {
     selectedGroupedEventId = groupedEventId;
     selectedGroupedEvent = payload.grouped_event;
     selectedGroupedEventRawItems = payload.items;
+    selectedRawEventId = payload.items[0]?.id ?? null;
     renderEvents(groupedEvents);
     renderEventDetailPanel();
 }
@@ -833,6 +864,14 @@ eventsList?.addEventListener("click", async (event) => {
     } catch (error) {
         showBanner(error.message, "error");
     }
+});
+eventDetailPanel?.addEventListener("click", (event) => {
+    const card = event.target instanceof Element ? event.target.closest("[data-raw-event-id]") : null;
+    if (!card) {
+        return;
+    }
+    selectedRawEventId = Number(card.dataset.rawEventId);
+    renderEventDetailPanel();
 });
 metamodelVersionForm?.addEventListener("submit", createMetamodelVersion);
 metamodelNamespaceSelect?.addEventListener("change", renderMetamodelSelectOptions);

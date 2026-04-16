@@ -575,6 +575,27 @@ a {
     margin: 0;
 }
 
+.event-drilldown-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+    gap: 12px;
+    align-items: start;
+}
+
+.raw-event-detail-panel {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    background: var(--panel-strong);
+}
+
+.raw-event-detail-panel h4,
+.raw-event-detail-panel p {
+    margin: 0;
+}
+
 .diagram-edge {
     stroke: #50606d;
     stroke-width: 2.5;
@@ -703,6 +724,10 @@ a {
     .two-column,
     .workspace-grid,
     .monitor-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .event-drilldown-layout {
         grid-template-columns: 1fr;
     }
 

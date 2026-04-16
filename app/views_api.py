@@ -96,6 +96,7 @@ def serialize_edge(edge_row) -> dict[str, Any]:
 def serialize_raw_event(event_row) -> dict[str, Any]:
     payload = {
         "id": event_row["id"],
+        "agent_id": event_row["agent_id"],
         "monitored_object_id": event_row["monitored_object_id"],
         "target_id": event_row["target_id"],
         "event_type": event_row["event_type"],

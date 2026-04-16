@@ -653,6 +653,8 @@ def test_event_drill_down_returns_group_raw_events_for_active_view(seeded_app, s
     assert payload["grouped_event"]["id"] == 1
     assert payload["grouped_event"]["repeat_count"] == 2
     assert [item["id"] for item in payload["items"]] == [104, 101]
+    assert payload["items"][0]["agent_id"] == "agent_local"
+    assert payload["items"][0]["event"]["retry"] == 2
     assert all(item["event_type"] == "process_stopped" for item in payload["items"])
 
 
