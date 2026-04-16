@@ -759,6 +759,117 @@ a {
     align-items: start;
 }
 
+.metamodel-workspace-grid {
+    display: grid;
+    grid-template-columns: minmax(240px, 320px) minmax(0, 1fr) minmax(280px, 340px);
+    gap: 20px;
+    margin-top: 18px;
+    align-items: start;
+}
+
+.metamodel-workspace-canvas {
+    min-height: 560px;
+}
+
+.metamodel-workspace-outline,
+.metamodel-workspace-inspector {
+    display: grid;
+    gap: 14px;
+}
+
+.workspace-outline-section {
+    display: grid;
+    gap: 10px;
+}
+
+.workspace-outline-section h4 {
+    margin: 0;
+}
+
+.workspace-outline-item {
+    display: grid;
+    gap: 6px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: rgba(255, 253, 248, 0.78);
+    cursor: pointer;
+}
+
+.workspace-outline-item.is-selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(10, 91, 145, 0.12);
+}
+
+.workspace-outline-item p,
+.workspace-outline-item h4 {
+    margin: 0;
+}
+
+.metamodel-link {
+    fill: none;
+    stroke-width: 2.5;
+    cursor: pointer;
+}
+
+.metamodel-link.containment {
+    stroke: #8d6400;
+    stroke-dasharray: 8 4;
+}
+
+.metamodel-link.association {
+    stroke: #0b7a75;
+}
+
+.metamodel-link.is-selected {
+    stroke-width: 4;
+}
+
+.metamodel-link-label {
+    font-size: 11px;
+    fill: var(--muted);
+}
+
+.metamodel-node .node-shape {
+    fill: #fff;
+    stroke: #405162;
+    stroke-width: 2;
+}
+
+.metamodel-node.kind-container .node-shape {
+    fill: #fbf4ea;
+}
+
+.metamodel-node.kind-node .node-shape {
+    fill: #eef4f6;
+}
+
+.metamodel-node.kind-edge .node-shape {
+    fill: #f5eef8;
+}
+
+.metamodel-node.kind-runtime-only .node-shape {
+    fill: #f1f5ea;
+}
+
+.metamodel-node.is-selected .node-shape {
+    stroke: var(--accent);
+    stroke-width: 3;
+}
+
+.metamodel-notation-preview {
+    display: grid;
+    gap: 10px;
+}
+
+.metamodel-notation-preview svg {
+    width: 100%;
+    height: auto;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: rgba(255, 253, 248, 0.9);
+}
+
 .admin-subcard {
     background: var(--panel-strong);
     border: 1px solid var(--line);
@@ -885,6 +996,7 @@ a {
 }
 
 @media (max-width: 960px) {
+    .metamodel-workspace-grid,
     .admin-metamodel-layout,
     .admin-grid {
         grid-template-columns: 1fr;

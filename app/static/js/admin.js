@@ -21,6 +21,10 @@ const metamodelNotationsList = document.getElementById("admin-metamodel-notation
 const metamodelNotationCount = document.getElementById("metamodel-notation-count");
 const metamodelAssociationsList = document.getElementById("admin-metamodel-associations-list");
 const metamodelAssociationCount = document.getElementById("metamodel-association-count");
+const metamodelWorkspaceSummary = document.getElementById("metamodel-workspace-summary");
+const metamodelWorkspaceOutline = document.getElementById("metamodel-workspace-outline");
+const metamodelWorkspaceCanvas = document.getElementById("metamodel-workspace-canvas");
+const metamodelWorkspaceInspector = document.getElementById("metamodel-workspace-inspector");
 const alertRulesList = document.getElementById("admin-alert-rules-list");
 const alertRuleCount = document.getElementById("alert-rule-count");
 const alertRulePreviewPanel = document.getElementById("alert-rule-preview-panel");
@@ -174,6 +178,7 @@ let selectedMetamodelContainmentRuleId = null;
 let selectedMetamodelNotationId = null;
 let selectedMetamodelAssociationId = null;
 let selectedMetamodelValidation = null;
+let selectedMetamodelWorkspace = null;
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -753,6 +758,384 @@ function renderMetamodelValidationPanel() {
     `;
 }
 
+function isSelectedMetamodelWorkspace(kind, id) {
+    return (
+        selectedMetamodelWorkspace &&
+        selectedMetamodelWorkspace.kind === kind &&
+        Number(selectedMetamodelWorkspace.id) === Number(id)
+    );
+}
+
+function ensureMetamodelWorkspaceSelection() {
+    if (
+        selectedMetamodelWorkspace &&
+        (
+            (selectedMetamodelWorkspace.kind === "semantic_type" &&
+                metamodelSemanticTypes.some((item) => item.id === selectedMetamodelWorkspace.id)) ||
+            (selectedMetamodelWorkspace.kind === "containment_rule" &&
+                metamodelContainmentRules.some((item) => item.id === selectedMetamodelWorkspace.id)) ||
+            (selectedMetamodelWorkspace.kind === "association_definition" &&
+                metamodelAssociations.some((item) => item.id === selectedMetamodelWorkspace.id)) ||
+            (selectedMetamodelWorkspace.kind === "notation_definition" &&
+                metamodelNotations.some((item) => item.id === selectedMetamodelWorkspace.id))
+        )
+    ) {
+        return;
+    }
+
+    selectedMetamodelWorkspace = metamodelSemanticTypes[0]
+        ? { kind: "semantic_type", id: metamodelSemanticTypes[0].id }
+        : null;
+}
+
+function renderMetamodelWorkspaceOutline() {
+    ensureMetamodelWorkspaceSelection();
+    metamodelWorkspaceSummary.textContent = `${metamodelSemanticTypes.length} type`;
+
+    const sections = [
+        {
+            title: "Semantic Types",
+            items: metamodelSemanticTypes.map((item) => ({
+                kind: "semantic_type",
+                id: item.id,
+                title: item.display_name,
+                meta: `${item.code} | ${item.kind}`,
+            })),
+        },
+        {
+            title: "Containment",
+            items: metamodelContainmentRules.map((item) => ({
+                kind: "containment_rule",
+                id: item.id,
+                title: `${item.parent_type_display_name} -> ${item.child_type_display_name}`,
+                meta: `${item.cardinality_scope} | min ${item.min_count ?? "-"} / max ${item.max_count ?? "-"}`,
+            })),
+        },
+        {
+            title: "Associations",
+            items: metamodelAssociations.map((item) => ({
+                kind: "association_definition",
+                id: item.id,
+                title: item.display_name,
+                meta: `${item.source_type_code} -> ${item.target_type_code} | ${item.direction}`,
+            })),
+        },
+        {
+            title: "Notations",
+            items: metamodelNotations.map((item) => ({
+                kind: "notation_definition",
+                id: item.id,
+                title: item.display_name,
+                meta: `${item.code} | ${item.render_primitive}`,
+            })),
+        },
+    ].filter((section) => section.items.length > 0);
+
+    if (sections.length === 0) {
+        metamodelWorkspaceOutline.innerHTML =
+            '<p class="section-copy">draft version을 선택하면 메타모델 구조를 여기에서 확인할 수 있습니다.</p>';
+        return;
+    }
+
+    metamodelWorkspaceOutline.innerHTML = sections
+        .map(
+            (section) => `
+                <section class="workspace-outline-section">
+                    <div class="section-header">
+                        <h4>${escapeHtml(section.title)}</h4>
+                        <span class="meta-pill">${escapeHtml(section.items.length)}</span>
+                    </div>
+                    ${section.items
+                        .map(
+                            (item) => `
+                                <article
+                                    class="workspace-outline-item ${isSelectedMetamodelWorkspace(item.kind, item.id) ? "is-selected" : ""}"
+                                    data-workspace-kind="${escapeHtml(item.kind)}"
+                                    data-workspace-id="${escapeHtml(item.id)}"
+                                >
+                                    <h4>${escapeHtml(item.title)}</h4>
+                                    <p class="admin-meta">${escapeHtml(item.meta)}</p>
+                                </article>
+                            `
+                        )
+                        .join("")}
+                </section>
+            `
+        )
+        .join("");
+}
+
+function buildNotationPreviewSvg(notation, semanticType) {
+    const title = notation?.display_name || semanticType?.display_name || "Preview";
+    const primitive = notation?.render_primitive || "rounded_rect";
+    const doubleBorder =
+        notation?.code?.includes("double_border") ||
+        Boolean(notation?.render_schema?.double_border);
+    const dashedBorder =
+        notation?.code?.includes("dashed") ||
+        notation?.render_schema?.border_style === "dashed" ||
+        notation?.render_schema?.stroke_style === "dashed";
+
+    if (primitive === "line") {
+        return `
+            <svg viewBox="0 0 240 140" role="img" aria-label="Notation preview">
+                <line x1="40" y1="70" x2="200" y2="70" stroke="#50606d" stroke-width="4" ${dashedBorder ? 'stroke-dasharray="8 4"' : ""}></line>
+                <text x="120" y="48" text-anchor="middle" font-size="14" font-weight="700" fill="#1f2a33">${escapeHtml(title)}</text>
+            </svg>
+        `;
+    }
+
+    const rx = primitive === "rounded_rect" ? 24 : 10;
+    return `
+        <svg viewBox="0 0 240 140" role="img" aria-label="Notation preview">
+            <rect x="34" y="32" width="172" height="76" rx="${rx}" ry="${rx}" fill="#fffdfa" stroke="#405162" stroke-width="3" ${dashedBorder ? 'stroke-dasharray="8 4"' : ""}></rect>
+            ${doubleBorder ? `<rect x="44" y="42" width="152" height="56" rx="${Math.max(rx - 8, 8)}" ry="${Math.max(rx - 8, 8)}" fill="none" stroke="#405162" stroke-width="1.4" ${dashedBorder ? 'stroke-dasharray="8 4"' : ""}></rect>` : ""}
+            <text x="120" y="64" text-anchor="middle" font-size="16" font-weight="700" fill="#1f2a33">${escapeHtml(title)}</text>
+            <text x="120" y="86" text-anchor="middle" font-size="11" fill="#58636b">${escapeHtml(semanticType?.code || notation?.code || "-")}</text>
+        </svg>
+    `;
+}
+
+function renderMetamodelWorkspaceInspector() {
+    ensureMetamodelWorkspaceSelection();
+    if (!selectedMetamodelWorkspace) {
+        metamodelWorkspaceInspector.innerHTML =
+            '<p class="section-copy">semantic type, containment, association, notation을 선택하면 우측 inspector에서 상세를 확인할 수 있습니다.</p>';
+        return;
+    }
+
+    if (selectedMetamodelWorkspace.kind === "semantic_type") {
+        const item = metamodelSemanticTypes.find((entry) => entry.id === selectedMetamodelWorkspace.id);
+        if (!item) {
+            metamodelWorkspaceInspector.innerHTML = '<p class="section-copy">선택한 semantic type을 찾을 수 없습니다.</p>';
+            return;
+        }
+        const propertyCount =
+            String(metamodelPropertySemanticTypeIdInput.value) === String(item.id) ? metamodelProperties.length : "-";
+        const notationCount = metamodelNotations.filter((entry) => entry.semantic_type_id === item.id).length;
+        const childCount = metamodelContainmentRules.filter((entry) => entry.parent_type_id === item.id).length;
+        const parentCount = metamodelContainmentRules.filter((entry) => entry.child_type_id === item.id).length;
+        const sourceAssocCount = metamodelAssociations.filter((entry) => entry.source_type_id === item.id).length;
+        const targetAssocCount = metamodelAssociations.filter((entry) => entry.target_type_id === item.id).length;
+        const defaultNotation = metamodelNotations.find((entry) => entry.semantic_type_id === item.id && entry.is_default);
+
+        metamodelWorkspaceInspector.innerHTML = `
+            <div class="section-header">
+                <h3>${escapeHtml(item.display_name)}</h3>
+                <span class="meta-pill">${escapeHtml(item.kind)}</span>
+            </div>
+            <p class="admin-meta">${escapeHtml(item.code)} | runtime ${escapeHtml(item.runtime_kind || "-")}</p>
+            <div class="summary-metrics">
+                ${renderMetaPills([
+                    ["property", propertyCount],
+                    ["notation", notationCount],
+                    ["contains", childCount],
+                    ["parent", parentCount],
+                    ["assoc out", sourceAssocCount],
+                    ["assoc in", targetAssocCount],
+                ])}
+            </div>
+            <p class="admin-meta">${escapeHtml(item.description || "설명 없음")}</p>
+            ${
+                defaultNotation
+                    ? `<div class="metamodel-notation-preview">
+                        <h4>Default Notation Preview</h4>
+                        ${buildNotationPreviewSvg(defaultNotation, item)}
+                        <p class="admin-meta">${escapeHtml(defaultNotation.code)} | ${escapeHtml(defaultNotation.render_primitive)}</p>
+                    </div>`
+                    : '<p class="section-copy">default notation이 아직 지정되지 않았습니다.</p>'
+            }
+        `;
+        return;
+    }
+
+    if (selectedMetamodelWorkspace.kind === "containment_rule") {
+        const item = metamodelContainmentRules.find((entry) => entry.id === selectedMetamodelWorkspace.id);
+        if (!item) {
+            metamodelWorkspaceInspector.innerHTML = '<p class="section-copy">선택한 containment rule을 찾을 수 없습니다.</p>';
+            return;
+        }
+        metamodelWorkspaceInspector.innerHTML = `
+            <div class="section-header">
+                <h3>${escapeHtml(item.parent_type_display_name)} -> ${escapeHtml(item.child_type_display_name)}</h3>
+                <span class="meta-pill">${escapeHtml(item.cardinality_scope)}</span>
+            </div>
+            <p class="admin-meta">${escapeHtml(item.parent_type_code)} -> ${escapeHtml(item.child_type_code)}</p>
+            <div class="summary-metrics">
+                ${renderMetaPills([
+                    ["min", item.min_count ?? "-"],
+                    ["max", item.max_count ?? "-"],
+                    ["required", item.is_required ? "yes" : "no"],
+                ])}
+            </div>
+        `;
+        return;
+    }
+
+    if (selectedMetamodelWorkspace.kind === "association_definition") {
+        const item = metamodelAssociations.find((entry) => entry.id === selectedMetamodelWorkspace.id);
+        if (!item) {
+            metamodelWorkspaceInspector.innerHTML = '<p class="section-copy">선택한 association definition을 찾을 수 없습니다.</p>';
+            return;
+        }
+        metamodelWorkspaceInspector.innerHTML = `
+            <div class="section-header">
+                <h3>${escapeHtml(item.display_name)}</h3>
+                <span class="meta-pill">${escapeHtml(item.direction)}</span>
+            </div>
+            <p class="admin-meta">${escapeHtml(item.code)} | ${escapeHtml(item.source_type_code)} -> ${escapeHtml(item.target_type_code)}</p>
+            <div class="summary-metrics">
+                ${renderMetaPills([
+                    ["source", item.multiplicity_source || "-"],
+                    ["target", item.multiplicity_target || "-"],
+                ])}
+            </div>
+            <p class="admin-meta">${escapeHtml(item.description || "설명 없음")}</p>
+            ${
+                item.semantics_json
+                    ? `<details class="state-payload-block" open><summary>Semantics JSON</summary><pre>${escapeHtml(JSON.stringify(item.semantics || {}, null, 2))}</pre></details>`
+                    : '<p class="section-copy">semantics JSON이 없습니다.</p>'
+            }
+        `;
+        return;
+    }
+
+    if (selectedMetamodelWorkspace.kind === "notation_definition") {
+        const item = metamodelNotations.find((entry) => entry.id === selectedMetamodelWorkspace.id);
+        if (!item) {
+            metamodelWorkspaceInspector.innerHTML = '<p class="section-copy">선택한 notation definition을 찾을 수 없습니다.</p>';
+            return;
+        }
+        const semanticType = metamodelSemanticTypes.find((entry) => entry.id === item.semantic_type_id);
+        metamodelWorkspaceInspector.innerHTML = `
+            <div class="section-header">
+                <h3>${escapeHtml(item.display_name)}</h3>
+                <span class="meta-pill">${escapeHtml(item.render_primitive)}</span>
+            </div>
+            <p class="admin-meta">${escapeHtml(item.code)} | ${escapeHtml(item.kind)} | ${escapeHtml(item.semantic_type_code)}</p>
+            <div class="summary-metrics">
+                ${renderMetaPills([
+                    ["default", item.is_default ? "yes" : "no"],
+                    ["palette", item.is_visible_in_palette ? "visible" : "hidden"],
+                    ["sort", item.sort_order ?? 0],
+                ])}
+            </div>
+            <div class="metamodel-notation-preview">
+                <h4>Notation Preview</h4>
+                ${buildNotationPreviewSvg(item, semanticType)}
+            </div>
+        `;
+    }
+}
+
+function renderMetamodelWorkspaceCanvas() {
+    ensureMetamodelWorkspaceSelection();
+    if (metamodelSemanticTypes.length === 0) {
+        metamodelWorkspaceCanvas.setAttribute("viewBox", "0 0 1200 560");
+        metamodelWorkspaceCanvas.innerHTML =
+            '<text x="40" y="60" font-size="18" fill="#58636b">draft version을 선택하면 semantic type graph를 확인할 수 있습니다.</text>';
+        return;
+    }
+
+    const layoutTypes = [...metamodelSemanticTypes];
+    const columns = Math.min(3, Math.max(layoutTypes.length, 1));
+    const startX = 80;
+    const startY = 80;
+    const colGap = 340;
+    const rowGap = 180;
+    const width = 240;
+    const height = 92;
+    const positions = new Map();
+
+    layoutTypes.forEach((item, index) => {
+        const col = index % columns;
+        const row = Math.floor(index / columns);
+        positions.set(item.id, {
+            x: startX + col * colGap,
+            y: startY + row * rowGap,
+            width,
+            height,
+        });
+    });
+
+    const rows = Math.max(1, Math.ceil(layoutTypes.length / columns));
+    const viewWidth = Math.max(1200, startX + (columns - 1) * colGap + width + 120);
+    const viewHeight = Math.max(560, startY + (rows - 1) * rowGap + height + 140);
+
+    const containmentSvg = metamodelContainmentRules
+        .map((item) => {
+            const source = positions.get(item.parent_type_id);
+            const target = positions.get(item.child_type_id);
+            if (!source || !target) {
+                return "";
+            }
+            const x1 = source.x + source.width / 2;
+            const y1 = source.y + source.height;
+            const x2 = target.x + target.width / 2;
+            const y2 = target.y;
+            const labelX = (x1 + x2) / 2;
+            const labelY = (y1 + y2) / 2 - 8;
+            return `
+                <g data-workspace-kind="containment_rule" data-workspace-id="${escapeHtml(item.id)}">
+                    <path class="metamodel-link containment ${isSelectedMetamodelWorkspace("containment_rule", item.id) ? "is-selected" : ""}" d="M ${x1} ${y1} C ${x1} ${y1 + 50}, ${x2} ${y2 - 50}, ${x2} ${y2}"></path>
+                    <text class="metamodel-link-label" x="${labelX}" y="${labelY}" text-anchor="middle">${escapeHtml(item.cardinality_scope)}</text>
+                </g>
+            `;
+        })
+        .join("");
+
+    const associationSvg = metamodelAssociations
+        .map((item) => {
+            const source = positions.get(item.source_type_id);
+            const target = positions.get(item.target_type_id);
+            if (!source || !target) {
+                return "";
+            }
+            const x1 = source.x + source.width;
+            const y1 = source.y + source.height / 2;
+            const x2 = target.x;
+            const y2 = target.y + target.height / 2;
+            const labelX = (x1 + x2) / 2;
+            const labelY = (y1 + y2) / 2 - 8;
+            return `
+                <g data-workspace-kind="association_definition" data-workspace-id="${escapeHtml(item.id)}">
+                    <path class="metamodel-link association ${isSelectedMetamodelWorkspace("association_definition", item.id) ? "is-selected" : ""}" d="M ${x1} ${y1} C ${x1 + 40} ${y1}, ${x2 - 40} ${y2}, ${x2} ${y2}"></path>
+                    <text class="metamodel-link-label" x="${labelX}" y="${labelY}" text-anchor="middle">${escapeHtml(item.code)}</text>
+                </g>
+            `;
+        })
+        .join("");
+
+    const nodeSvg = layoutTypes
+        .map((item) => {
+            const pos = positions.get(item.id);
+            const nodeClass = item.kind === "runtime-only" ? "runtime-only" : item.kind;
+            return `
+                <g class="diagram-node metamodel-node kind-${escapeHtml(nodeClass)} ${isSelectedMetamodelWorkspace("semantic_type", item.id) ? "is-selected" : ""}" data-workspace-kind="semantic_type" data-workspace-id="${escapeHtml(item.id)}">
+                    <rect class="node-shape" x="${pos.x}" y="${pos.y}" width="${pos.width}" height="${pos.height}" rx="${item.kind === "container" ? 22 : 14}" ry="${item.kind === "container" ? 22 : 14}"></rect>
+                    <text class="node-label" x="${pos.x + 20}" y="${pos.y + 36}">${escapeHtml(item.display_name)}</text>
+                    <text class="node-meta" x="${pos.x + 20}" y="${pos.y + 58}">${escapeHtml(item.code)} | ${escapeHtml(item.kind)}</text>
+                    <text class="node-meta" x="${pos.x + 20}" y="${pos.y + 76}">default notation ${escapeHtml(item.default_notation_code || "-")}</text>
+                </g>
+            `;
+        })
+        .join("");
+
+    metamodelWorkspaceCanvas.setAttribute("viewBox", `0 0 ${viewWidth} ${viewHeight}`);
+    metamodelWorkspaceCanvas.innerHTML = `
+        ${containmentSvg}
+        ${associationSvg}
+        ${nodeSvg}
+    `;
+}
+
+function refreshMetamodelWorkspace() {
+    ensureMetamodelWorkspaceSelection();
+    renderMetamodelWorkspaceOutline();
+    renderMetamodelWorkspaceCanvas();
+    renderMetamodelWorkspaceInspector();
+}
+
 function resetMetamodelSemanticTypeForm() {
     metamodelSemanticTypeForm.reset();
     metamodelSemanticTypeIdInput.value = "";
@@ -1031,6 +1414,7 @@ function renderMetamodelSemanticTypes(items) {
 
     if (items.length === 0) {
         metamodelSemanticTypesList.innerHTML = '<p class="section-copy">선택한 draft version에 semantic type이 없습니다.</p>';
+        refreshMetamodelWorkspace();
         return;
     }
 
@@ -1055,6 +1439,7 @@ function renderMetamodelSemanticTypes(items) {
             `
         )
         .join("");
+    refreshMetamodelWorkspace();
 }
 
 function renderMetamodelContainmentRules(items) {
@@ -1063,6 +1448,7 @@ function renderMetamodelContainmentRules(items) {
 
     if (items.length === 0) {
         metamodelContainmentRulesList.innerHTML = '<p class="section-copy">선택한 draft version에 containment rule이 없습니다.</p>';
+        refreshMetamodelWorkspace();
         return;
     }
 
@@ -1086,6 +1472,7 @@ function renderMetamodelContainmentRules(items) {
             `
         )
         .join("");
+    refreshMetamodelWorkspace();
 }
 
 function renderMetamodelNotations(items) {
@@ -1094,6 +1481,7 @@ function renderMetamodelNotations(items) {
 
     if (items.length === 0) {
         metamodelNotationsList.innerHTML = '<p class="section-copy">선택한 semantic type에 notation definition이 없습니다.</p>';
+        refreshMetamodelWorkspace();
         return;
     }
 
@@ -1118,6 +1506,7 @@ function renderMetamodelNotations(items) {
             `
         )
         .join("");
+    refreshMetamodelWorkspace();
 }
 
 function renderMetamodelAssociations(items) {
@@ -1126,6 +1515,7 @@ function renderMetamodelAssociations(items) {
 
     if (items.length === 0) {
         metamodelAssociationsList.innerHTML = '<p class="section-copy">선택한 draft version에 association definition이 없습니다.</p>';
+        refreshMetamodelWorkspace();
         return;
     }
 
@@ -1151,6 +1541,7 @@ function renderMetamodelAssociations(items) {
             `
         )
         .join("");
+    refreshMetamodelWorkspace();
 }
 
 function renderMetamodelProperties(items) {
@@ -1159,6 +1550,7 @@ function renderMetamodelProperties(items) {
 
     if (items.length === 0) {
         metamodelPropertiesList.innerHTML = '<p class="section-copy">선택한 semantic type에 property definition이 없습니다.</p>';
+        refreshMetamodelWorkspace();
         return;
     }
 
@@ -1184,6 +1576,7 @@ function renderMetamodelProperties(items) {
             `
         )
         .join("");
+    refreshMetamodelWorkspace();
 }
 
 function renderMonitoredObjectOptions(selectedId = "") {
@@ -1556,6 +1949,19 @@ async function loadGroupedEventDetails(groupedEventId) {
     selectedRawEventId = payload.items[0]?.id ?? null;
     renderEvents(groupedEvents);
     renderEventDetailPanel();
+}
+
+async function selectMetamodelWorkspaceItem(kind, id) {
+    selectedMetamodelWorkspace = { kind, id: Number(id) };
+
+    if (kind === "semantic_type") {
+        metamodelPropertySemanticTypeIdInput.value = String(id);
+        metamodelNotationSemanticTypeIdInput.value = String(id);
+        await Promise.all([loadMetamodelProperties(), loadMetamodelNotations()]);
+        return;
+    }
+
+    refreshMetamodelWorkspace();
 }
 
 async function createMetamodelVersion(event) {
@@ -2019,6 +2425,7 @@ eventDetailPanel?.addEventListener("click", (event) => {
 metamodelVersionForm?.addEventListener("submit", createMetamodelVersion);
 metamodelNamespaceSelect?.addEventListener("change", renderMetamodelSelectOptions);
 metamodelDraftVersionSelect?.addEventListener("change", () => {
+    selectedMetamodelWorkspace = null;
     resetMetamodelSemanticTypeForm();
     resetMetamodelPropertyForm({ preserveSemanticType: false });
     resetMetamodelContainmentRuleForm();
@@ -2054,6 +2461,20 @@ metamodelPropertySemanticTypeIdInput?.addEventListener("change", () => {
 metamodelNotationSemanticTypeIdInput?.addEventListener("change", () => {
     resetMetamodelNotationForm({ preserveSemanticType: true });
     loadMetamodelNotations().catch((error) => showBanner(error.message, "error"));
+});
+metamodelWorkspaceOutline?.addEventListener("click", (event) => {
+    const item = event.target instanceof Element ? event.target.closest("[data-workspace-kind][data-workspace-id]") : null;
+    if (!item) {
+        return;
+    }
+    selectMetamodelWorkspaceItem(item.dataset.workspaceKind, item.dataset.workspaceId).catch((error) => showBanner(error.message, "error"));
+});
+metamodelWorkspaceCanvas?.addEventListener("click", (event) => {
+    const item = event.target instanceof Element ? event.target.closest("[data-workspace-kind][data-workspace-id]") : null;
+    if (!item) {
+        return;
+    }
+    selectMetamodelWorkspaceItem(item.dataset.workspaceKind, item.dataset.workspaceId).catch((error) => showBanner(error.message, "error"));
 });
 alertRuleForm?.addEventListener("submit", saveAlertRule);
 alertRuleFormResetButton?.addEventListener("click", resetAlertRuleForm);
@@ -2099,6 +2520,7 @@ metamodelSemanticTypesList?.addEventListener("click", (event) => {
         return;
     }
     fillMetamodelSemanticTypeForm(item);
+    selectedMetamodelWorkspace = { kind: "semantic_type", id: item.id };
     metamodelPropertySemanticTypeIdInput.value = String(item.id);
     resetMetamodelPropertyForm();
     renderContainmentSemanticTypeOptions(
@@ -2120,6 +2542,8 @@ metamodelContainmentRulesList?.addEventListener("click", (event) => {
         return;
     }
     fillMetamodelContainmentRuleForm(item);
+    selectedMetamodelWorkspace = { kind: "containment_rule", id: item.id };
+    refreshMetamodelWorkspace();
 });
 metamodelPropertiesList?.addEventListener("click", (event) => {
     const button = event.target instanceof HTMLElement ? event.target.closest(".edit-metamodel-property-button") : null;
@@ -2144,6 +2568,8 @@ metamodelNotationsList?.addEventListener("click", (event) => {
         return;
     }
     fillMetamodelNotationForm(item);
+    selectedMetamodelWorkspace = { kind: "notation_definition", id: item.id };
+    refreshMetamodelWorkspace();
 });
 metamodelAssociationsList?.addEventListener("click", (event) => {
     const button = event.target instanceof HTMLElement ? event.target.closest(".edit-metamodel-association-button") : null;
@@ -2156,6 +2582,8 @@ metamodelAssociationsList?.addEventListener("click", (event) => {
         return;
     }
     fillMetamodelAssociationForm(item);
+    selectedMetamodelWorkspace = { kind: "association_definition", id: item.id };
+    refreshMetamodelWorkspace();
 });
 alertRulesList?.addEventListener("click", (event) => {
     const button = event.target instanceof HTMLElement ? event.target.closest(".edit-alert-rule-button") : null;

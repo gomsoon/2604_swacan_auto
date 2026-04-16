@@ -436,6 +436,16 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
 
     expect(page.locator("#admin-metamodel-associations-list .admin-item", has_text="Monitors Worker Pool Updated").first).to_contain_text("undirected")
     expect(page.locator("#admin-metamodel-associations-list .admin-item", has_text="Monitors Worker Pool Updated").first).to_contain_text("1..n")
+    expect(page.locator("#metamodel-workspace-outline")).to_contain_text("Worker Pool Updated")
+    expect(page.locator("#metamodel-workspace-outline")).to_contain_text("Monitors Worker Pool Updated")
+
+    page.locator('#metamodel-workspace-outline [data-workspace-kind="semantic_type"]', has_text="Worker Pool Updated").click()
+    expect(page.locator("#metamodel-workspace-inspector")).to_contain_text("Worker Pool Updated")
+    expect(page.locator("#metamodel-workspace-inspector")).to_contain_text("Default Notation Preview")
+
+    page.locator('#metamodel-workspace-outline [data-workspace-kind="association_definition"]', has_text="Monitors Worker Pool Updated").click()
+    expect(page.locator("#metamodel-workspace-inspector")).to_contain_text("Monitors Worker Pool Updated")
+    expect(page.locator("#metamodel-workspace-inspector")).to_contain_text("undirected")
 
     createdVersion.get_by_role("button", name="Validate").click()
     expect(page.locator("#metamodel-validation-panel")).to_contain_text("core / core-v2-ui-draft validation")

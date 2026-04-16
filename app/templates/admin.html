@@ -107,6 +107,28 @@
             <button id="refresh-metamodel-semantic-types-button" class="button ghost small" type="button">갱신</button>
         </div>
 
+        <div class="metamodel-workspace-grid">
+            <section class="admin-subcard">
+                <div class="section-header">
+                    <h3>Metamodel Workspace</h3>
+                    <span id="metamodel-workspace-summary" class="meta-pill">0개</span>
+                </div>
+                <div id="metamodel-workspace-outline" class="admin-list compact-admin-list"></div>
+            </section>
+
+            <section class="admin-subcard canvas-card">
+                <div class="section-header">
+                    <h3>Metamodel Canvas</h3>
+                    <span class="meta-pill">draft structure</span>
+                </div>
+                <svg id="metamodel-workspace-canvas" class="diagram-canvas metamodel-workspace-canvas" viewBox="0 0 1200 760" role="img" aria-label="Metamodel workspace canvas"></svg>
+            </section>
+
+            <aside id="metamodel-workspace-inspector" class="admin-subcard inspector metamodel-workspace-inspector">
+                <p class="section-copy">semantic type, containment, association, notation을 선택하면 우측 inspector에서 상세를 확인할 수 있습니다.</p>
+            </aside>
+        </div>
+
         <div class="admin-metamodel-layout">
             <form id="metamodel-semantic-type-form" class="stack-form card admin-subcard">
                 <div class="section-header">
