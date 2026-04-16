@@ -94,6 +94,7 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     page.get_by_role("button", name="통신선 시작").click()
     agent_shape.click(force=True)
     expect(page.locator("path.diagram-edge")).to_have_count(1)
+    expect(page.locator("#edge-link-text")).to_contain_text("Worker Alpha")
     expect(page.locator("#editor-version-status-label")).to_contain_text("draft")
 
     page.get_by_role("button", name="Draft 발행").click()
@@ -142,6 +143,19 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
             """,
             (draft_row["id"],),
         ).fetchone()
+        edge_row = db_conn.execute(
+            """
+            SELECT e.association_code, e.source_node_id, e.target_node_id,
+                   source.node_type AS source_node_type,
+                   target.node_type AS target_node_type
+            FROM view_version_edges AS e
+            JOIN view_version_nodes AS source ON source.id = e.source_node_id
+            JOIN view_version_nodes AS target ON target.id = e.target_node_id
+            WHERE e.view_version_id = ?
+            LIMIT 1
+            """,
+            (draft_row["id"],),
+        ).fetchone()
         db_conn.execute(
             "DELETE FROM node_bindings WHERE view_version_node_id = ?",
             (process_row["id"],),
@@ -160,6 +174,10 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
             ),
         )
         db_conn.commit()
+        assert edge_row["association_code"] == "monitors"
+        assert edge_row["source_node_type"] == "MonitoringAgent"
+        assert edge_row["target_node_type"] == "SoftwareProcess"
+        assert edge_row["target_node_id"] == process_row["id"]
 
     post_ingest(
         base_url,

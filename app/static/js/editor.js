@@ -118,23 +118,56 @@ function findCandidateParentId(childTypeCode) {
     return candidate?.id || null;
 }
 
-function findAssociationForNodes(sourceNode, targetNode) {
+function resolveEdgeCreationPlan(sourceNode, targetNode) {
+    if (!sourceNode || !targetNode) {
+        return null;
+    }
+
     const sourceTypeCode = sourceNode.semantic_type_code || sourceNode.node_type;
     const targetTypeCode = targetNode.semantic_type_code || targetNode.node_type;
-    return (
-        state.associations.find(
-            (item) =>
-                item.source_type_code === sourceTypeCode &&
-                item.target_type_code === targetTypeCode
-        ) ||
-        state.associations.find(
-            (item) =>
-                item.direction === "undirected" &&
-                item.source_type_code === targetTypeCode &&
-                item.target_type_code === sourceTypeCode
-        ) ||
-        null
+    const exactAssociation = state.associations.find(
+        (item) =>
+            item.source_type_code === sourceTypeCode &&
+            item.target_type_code === targetTypeCode
     );
+    if (exactAssociation) {
+        return {
+            association: exactAssociation,
+            sourceNodeId: sourceNode.id,
+            targetNodeId: targetNode.id,
+            autoOriented: false,
+        };
+    }
+
+    const reverseAssociation = state.associations.find(
+        (item) =>
+            item.source_type_code === targetTypeCode &&
+            item.target_type_code === sourceTypeCode
+    );
+    if (!reverseAssociation) {
+        return {
+            association: null,
+            sourceNodeId: sourceNode.id,
+            targetNodeId: targetNode.id,
+            autoOriented: false,
+        };
+    }
+
+    if (reverseAssociation.direction === "undirected") {
+        return {
+            association: reverseAssociation,
+            sourceNodeId: sourceNode.id,
+            targetNodeId: targetNode.id,
+            autoOriented: false,
+        };
+    }
+
+    return {
+        association: reverseAssociation,
+        sourceNodeId: targetNode.id,
+        targetNodeId: sourceNode.id,
+        autoOriented: true,
+    };
 }
 
 function getFirstEdgePaletteItem() {
@@ -458,11 +491,16 @@ function syncSelectionPanel() {
 
     const edge = state.edges.find((item) => item.id === state.selectedEdgeId);
     if (edge) {
-        selectionKind.textContent = `CommunicationLink #${edge.id}`;
+        const association = edge.association_code
+            ? state.associations.find((item) => item.code === edge.association_code)
+            : null;
+        const sourceNode = getNode(edge.source_node_id);
+        const targetNode = getNode(edge.target_node_id);
+        selectionKind.textContent = `${association?.display_name || edge.edge_type} #${edge.id}`;
         nodeForm.hidden = true;
         edgeSummary.hidden = false;
         edgeIdText.textContent = String(edge.id);
-        edgeLinkText.textContent = `${edge.source_node_id} -> ${edge.target_node_id}`;
+        edgeLinkText.textContent = `${sourceNode?.display_name || edge.source_node_id} -> ${targetNode?.display_name || edge.target_node_id}`;
         return;
     }
 
@@ -608,7 +646,8 @@ async function createEdge(targetNodeId) {
     try {
         const sourceNode = getNode(state.connectSourceId);
         const targetNode = getNode(targetNodeId);
-        const matchedAssociation = sourceNode && targetNode ? findAssociationForNodes(sourceNode, targetNode) : null;
+        const edgePlan = resolveEdgeCreationPlan(sourceNode, targetNode);
+        const matchedAssociation = edgePlan?.association || null;
         const matchedEdgeType = matchedAssociation?.semantics?.default_edge_type;
         const edgeItem = getPaletteItemByType(matchedEdgeType) || getFirstEdgePaletteItem();
         if (!edgeItem) {
@@ -622,8 +661,8 @@ async function createEdge(targetNodeId) {
                 association_code: matchedAssociation?.code || null,
                 semantic_type_code: edgeItem.semantic_type_code,
                 notation_code: edgeItem.notation_code,
-                source_node_id: state.connectSourceId,
-                target_node_id: targetNodeId,
+                source_node_id: edgePlan?.sourceNodeId || state.connectSourceId,
+                target_node_id: edgePlan?.targetNodeId || targetNodeId,
                 source_anchor: "right",
                 target_anchor: "left",
                 label: matchedAssociation?.display_name || edgeItem.display_name || "communication",
@@ -637,7 +676,11 @@ async function createEdge(targetNodeId) {
         state.connectSourceId = null;
         updateRevision(payload.revision);
         render();
-        setStatus(`${edgeItem.display_name || "관계선"}이 추가되었습니다.`);
+        setStatus(
+            edgePlan?.autoOriented
+                ? `${edgeItem.display_name || "관계선"}이 추가되었습니다. 메타모델 정의에 맞춰 방향을 자동 조정했습니다.`
+                : `${edgeItem.display_name || "관계선"}이 추가되었습니다.`
+        );
     } catch (error) {
         showBanner(error.message, "error");
         state.connectSourceId = null;
