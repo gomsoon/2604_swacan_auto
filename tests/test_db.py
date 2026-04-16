@@ -71,9 +71,9 @@ def test_init_db_loads_seed_data(seeded_app) -> None:
         "agent_local_main",
     ]
     assert version_edge_row["edge_type"] == "CommunicationLink"
-    assert version_edge_row["association_code"] == "communicates_with"
-    assert version_edge_row["source_node_id"] == 1102
-    assert version_edge_row["target_node_id"] == 1103
+    assert version_edge_row["association_code"] == "monitors"
+    assert version_edge_row["source_node_id"] == 1103
+    assert version_edge_row["target_node_id"] == 1102
     assert [row["object_key"] for row in monitored_object_rows] == [
         "host.host-a",
         "process.app-main",

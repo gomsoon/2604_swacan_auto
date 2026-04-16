@@ -62,7 +62,7 @@ def test_get_active_view_version_detail_returns_seed_snapshot(seeded_client) -> 
         "agent_local_main",
     ]
     assert payload["edges"][0]["element_key"] == "edge_agent_link"
-    assert payload["edges"][0]["association_code"] == "communicates_with"
+    assert payload["edges"][0]["association_code"] == "monitors"
 
 
 def test_get_view_version_detail_returns_specific_snapshot(seeded_client) -> None:

@@ -367,6 +367,52 @@ def test_create_version_edge_rejects_invalid_edge_type(seeded_client) -> None:
     assert response.get_json()["error"]["code"] == "validation_error"
 
 
+def test_create_version_edge_rejects_association_code_that_does_not_match_node_pair(seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+    process_node = next(node for node in draft_payload["nodes"] if node["node_type"] == "SoftwareProcess")
+    agent_node = next(node for node in draft_payload["nodes"] if node["node_type"] == "MonitoringAgent")
+
+    response = seeded_client.post(
+        f"/api/view-versions/{version_id}/edges",
+        json={
+            "revision": draft_payload["version"]["revision"],
+            "edge_type": "CommunicationLink",
+            "association_code": "communicates_with",
+            "source_node_id": process_node["id"],
+            "target_node_id": agent_node["id"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+    assert response.get_json()["error"]["message"] == "association_code does not match source/target semantic types"
+
+
+def test_create_version_edge_allows_matching_association_code(seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+    process_node = next(node for node in draft_payload["nodes"] if node["node_type"] == "SoftwareProcess")
+    agent_node = next(node for node in draft_payload["nodes"] if node["node_type"] == "MonitoringAgent")
+
+    response = seeded_client.post(
+        f"/api/view-versions/{version_id}/edges",
+        json={
+            "revision": draft_payload["version"]["revision"],
+            "edge_type": "CommunicationLink",
+            "association_code": "monitors",
+            "source_node_id": agent_node["id"],
+            "target_node_id": process_node["id"],
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert payload["edge"]["association_code"] == "monitors"
+
+
 def test_replace_version_assigns_ids_for_missing_items_and_increments_revision(seeded_client) -> None:
     login(seeded_client)
     draft_payload = create_draft(seeded_client)

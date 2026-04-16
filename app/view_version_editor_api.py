@@ -118,6 +118,29 @@ def resolve_edge_defaults(editor_metamodel: dict[str, Any], edge_type: str) -> d
     }
 
 
+def find_association_by_code(editor_metamodel: dict[str, Any], association_code: str) -> dict[str, Any] | None:
+    return next(
+        (item for item in editor_metamodel["snapshot"]["associations"] if item["code"] == association_code),
+        None,
+    )
+
+
+def association_matches_nodes(
+    association: dict[str, Any],
+    source_type_code: str,
+    target_type_code: str,
+) -> bool:
+    if association["direction"] == "undirected":
+        return {
+            association["source_type_code"],
+            association["target_type_code"],
+        } == {source_type_code, target_type_code}
+    return (
+        association["source_type_code"] == source_type_code
+        and association["target_type_code"] == target_type_code
+    )
+
+
 def validate_nodes_against_metamodel(nodes: list[dict[str, Any]], editor_metamodel: dict[str, Any]) -> str | None:
     node_map: dict[int, dict[str, Any]] = {}
     required = {"id", "node_type", "display_name", "x", "y", "width", "height"}
@@ -139,6 +162,8 @@ def validate_nodes_against_metamodel(nodes: list[dict[str, Any]], editor_metamod
         notation = editor_metamodel["notation_by_code"].get(notation_code)
         if notation is None or notation["semantic_type_code"] != defaults["semantic_type_code"] or notation["kind"] != "node":
             return "notation_code does not match node_type"
+        if node.get("target_id") and not editor_metamodel["semantic_types_by_code"][defaults["semantic_type_code"]]["allows_runtime_binding"]:
+            return "target_id is not allowed for this semantic type"
 
         if not isinstance(node["id"], int):
             return "node id must be an integer"
@@ -177,7 +202,8 @@ def validate_edges_against_metamodel(
     nodes: list[dict[str, Any]],
     editor_metamodel: dict[str, Any],
 ) -> str | None:
-    node_ids = {node["id"] for node in nodes}
+    node_by_id = {node["id"]: node for node in nodes}
+    node_ids = set(node_by_id)
     seen_ids: set[int] = set()
 
     for edge in edges:
@@ -205,10 +231,21 @@ def validate_edges_against_metamodel(
         if edge["source_node_id"] not in node_ids or edge["target_node_id"] not in node_ids:
             return "edge must reference existing nodes"
 
+        source_node = node_by_id[edge["source_node_id"]]
+        target_node = node_by_id[edge["target_node_id"]]
+        source_type_code = source_node.get("semantic_type_code") or source_node["node_type"]
+        target_type_code = target_node.get("semantic_type_code") or target_node["node_type"]
+
         association_code = edge.get("association_code")
         if association_code:
-            if not any(item["code"] == association_code for item in editor_metamodel["snapshot"]["associations"]):
+            association = find_association_by_code(editor_metamodel, association_code)
+            if association is None:
                 return "association_code is invalid"
+            if not association_matches_nodes(association, source_type_code, target_type_code):
+                return "association_code does not match source/target semantic types"
+            default_edge_type = (association.get("semantics") or {}).get("default_edge_type")
+            if default_edge_type and default_edge_type != edge_type:
+                return "association_code does not match edge_type"
 
     return None
 
