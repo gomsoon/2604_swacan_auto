@@ -12,6 +12,7 @@ from .db import get_db
 bp = Blueprint("admin_metamodel_api", __name__, url_prefix="/api/admin/metamodel")
 
 ALLOWED_VERSION_STATUSES = {"draft", "published", "deprecated"}
+ALLOWED_SEMANTIC_TYPE_KINDS = {"node", "edge", "container", "runtime-only"}
 
 
 def now_iso() -> str:
@@ -71,6 +72,106 @@ def require_namespace_id(namespace_code: str):
     if row is None:
         return None, error_response("validation_error", "namespace_code is invalid", 400)
     return row["id"], None
+
+
+def parse_optional_string(value: Any, *, field_name: str, max_length: int | None = None) -> str | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string")
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if max_length is not None and len(normalized) > max_length:
+        raise ValueError(f"{field_name} must be at most {max_length} characters")
+    return normalized
+
+
+def require_draft_version(version_id: int):
+    version = fetch_version(version_id)
+    if version is None:
+        return None, error_response("metamodel_not_found", "metamodel version not found", 404)
+    if version["status"] != "draft":
+        return None, error_response("invalid_state", "only draft metamodel versions can be edited", 409)
+    return version, None
+
+
+def fetch_semantic_type_row(type_id: int):
+    return get_db().execute(
+        """
+        SELECT st.id, st.metamodel_version_id, st.code, st.display_name, st.description, st.kind, st.runtime_kind,
+               st.is_groupable, st.allows_runtime_binding, st.default_notation_id, st.is_active,
+               st.created_at, st.updated_at,
+               nd.code AS default_notation_code,
+               mv.status AS metamodel_version_status,
+               mv.version_code AS metamodel_version_code,
+               ns.code AS namespace_code
+        FROM semantic_types AS st
+        JOIN metamodel_versions AS mv ON mv.id = st.metamodel_version_id
+        JOIN metamodel_namespaces AS ns ON ns.id = mv.namespace_id
+        LEFT JOIN notation_definitions AS nd ON nd.id = st.default_notation_id
+        WHERE st.id = ?
+        """,
+        (type_id,),
+    ).fetchone()
+
+
+def serialize_semantic_type(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "metamodel_version_id": row["metamodel_version_id"],
+        "metamodel_version_code": row["metamodel_version_code"],
+        "namespace_code": row["namespace_code"],
+        "code": row["code"],
+        "display_name": row["display_name"],
+        "description": row["description"],
+        "kind": row["kind"],
+        "runtime_kind": row["runtime_kind"],
+        "is_groupable": bool(row["is_groupable"]),
+        "allows_runtime_binding": bool(row["allows_runtime_binding"]),
+        "default_notation_id": row["default_notation_id"],
+        "default_notation_code": row["default_notation_code"],
+        "is_active": bool(row["is_active"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def validate_semantic_type_payload(data: dict[str, Any], *, partial: bool = False) -> tuple[dict[str, Any] | None, Any | None]:
+    payload = dict(data)
+    try:
+        if not partial or "code" in payload:
+            code = parse_optional_string(payload.get("code"), field_name="code", max_length=100)
+            if not code:
+                return None, error_response("validation_error", "code is required", 400)
+            payload["code"] = code
+
+        if not partial or "display_name" in payload:
+            display_name = parse_optional_string(payload.get("display_name"), field_name="display_name", max_length=120)
+            if not display_name:
+                return None, error_response("validation_error", "display_name is required", 400)
+            payload["display_name"] = display_name
+
+        if not partial or "kind" in payload:
+            kind = payload.get("kind")
+            if kind not in ALLOWED_SEMANTIC_TYPE_KINDS:
+                return None, error_response("validation_error", "kind is invalid", 400)
+
+        if "description" in payload:
+            payload["description"] = parse_optional_string(payload.get("description"), field_name="description", max_length=500)
+        if "runtime_kind" in payload:
+            payload["runtime_kind"] = parse_optional_string(payload.get("runtime_kind"), field_name="runtime_kind", max_length=100)
+    except ValueError as exc:
+        return None, error_response("validation_error", str(exc), 400)
+
+    for bool_field in ("is_groupable", "allows_runtime_binding", "is_active"):
+        if not partial or bool_field in payload:
+            value = payload.get(bool_field)
+            if not isinstance(value, bool):
+                return None, error_response("validation_error", f"{bool_field} must be a boolean", 400)
+            payload[bool_field] = value
+
+    return payload, None
 
 
 def clone_metamodel_version(*, source_version_id: int, namespace_id: int, version_code: str, description: str | None):
@@ -393,3 +494,172 @@ def publish_version(version_id: int):
     db_conn.commit()
 
     return {"version": serialize_version(fetch_version(version_id))}
+
+
+@bp.get("/versions/<int:version_id>/semantic-types")
+@admin_required
+def list_semantic_types(version_id: int):
+    version = fetch_version(version_id)
+    if version is None:
+        return error_response("metamodel_not_found", "metamodel version not found", 404)
+
+    rows = get_db().execute(
+        """
+        SELECT st.id, st.metamodel_version_id, st.code, st.display_name, st.description, st.kind, st.runtime_kind,
+               st.is_groupable, st.allows_runtime_binding, st.default_notation_id, st.is_active,
+               st.created_at, st.updated_at,
+               nd.code AS default_notation_code,
+               mv.status AS metamodel_version_status,
+               mv.version_code AS metamodel_version_code,
+               ns.code AS namespace_code
+        FROM semantic_types AS st
+        JOIN metamodel_versions AS mv ON mv.id = st.metamodel_version_id
+        JOIN metamodel_namespaces AS ns ON ns.id = mv.namespace_id
+        LEFT JOIN notation_definitions AS nd ON nd.id = st.default_notation_id
+        WHERE st.metamodel_version_id = ?
+        ORDER BY st.kind ASC, st.code ASC, st.id ASC
+        """,
+        (version_id,),
+    ).fetchall()
+
+    return {
+        "version": serialize_version(version),
+        "items": [serialize_semantic_type(row) for row in rows],
+    }
+
+
+@bp.post("/versions/<int:version_id>/semantic-types")
+@admin_required
+def create_semantic_type(version_id: int):
+    version, error = require_draft_version(version_id)
+    if error:
+        return error
+
+    payload, error = validate_semantic_type_payload(request.get_json(silent=True) or {}, partial=False)
+    if error:
+        return error
+
+    existing = get_db().execute(
+        """
+        SELECT 1
+        FROM semantic_types
+        WHERE metamodel_version_id = ? AND code = ?
+        """,
+        (version_id, payload["code"]),
+    ).fetchone()
+    if existing is not None:
+        return error_response("semantic_type_conflict", "semantic type code already exists in version", 409)
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    cursor = db_conn.execute(
+        """
+        INSERT INTO semantic_types (
+            metamodel_version_id, code, display_name, description, kind, runtime_kind,
+            is_groupable, allows_runtime_binding, default_notation_id, is_active, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+        """,
+        (
+            version_id,
+            payload["code"],
+            payload["display_name"],
+            payload.get("description"),
+            payload["kind"],
+            payload.get("runtime_kind"),
+            int(payload["is_groupable"]),
+            int(payload["allows_runtime_binding"]),
+            int(payload["is_active"]),
+            timestamp,
+            timestamp,
+        ),
+    )
+    db_conn.execute(
+        """
+        UPDATE metamodel_versions
+        SET updated_at = ?
+        WHERE id = ?
+        """,
+        (timestamp, version_id),
+    )
+    db_conn.commit()
+
+    created = fetch_semantic_type_row(int(cursor.lastrowid))
+    return {"version": serialize_version(version), "semantic_type": serialize_semantic_type(created)}, 201
+
+
+@bp.patch("/semantic-types/<int:type_id>")
+@admin_required
+def update_semantic_type(type_id: int):
+    existing = fetch_semantic_type_row(type_id)
+    if existing is None:
+        return error_response("semantic_type_not_found", "semantic type not found", 404)
+    if existing["metamodel_version_status"] != "draft":
+        return error_response("invalid_state", "only draft semantic types can be edited", 409)
+
+    current_payload = {
+        "code": existing["code"],
+        "display_name": existing["display_name"],
+        "description": existing["description"],
+        "kind": existing["kind"],
+        "runtime_kind": existing["runtime_kind"],
+        "is_groupable": bool(existing["is_groupable"]),
+        "allows_runtime_binding": bool(existing["allows_runtime_binding"]),
+        "is_active": bool(existing["is_active"]),
+    }
+    current_payload.update(request.get_json(silent=True) or {})
+    payload, error = validate_semantic_type_payload(current_payload, partial=False)
+    if error:
+        return error
+
+    conflict = get_db().execute(
+        """
+        SELECT 1
+        FROM semantic_types
+        WHERE metamodel_version_id = ? AND code = ? AND id != ?
+        """,
+        (existing["metamodel_version_id"], payload["code"], type_id),
+    ).fetchone()
+    if conflict is not None:
+        return error_response("semantic_type_conflict", "semantic type code already exists in version", 409)
+
+    timestamp = now_iso()
+    db_conn = get_db()
+    db_conn.execute(
+        """
+        UPDATE semantic_types
+        SET code = ?,
+            display_name = ?,
+            description = ?,
+            kind = ?,
+            runtime_kind = ?,
+            is_groupable = ?,
+            allows_runtime_binding = ?,
+            is_active = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            payload["code"],
+            payload["display_name"],
+            payload.get("description"),
+            payload["kind"],
+            payload.get("runtime_kind"),
+            int(payload["is_groupable"]),
+            int(payload["allows_runtime_binding"]),
+            int(payload["is_active"]),
+            timestamp,
+            type_id,
+        ),
+    )
+    db_conn.execute(
+        """
+        UPDATE metamodel_versions
+        SET updated_at = ?
+        WHERE id = ?
+        """,
+        (timestamp, existing["metamodel_version_id"]),
+    )
+    db_conn.commit()
+
+    updated = fetch_semantic_type_row(type_id)
+    return {"semantic_type": serialize_semantic_type(updated)}

@@ -155,3 +155,183 @@ def test_admin_rejects_publish_for_non_draft_version(seeded_client) -> None:
 
     assert response.status_code == 409
     assert response.get_json()["error"]["code"] == "publish_conflict"
+
+
+def test_admin_can_list_semantic_types_for_version(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/metamodel/versions/1/semantic-types")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["version"]["version_code"] == "seed-v1"
+    assert any(item["code"] == "SoftwareProcess" for item in payload["items"])
+    process_type = next(item for item in payload["items"] if item["code"] == "SoftwareProcess")
+    assert process_type["default_notation_code"] == "process.rounded_rect"
+
+
+def test_admin_can_create_semantic_type_in_draft_version(seeded_app, seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v3-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for semantic type create",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    response = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPool",
+            "display_name": "Worker Pool",
+            "description": "Grouped worker process type",
+            "kind": "node",
+            "runtime_kind": "process-group",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert payload["semantic_type"]["code"] == "WorkerPool"
+    assert payload["semantic_type"]["display_name"] == "Worker Pool"
+    assert payload["semantic_type"]["runtime_kind"] == "process-group"
+    assert payload["semantic_type"]["is_groupable"] is True
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        row = db_conn.execute(
+            "SELECT code, display_name FROM semantic_types WHERE metamodel_version_id = ? AND code = ?",
+            (version_id, "WorkerPool"),
+        ).fetchone()
+        assert row["display_name"] == "Worker Pool"
+
+
+def test_admin_rejects_semantic_type_create_for_published_version(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/metamodel/versions/1/semantic-types",
+        json={
+            "code": "WorkerPool",
+            "display_name": "Worker Pool",
+            "kind": "node",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["error"]["code"] == "invalid_state"
+
+
+def test_admin_can_update_semantic_type_with_boundary_description(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v4-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for semantic type update",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    create_type = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPool",
+            "display_name": "Worker Pool",
+            "kind": "node",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+    assert create_type.status_code == 201
+    type_id = create_type.get_json()["semantic_type"]["id"]
+
+    ok_response = seeded_client.patch(
+        f"/api/admin/metamodel/semantic-types/{type_id}",
+        json={
+            "display_name": "Worker Pool Updated",
+            "description": "a" * 500,
+            "kind": "container",
+            "runtime_kind": "process-group",
+            "is_groupable": True,
+            "allows_runtime_binding": False,
+            "is_active": True,
+        },
+    )
+    too_long_response = seeded_client.patch(
+        f"/api/admin/metamodel/semantic-types/{type_id}",
+        json={
+            "display_name": "Worker Pool Updated",
+            "description": "a" * 501,
+            "kind": "container",
+            "runtime_kind": "process-group",
+            "is_groupable": True,
+            "allows_runtime_binding": False,
+            "is_active": True,
+        },
+    )
+
+    assert ok_response.status_code == 200
+    assert ok_response.get_json()["semantic_type"]["display_name"] == "Worker Pool Updated"
+    assert ok_response.get_json()["semantic_type"]["kind"] == "container"
+    assert ok_response.get_json()["semantic_type"]["allows_runtime_binding"] is False
+    assert too_long_response.status_code == 400
+    assert too_long_response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_admin_rejects_invalid_semantic_type_payload_boundaries(seeded_client) -> None:
+    login(seeded_client)
+    create_version = seeded_client.post(
+        "/api/admin/metamodel/versions",
+        json={
+            "namespace_code": "core",
+            "version_code": "seed-v5-draft",
+            "based_on_version_id": 1,
+            "description": "Draft for semantic type validation",
+        },
+    )
+    assert create_version.status_code == 201
+    version_id = create_version.get_json()["version"]["id"]
+
+    invalid_kind = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPool",
+            "display_name": "Worker Pool",
+            "kind": "bad-kind",
+            "is_groupable": True,
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+    invalid_bool = seeded_client.post(
+        f"/api/admin/metamodel/versions/{version_id}/semantic-types",
+        json={
+            "code": "WorkerPool2",
+            "display_name": "Worker Pool",
+            "kind": "node",
+            "is_groupable": "true",
+            "allows_runtime_binding": True,
+            "is_active": True,
+        },
+    )
+
+    assert invalid_kind.status_code == 400
+    assert invalid_kind.get_json()["error"]["code"] == "validation_error"
+    assert invalid_bool.status_code == 400
+    assert invalid_bool.get_json()["error"]["code"] == "validation_error"

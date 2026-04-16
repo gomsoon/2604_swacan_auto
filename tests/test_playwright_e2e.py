@@ -316,6 +316,27 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
 
     createdVersion = page.locator(".admin-item", has_text="core-v2-ui-draft").first
     expect(createdVersion).to_contain_text("draft")
+    expect(page.locator("#metamodel-draft-version-select")).to_contain_text("core / core-v2-ui-draft")
+
+    page.locator("#metamodel-semantic-type-code").fill("WorkerPool")
+    page.locator("#metamodel-semantic-type-display-name").fill("Worker Pool")
+    page.locator("#metamodel-semantic-type-kind").select_option("container")
+    page.locator("#metamodel-semantic-type-runtime-kind").fill("process-group")
+    page.locator("#metamodel-semantic-type-description").fill("Playwright semantic type create")
+    page.locator("#metamodel-semantic-type-groupable").check()
+    page.locator("#save-metamodel-semantic-type-button").click()
+
+    createdSemanticType = page.locator("#admin-metamodel-semantic-types-list .admin-item", has_text="Worker Pool").first
+    expect(createdSemanticType).to_contain_text("WorkerPool")
+    expect(createdSemanticType).to_contain_text("container")
+
+    createdSemanticType.get_by_role("button", name="수정").click()
+    expect(page.locator("#metamodel-semantic-type-form-mode")).to_contain_text("edit")
+    page.locator("#metamodel-semantic-type-display-name").fill("Worker Pool Updated")
+    page.locator("#metamodel-semantic-type-runtime-binding").uncheck()
+    page.locator("#save-metamodel-semantic-type-button").click()
+
+    expect(page.locator("#admin-metamodel-semantic-types-list .admin-item", has_text="Worker Pool Updated").first).to_contain_text("no-binding")
 
     createdVersion.locator(".publish-metamodel-button").click()
 
@@ -325,7 +346,7 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     page.locator("#alert-rule-warning-threshold").fill("50")
     page.locator("#alert-rule-critical-threshold").fill("100")
     page.locator("#alert-rule-description").fill("Playwright rule")
-    page.get_by_role("button", name="저장").click()
+    page.locator("#save-alert-rule-button").click()
 
     createdRule = page.locator(".admin-item", has_text="fd_count").first
     expect(createdRule).to_contain_text("warning=50")
@@ -333,7 +354,7 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
 
     createdRule.get_by_role("button", name="수정").click()
     page.locator("#alert-rule-critical-threshold").fill("120")
-    page.get_by_role("button", name="저장").click()
+    page.locator("#save-alert-rule-button").click()
 
     expect(page.locator(".admin-item", has_text="fd_count").first).to_contain_text("critical=120")
     createdRule = page.locator(".admin-item", has_text="fd_count").first

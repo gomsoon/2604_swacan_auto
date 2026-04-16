@@ -98,6 +98,82 @@
     <section class="card">
         <div class="section-header section-header-stack">
             <div>
+                <h2>Metamodel Draft 편집</h2>
+                <p class="section-copy">draft 버전의 semantic type을 생성하고 수정합니다. published/deprecated 버전은 읽기 전용입니다.</p>
+            </div>
+            <button id="refresh-metamodel-semantic-types-button" class="button ghost small" type="button">갱신</button>
+        </div>
+
+        <div class="admin-metamodel-layout">
+            <form id="metamodel-semantic-type-form" class="stack-form card admin-subcard">
+                <div class="section-header">
+                    <h3 id="metamodel-semantic-type-form-title">Semantic Type 생성</h3>
+                    <button id="metamodel-semantic-type-form-reset" class="button ghost small" type="button">초기화</button>
+                </div>
+                <input id="metamodel-semantic-type-id" type="hidden" value="">
+                <label class="field">
+                    <span>Draft Version</span>
+                    <select id="metamodel-draft-version-select"></select>
+                </label>
+                <div class="field-grid">
+                    <label class="field compact-field">
+                        <span>Code</span>
+                        <input id="metamodel-semantic-type-code" type="text" placeholder="예: WorkerPool" required>
+                    </label>
+                    <label class="field compact-field">
+                        <span>Display Name</span>
+                        <input id="metamodel-semantic-type-display-name" type="text" placeholder="예: Worker Pool" required>
+                    </label>
+                </div>
+                <div class="field-grid">
+                    <label class="field compact-field">
+                        <span>Kind</span>
+                        <select id="metamodel-semantic-type-kind">
+                            <option value="node">node</option>
+                            <option value="edge">edge</option>
+                            <option value="container">container</option>
+                            <option value="runtime-only">runtime-only</option>
+                        </select>
+                    </label>
+                    <label class="field compact-field">
+                        <span>Runtime Kind</span>
+                        <input id="metamodel-semantic-type-runtime-kind" type="text" placeholder="예: process-group">
+                    </label>
+                </div>
+                <label class="field">
+                    <span>설명</span>
+                    <textarea id="metamodel-semantic-type-description" rows="3" placeholder="semantic type 설명"></textarea>
+                </label>
+                <div class="field-grid">
+                    <label class="field checkbox-field">
+                        <span><input id="metamodel-semantic-type-groupable" type="checkbox"> groupable</span>
+                    </label>
+                    <label class="field checkbox-field">
+                        <span><input id="metamodel-semantic-type-runtime-binding" type="checkbox" checked> runtime binding 허용</span>
+                    </label>
+                </div>
+                <label class="field checkbox-field">
+                    <span><input id="metamodel-semantic-type-active" type="checkbox" checked> active</span>
+                </label>
+                <div class="toolbar-inline">
+                    <button id="save-metamodel-semantic-type-button" class="button primary" type="submit">저장</button>
+                    <span id="metamodel-semantic-type-form-mode" class="meta-pill">create</span>
+                </div>
+            </form>
+
+            <section class="admin-subcard">
+                <div class="section-header">
+                    <h3>Draft Semantic Type 목록</h3>
+                    <span id="metamodel-semantic-type-count" class="meta-pill">0개</span>
+                </div>
+                <div id="admin-metamodel-semantic-types-list" class="admin-list"></div>
+            </section>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="section-header section-header-stack">
+            <div>
                 <h2>Alert Rule</h2>
                 <p class="section-copy">warning/critical 임계치를 object type 또는 특정 monitored object 단위로 조정합니다.</p>
             </div>
