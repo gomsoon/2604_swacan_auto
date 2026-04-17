@@ -27,6 +27,7 @@ const state = {
     selectedGroupedEvent: null,
     selectedRawEventId: null,
     selectedNodeId: null,
+    selectedEdgeId: null,
 };
 
 function escapeHtml(value) {
@@ -107,6 +108,166 @@ function renderDetailRows(rows) {
             `
         )
         .join("");
+}
+
+function runtimeStatusLabel(stateRow) {
+    if (!stateRow) {
+        return "미수집";
+    }
+    if (stateRow.status === "down" || stateRow.severity === "critical") {
+        return "critical";
+    }
+    if (stateRow.status === "warning" || stateRow.severity === "warning") {
+        return "warning";
+    }
+    if (stateRow.status === "up" || stateRow.status === "healthy" || stateRow.severity === "info") {
+        return "normal";
+    }
+    return stateRow.status || stateRow.severity || "unknown";
+}
+
+function cardSeverityClass(severity) {
+    if (severity === "critical" || severity === "down") {
+        return "is-critical";
+    }
+    if (severity === "warning") {
+        return "is-warning";
+    }
+    if (severity === "normal" || severity === "info" || severity === "up") {
+        return "is-ok";
+    }
+    return "";
+}
+
+function bindingKeyForNode(node) {
+    if (!node) {
+        return null;
+    }
+    if (node.monitored_object_id !== null && node.monitored_object_id !== undefined) {
+        return `monitored:${node.monitored_object_id}`;
+    }
+    if (node.target_id) {
+        return `target:${node.target_id}`;
+    }
+    return null;
+}
+
+function alertsForNode(node) {
+    if (!node) {
+        return [];
+    }
+    if (node.monitored_object_id !== null && node.monitored_object_id !== undefined) {
+        return state.alerts.filter((item) => item.monitored_object_id === node.monitored_object_id);
+    }
+    return [];
+}
+
+function groupedEventsForNode(node) {
+    if (!node) {
+        return [];
+    }
+    if (node.monitored_object_id !== null && node.monitored_object_id !== undefined) {
+        return state.events.filter((item) => item.monitored_object_id === node.monitored_object_id);
+    }
+    if (node.target_id) {
+        return state.events.filter((item) => item.target_id === node.target_id);
+    }
+    return [];
+}
+
+function fanoutNodesForNode(node) {
+    const bindingKey = bindingKeyForNode(node);
+    if (!bindingKey) {
+        return [node].filter(Boolean);
+    }
+    return state.nodes.filter((candidate) => bindingKeyForNode(candidate) === bindingKey);
+}
+
+function uniqueById(items) {
+    const seen = new Set();
+    return items.filter((item) => {
+        if (!item || seen.has(item.id)) {
+            return false;
+        }
+        seen.add(item.id);
+        return true;
+    });
+}
+
+function sectionBlock(title, bodyHtml, metaHtml = "") {
+    return `
+        <section class="selection-summary-section">
+            <div class="selection-summary-section-header">
+                <h3>${escapeHtml(title)}</h3>
+                ${metaHtml}
+            </div>
+            ${bodyHtml}
+        </section>
+    `;
+}
+
+function renderAlertCards(items, emptyMessage) {
+    if (items.length === 0) {
+        return `<p class="section-copy">${escapeHtml(emptyMessage)}</p>`;
+    }
+    return `
+        <div class="selection-summary-card-list">
+            ${items
+                .map(
+                    (alert) => `
+                        <article class="selection-summary-card ${cardSeverityClass(alert.severity)}">
+                            <h4>${escapeHtml(alert.alert_code)}</h4>
+                            <p>${escapeHtml(alert.latest_message || "메시지 없음")}</p>
+                            <p>${escapeHtml(alert.severity)} | ${escapeHtml(alert.status)} | 반복 ${escapeHtml(alert.repeat_count ?? 1)}회</p>
+                            <p>${escapeHtml(formatTimestamp(alert.last_occurred_at))}</p>
+                        </article>
+                    `
+                )
+                .join("")}
+        </div>
+    `;
+}
+
+function renderGroupedEventCards(items, emptyMessage) {
+    if (items.length === 0) {
+        return `<p class="section-copy">${escapeHtml(emptyMessage)}</p>`;
+    }
+    return `
+        <div class="selection-summary-card-list">
+            ${items
+                .map(
+                    (event) => `
+                        <article class="selection-summary-card ${cardSeverityClass(event.severity)}">
+                            <h4>${escapeHtml(event.event_type)}</h4>
+                            <p>${escapeHtml(event.latest_message || "메시지 없음")}</p>
+                            <p>${escapeHtml(event.severity)} | 반복 ${escapeHtml(event.repeat_count ?? 1)}회</p>
+                            <p>${escapeHtml(formatTimestamp(event.last_occurred_at || event.occurred_at))}</p>
+                        </article>
+                    `
+                )
+                .join("")}
+        </div>
+    `;
+}
+
+function renderFanoutPills(items, currentNodeId) {
+    if (items.length === 0) {
+        return '<p class="section-copy">같은 runtime binding을 참조하는 노드가 없습니다.</p>';
+    }
+    return `
+        <div class="selection-fanout-list">
+            ${items
+                .map(
+                    (node) => `
+                        <span class="selection-fanout-pill">
+                            ${escapeHtml(node.display_name)}
+                            <span>${escapeHtml(node.id === currentNodeId ? "현재 선택" : node.node_type)}</span>
+                        </span>
+                    `
+                )
+                .join("")}
+        </div>
+    `;
 }
 
 function formatHeartbeatAge(payload) {
@@ -358,36 +519,146 @@ function renderAgentSummary() {
 
 function renderSelection() {
     const node = state.nodes.find((item) => item.id === state.selectedNodeId);
-    if (!node) {
-        selectionSummary.innerHTML = "<p>노드를 선택하면 latest state를 볼 수 있습니다.</p>";
+    const edge = state.edges.find((item) => item.id === state.selectedEdgeId);
+
+    if (!node && !edge) {
+        selectionSummary.innerHTML = "<p>노드나 관계선을 선택하면 runtime binding, latest state, alert, event를 함께 볼 수 있습니다.</p>";
         return;
     }
 
+    if (node) {
+        renderNodeSelection(node);
+        return;
+    }
+
+    renderEdgeSelection(edge);
+}
+
+function renderNodeSelection(node) {
     const stateRow = latestStateForNode(node);
-    const nodeAlerts = state.alerts.filter((item) => item.monitored_object_id === node.monitored_object_id);
+    const nodeAlerts = alertsForNode(node);
+    const nodeEvents = groupedEventsForNode(node);
+    const fanoutNodes = fanoutNodesForNode(node);
+    const bindingRows = [
+        { label: "타겟", value: node.target_id || "-" },
+        { label: "모니터링 객체", value: node.monitored_object_id ?? "-" },
+        { label: "구성 요소", value: node.node_type },
+        { label: "semantic type", value: node.semantic_type_code || "-" },
+        { label: "fan-out", value: `${fanoutNodes.length}개 node` },
+    ];
+    const overviewSection = sectionBlock(
+        `${node.display_name}`,
+        `<p class="selection-kind">${escapeHtml(node.node_type)}${stateRow ? ` | 상태 ${escapeHtml(runtimeStatusLabel(stateRow))} | 열린 alert ${escapeHtml(nodeAlerts.length)}건 | grouped event ${escapeHtml(nodeEvents.length)}건` : " | latest state 미수집"}</p>`,
+        `<span class="meta-pill">${escapeHtml(node.node_type)}</span>`
+    );
+    const bindingSection = sectionBlock(
+        "Runtime Binding",
+        `
+            <div class="detail-grid">${renderDetailRows(bindingRows)}</div>
+            ${renderFanoutPills(fanoutNodes, node.id)}
+        `
+    );
+
     if (!stateRow) {
         selectionSummary.innerHTML = `
-            <p><strong>${escapeHtml(node.display_name)}</strong></p>
-            <p>아직 runtime state가 없습니다.</p>
-            <p class="selection-kind">타겟 ID: ${escapeHtml(node.target_id || "-")}</p>
-            <p class="selection-kind">열린 alert 수: ${escapeHtml(nodeAlerts.length)}</p>
+            ${overviewSection}
+            ${bindingSection}
+            ${sectionBlock("Open Alert", renderAlertCards(nodeAlerts.slice(0, 3), "현재 열린 alert가 없습니다."))}
+            ${sectionBlock("최근 Grouped Event", renderGroupedEventCards(nodeEvents.slice(0, 3), "최근 grouped event가 없습니다."))}
         `;
         return;
     }
 
     const detailRows = buildStateDetailRows(node, stateRow);
     selectionSummary.innerHTML = `
-        <p><strong>${escapeHtml(node.display_name)}</strong></p>
-        <p class="selection-kind">열린 alert 수: ${escapeHtml(nodeAlerts.length)}</p>
-        <div class="detail-grid">${renderDetailRows(detailRows)}</div>
-        <details class="state-payload-block">
-            <summary>Raw state payload</summary>
-            <pre>${escapeHtml(JSON.stringify(stateRow.state, null, 2))}</pre>
-        </details>
+        ${overviewSection}
+        ${bindingSection}
+        ${sectionBlock(
+            "Latest State",
+            `
+                <div class="detail-grid">${renderDetailRows(detailRows)}</div>
+                <details class="state-payload-block">
+                    <summary>Raw state payload</summary>
+                    <pre>${escapeHtml(JSON.stringify(stateRow.state, null, 2))}</pre>
+                </details>
+            `,
+            `<span class="meta-pill">${escapeHtml(runtimeStatusLabel(stateRow))}</span>`
+        )}
+        ${sectionBlock("Open Alert", renderAlertCards(nodeAlerts.slice(0, 3), "현재 열린 alert가 없습니다."))}
+        ${sectionBlock("최근 Grouped Event", renderGroupedEventCards(nodeEvents.slice(0, 3), "최근 grouped event가 없습니다."))}
+    `;
+}
+
+function renderEdgeSelection(edge) {
+    if (!edge) {
+        selectionSummary.innerHTML = "<p>노드나 관계선을 선택하면 runtime binding, latest state, alert, event를 함께 볼 수 있습니다.</p>";
+        return;
+    }
+
+    const sourceNode = state.nodes.find((item) => item.id === edge.source_node_id) || null;
+    const targetNode = state.nodes.find((item) => item.id === edge.target_node_id) || null;
+    const edgeEvents = uniqueById([
+        ...groupedEventsForNode(sourceNode),
+        ...groupedEventsForNode(targetNode),
+    ]);
+    const edgeAlerts = uniqueById([
+        ...alertsForNode(sourceNode),
+        ...alertsForNode(targetNode),
+    ]);
+    const edgeRows = [
+        { label: "edge type", value: edge.edge_type || "-" },
+        { label: "association", value: edge.association_code || "-" },
+        { label: "semantic type", value: edge.semantic_type_code || "-" },
+        { label: "source", value: sourceNode?.display_name || "-" },
+        { label: "target", value: targetNode?.display_name || "-" },
+    ];
+    const endpointCard = (label, node) => {
+        if (!node) {
+            return `
+                <article class="selection-summary-card">
+                    <h4>${escapeHtml(label)}</h4>
+                    <p>연결된 노드를 찾을 수 없습니다.</p>
+                </article>
+            `;
+        }
+        const latestState = latestStateForNode(node);
+        const alerts = alertsForNode(node);
+        const events = groupedEventsForNode(node);
+        return `
+            <article class="selection-summary-card ${cardSeverityClass(latestState?.severity || latestState?.status)}">
+                <h4>${escapeHtml(label)} · ${escapeHtml(node.display_name)}</h4>
+                <p>${escapeHtml(node.node_type)} | target ${escapeHtml(node.target_id || "-")}</p>
+                <p>status ${escapeHtml(runtimeStatusLabel(latestState))} | alert ${escapeHtml(alerts.length)}건 | event ${escapeHtml(events.length)}건</p>
+                <p>binding ${escapeHtml(node.monitored_object_id ?? "-")}</p>
+            </article>
+        `;
+    };
+
+    selectionSummary.innerHTML = `
+        ${sectionBlock(
+            edge.label || edge.association_code || edge.edge_type || "관계선",
+            `
+                <p class="selection-kind">${escapeHtml(sourceNode?.display_name || "-")} → ${escapeHtml(targetNode?.display_name || "-")}</p>
+                <div class="detail-grid">${renderDetailRows(edgeRows)}</div>
+            `,
+            `<span class="meta-pill">${escapeHtml(edge.edge_type || "edge")}</span>`
+        )}
+        ${sectionBlock(
+            "연결된 Runtime 대상",
+            `<div class="selection-endpoint-grid">${endpointCard("Source", sourceNode)}${endpointCard("Target", targetNode)}</div>`
+        )}
+        ${sectionBlock("연결 Endpoint Alert", renderAlertCards(edgeAlerts.slice(0, 4), "연결된 endpoint에 열린 alert가 없습니다."))}
+        ${sectionBlock("연결 Endpoint Event", renderGroupedEventCards(edgeEvents.slice(0, 4), "연결된 endpoint의 recent grouped event가 없습니다."))}
     `;
 }
 
 function render() {
+    if (state.selectedNodeId !== null && !state.nodes.some((item) => item.id === state.selectedNodeId)) {
+        state.selectedNodeId = null;
+    }
+    if (state.selectedEdgeId !== null && !state.edges.some((item) => item.id === state.selectedEdgeId)) {
+        state.selectedEdgeId = null;
+    }
     const latestStatesByTargetId = new Map(state.latestStates.map((item) => [item.target_id, item]));
     const latestStatesByMonitoredObjectId = new Map(
         state.latestStates
@@ -405,15 +676,22 @@ function render() {
         edges: state.edges,
         notationDefinitionsByCode: state.notationDefinitionsByCode,
         selectedNodeId: state.selectedNodeId,
+        selectedEdgeId: state.selectedEdgeId,
         latestStatesByTargetId,
         latestStatesByMonitoredObjectId,
         alertsByMonitoredObjectId,
         onNodeClick: (node, event) => {
             event.stopPropagation();
             state.selectedNodeId = node.id;
+            state.selectedEdgeId = null;
             render();
         },
-        onEdgeClick: (_edge, event) => event.stopPropagation(),
+        onEdgeClick: (edge, event) => {
+            event.stopPropagation();
+            state.selectedNodeId = null;
+            state.selectedEdgeId = edge.id;
+            render();
+        },
     });
     renderAgentSummary();
     renderAlerts();
@@ -523,11 +801,12 @@ agentSummary?.addEventListener("click", (event) => {
         return;
     }
     state.selectedNodeId = Number(card.dataset.nodeId);
+    state.selectedEdgeId = null;
     render();
 });
 svg.addEventListener("click", () => {
     state.selectedNodeId = null;
-    renderSelection();
+    state.selectedEdgeId = null;
     render();
 });
 

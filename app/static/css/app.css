@@ -695,6 +695,88 @@ a {
     margin-bottom: 10px;
 }
 
+.selection-summary-section {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 16px;
+    border: 1px solid var(--line);
+    background: rgba(255, 253, 248, 0.74);
+}
+
+.selection-summary-section h3,
+.selection-summary-section p {
+    margin: 0;
+}
+
+.selection-summary-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.selection-summary-card-list {
+    display: grid;
+    gap: 10px;
+}
+
+.selection-summary-card {
+    display: grid;
+    gap: 6px;
+    padding: 12px;
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    background: var(--panel-strong);
+}
+
+.selection-summary-card h4,
+.selection-summary-card p {
+    margin: 0;
+}
+
+.selection-summary-card p {
+    color: var(--muted);
+}
+
+.selection-summary-card.is-warning {
+    background: var(--warning-soft);
+}
+
+.selection-summary-card.is-critical {
+    background: var(--danger-soft);
+}
+
+.selection-summary-card.is-ok {
+    background: var(--ok-soft);
+}
+
+.selection-fanout-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.selection-fanout-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 0 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--panel-strong);
+    color: var(--muted);
+    font-size: 0.84rem;
+}
+
+.selection-endpoint-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+}
+
 .hint-box {
     padding: 16px;
     border-radius: 16px;

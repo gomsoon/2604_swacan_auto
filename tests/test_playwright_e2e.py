@@ -362,7 +362,10 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     expect(page.get_by_role("heading", name="최근 이벤트")).to_be_visible()
 
     monitor_server_node = page.locator('g.diagram-node[data-node-type="PhysicalServer"]').first
+    monitor_process_node = page.locator('g.diagram-node[data-node-type="SoftwareProcess"]', has_text="Worker Alpha").first
+    monitor_process_shape = monitor_process_node.locator(".node-shape").first
     monitor_agent_shape = page.locator('g.diagram-node[data-node-type="MonitoringAgent"] .node-shape').first
+    monitor_edge = page.locator("path.diagram-edge").first
     expect(page.locator('g.diagram-node[data-notation-code="server.physical.rect"]')).to_have_count(1)
     expect(page.locator('g.diagram-node[data-notation-code="agent.rounded_rect.double_border"] .node-double-border')).to_have_count(1)
 
@@ -382,6 +385,25 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     expect(page.locator("#monitor-selection-summary")).to_contain_text("백엔드 연결")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("connected")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("last ack seq")
+
+    monitor_process_shape.click(force=True)
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("Worker Alpha")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("Runtime Binding")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("app_main")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("1302")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("fan-out")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("최근 Grouped Event")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("process_restarted")
+
+    monitor_edge.dispatch_event("click")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("monitors")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("연결된 Runtime 대상")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("Source")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("Target")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("Worker Alpha")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("Agent Alpha")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("연결 Endpoint Event")
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("process_restarted")
 
     expect(page.locator("#events-list")).to_contain_text("process_restarted")
     expect(page.locator("#events-list")).to_contain_text("Playwright process restarted")
