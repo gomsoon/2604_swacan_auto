@@ -106,6 +106,76 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     page.get_by_role("button", name="모두 펼치기").click()
     page.locator("#outline-search-input").fill("")
 
+    worker_group = page.locator('g.diagram-node[data-node-type="SoftwareProcess"]', has_text="Worker Alpha").first
+    vm_group = page.locator('g.diagram-node[data-node-type="VirtualMachine"]').first
+    agent_group = page.locator('g.diagram-node[data-node-type="MonitoringAgent"]').first
+    worker_box = worker_group.bounding_box()
+    vm_box = vm_group.bounding_box()
+    agent_box = agent_group.bounding_box()
+    assert worker_box is not None
+    assert vm_box is not None
+    assert agent_box is not None
+    page.mouse.move(worker_box["x"] + worker_box["width"] / 2, worker_box["y"] + worker_box["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(vm_box["x"] + vm_box["width"] / 2, vm_box["y"] + vm_box["height"] / 2, steps=8)
+    expect(vm_group).to_have_class(re.compile(r".*is-containment-candidate.*"))
+    page.mouse.up()
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        current_draft = db_conn.execute(
+            """
+            SELECT id
+            FROM view_versions
+            WHERE view_id = ? AND status = 'draft'
+            ORDER BY version_no DESC, id DESC
+            LIMIT 1
+            """,
+            (view_id,),
+        ).fetchone()
+        worker_alpha_row = db_conn.execute(
+            """
+            SELECT child.parent_node_id, parent.node_type AS parent_type
+            FROM view_version_nodes AS child
+            LEFT JOIN view_version_nodes AS parent ON parent.id = child.parent_node_id
+            WHERE child.view_version_id = ? AND child.display_name = 'Worker Alpha'
+            LIMIT 1
+            """,
+            (current_draft["id"],),
+        ).fetchone()
+        assert worker_alpha_row["parent_type"] == "VirtualMachine"
+
+    worker_box_after = worker_group.bounding_box()
+    assert worker_box_after is not None
+    page.mouse.move(worker_box_after["x"] + worker_box_after["width"] / 2, worker_box_after["y"] + worker_box_after["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(agent_box["x"] + agent_box["width"] / 2, agent_box["y"] + agent_box["height"] / 2, steps=8)
+    page.mouse.up()
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        current_draft_after_invalid = db_conn.execute(
+            """
+            SELECT id
+            FROM view_versions
+            WHERE view_id = ? AND status = 'draft'
+            ORDER BY version_no DESC, id DESC
+            LIMIT 1
+            """,
+            (view_id,),
+        ).fetchone()
+        worker_alpha_row_after_invalid = db_conn.execute(
+            """
+            SELECT child.parent_node_id, parent.node_type AS parent_type
+            FROM view_version_nodes AS child
+            LEFT JOIN view_version_nodes AS parent ON parent.id = child.parent_node_id
+            WHERE child.view_version_id = ? AND child.display_name = 'Worker Alpha'
+            LIMIT 1
+            """,
+            (current_draft_after_invalid["id"],),
+        ).fetchone()
+        assert worker_alpha_row_after_invalid["parent_type"] == "VirtualMachine"
+
     page.locator('#editor-outline-tree .outline-item', has_text="Worker Alpha").click()
     expect(page.locator("#selection-kind")).to_contain_text("Software Process")
     expect(page.locator("#node-display-name")).to_have_value("Worker Alpha")
@@ -277,7 +347,10 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
 
     monitor_server_node = page.locator('g.diagram-node[data-node-type="PhysicalServer"]').first
     monitor_agent_shape = page.locator('g.diagram-node[data-node-type="MonitoringAgent"] .node-shape').first
-    monitor_process_shape = page.locator('g.diagram-node[data-node-type="SoftwareProcess"]', has_text="Worker Alpha").locator(".node-shape").first
+    monitor_process_group = page.locator(
+        'g.diagram-node[data-node-type="SoftwareProcess"]',
+        has_text="Worker Alpha",
+    ).first
     expect(page.locator('g.diagram-node[data-notation-code="server.physical.rect"]')).to_have_count(1)
     expect(page.locator('g.diagram-node[data-notation-code="agent.rounded_rect.double_border"] .node-double-border')).to_have_count(1)
 
@@ -298,7 +371,13 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     expect(page.locator("#monitor-selection-summary")).to_contain_text("connected")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("last ack seq")
 
-    monitor_process_shape.click(force=True)
+    monitor_process_group.evaluate(
+        """
+        (element) => {
+            element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+        }
+        """
+    )
     expect(page.locator("#monitor-selection-summary")).to_contain_text("Worker Alpha")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("프로세스 상태")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("최근 이벤트")

@@ -484,6 +484,91 @@ function getContainmentPreviewGuide() {
     };
 }
 
+function pointHitsNode(point, node) {
+    return (
+        point.x >= node.x &&
+        point.x <= node.x + node.width &&
+        point.y >= node.y &&
+        point.y <= node.y + node.height
+    );
+}
+
+function describeContainmentDropReason(childNode, hoveredNode, allowedParentTypeCodes, dragNodeIds) {
+    if (!hoveredNode) {
+        if (allowedParentTypeCodes.length === 0) {
+            return "루트 위치에 둘 수 있습니다.";
+        }
+        return "이 semantic type은 허용된 상위 containment 안에 있어야 합니다.";
+    }
+    if (dragNodeIds.has(hoveredNode.id)) {
+        return "자기 자신이나 하위 노드 아래로는 이동할 수 없습니다.";
+    }
+    const hoveredType = hoveredNode.semantic_type_code || hoveredNode.node_type;
+    if (!allowedParentTypeCodes.includes(hoveredType)) {
+        const childType = getSemanticType(childNode.semantic_type_code || childNode.node_type)?.display_name || childNode.node_type;
+        const parentType = getSemanticType(hoveredType)?.display_name || hoveredType;
+        return `${childType}은(는) ${parentType} 아래로 이동할 수 없습니다.`;
+    }
+    const parentType = getSemanticType(hoveredType)?.display_name || hoveredType;
+    return `${parentType} 아래로 containment 이동합니다.`;
+}
+
+function getDragContainmentGuide() {
+    if (!state.drag?.reparent) {
+        return {
+            candidateIds: new Set(),
+            blockedIds: new Set(),
+            recommendedParentId: null,
+            hoveredBlockedId: null,
+            reason: null,
+        };
+    }
+    return {
+        candidateIds: state.drag.reparent.candidateIds,
+        blockedIds: state.drag.reparent.blockedTargetId ? new Set([state.drag.reparent.blockedTargetId]) : new Set(),
+        recommendedParentId: state.drag.reparent.dropTargetId,
+        hoveredBlockedId: state.drag.reparent.blockedTargetId,
+        reason: state.drag.reparent.reason,
+    };
+}
+
+function findContainmentDropState(point, drag) {
+    const node = getNode(drag.sourceNodeId);
+    if (!node) {
+        return {
+            dropTargetId: null,
+            blockedTargetId: null,
+            reason: null,
+        };
+    }
+
+    const hoveredNode = [...state.nodes]
+        .filter((candidate) => !drag.dragNodeIds.has(candidate.id) && pointHitsNode(point, candidate))
+        .sort((left, right) => (right.layer_order ?? 0) - (left.layer_order ?? 0) || right.id - left.id)[0] || null;
+
+    if (!hoveredNode) {
+        return {
+            dropTargetId: null,
+            blockedTargetId: null,
+            reason: describeContainmentDropReason(node, null, drag.allowedParentTypeCodes, drag.dragNodeIds),
+        };
+    }
+
+    if (drag.candidateIds.has(hoveredNode.id)) {
+        return {
+            dropTargetId: hoveredNode.id,
+            blockedTargetId: null,
+            reason: describeContainmentDropReason(node, hoveredNode, drag.allowedParentTypeCodes, drag.dragNodeIds),
+        };
+    }
+
+    return {
+        dropTargetId: null,
+        blockedTargetId: hoveredNode.id,
+        reason: describeContainmentDropReason(node, hoveredNode, drag.allowedParentTypeCodes, drag.dragNodeIds),
+    };
+}
+
 function getConnectGuide() {
     if (!state.connectSourceId) {
         return {
@@ -707,6 +792,9 @@ function renderOutlineNode(node, depth = 0, guides = {}) {
     if (guides.containmentCandidateIds?.has(node.id)) {
         item.classList.add("is-containment-candidate");
     }
+    if (guides.containmentBlockedIds?.has(node.id)) {
+        item.classList.add("is-containment-blocked");
+    }
     if (guides.recommendedParentId === node.id) {
         item.classList.add("is-containment-target");
     }
@@ -760,6 +848,11 @@ function renderOutlineNode(node, depth = 0, guides = {}) {
         candidateBadge.className = "outline-badge ok";
         candidateBadge.textContent = "허용 parent";
         meta.appendChild(candidateBadge);
+    } else if (guides.containmentBlockedIds?.has(node.id)) {
+        const blockedBadge = document.createElement("span");
+        blockedBadge.className = "outline-badge warning";
+        blockedBadge.textContent = "containment 불가";
+        meta.appendChild(blockedBadge);
     }
 
     if (guides.connectCandidateIds?.has(node.id)) {
@@ -1201,7 +1294,14 @@ function syncSelectionPanel() {
 
 function render() {
     const containmentGuide = getContainmentPreviewGuide();
+    const dragContainmentGuide = getDragContainmentGuide();
     const connectGuide = getConnectGuide();
+    const mergedContainmentCandidateIds = new Set([
+        ...containmentGuide.candidateIds,
+        ...dragContainmentGuide.candidateIds,
+    ]);
+    const mergedContainmentBlockedIds = dragContainmentGuide.blockedIds;
+    const recommendedParentId = dragContainmentGuide.recommendedParentId ?? containmentGuide.recommendedParentId;
     renderDiagram(svg, {
         nodes: state.nodes,
         edges: state.edges,
@@ -1211,8 +1311,10 @@ function render() {
         connectSourceId: state.connectSourceId,
         connectCandidateIds: connectGuide.candidateIds,
         connectBlockedIds: connectGuide.blockedIds,
-        containmentCandidateIds: containmentGuide.candidateIds,
-        containmentRecommendedParentId: containmentGuide.recommendedParentId,
+        containmentCandidateIds: mergedContainmentCandidateIds,
+        containmentBlockedIds: mergedContainmentBlockedIds,
+        containmentRecommendedParentId: recommendedParentId,
+        draggingNodeIds: state.drag?.dragNodeIds || new Set(),
         onNodeClick: handleNodeClick,
         onNodePointerDown: handleNodePointerDown,
         onEdgeClick: handleEdgeClick,
@@ -1221,8 +1323,9 @@ function render() {
     renderOutline({
         connectCandidateIds: connectGuide.candidateIds,
         connectBlockedIds: connectGuide.blockedIds,
-        containmentCandidateIds: containmentGuide.candidateIds,
-        recommendedParentId: containmentGuide.recommendedParentId,
+        containmentCandidateIds: mergedContainmentCandidateIds,
+        containmentBlockedIds: mergedContainmentBlockedIds,
+        recommendedParentId,
     });
     refreshPaletteInteractivity();
     refreshPalettePreviewState();
@@ -1521,21 +1624,43 @@ function handleNodePointerDown(node, event) {
 
     event.stopPropagation();
     const origin = clientToSvg(svg, event.clientX, event.clientY);
-    const affectedIds = node.node_type === "PhysicalServer" ? getDescendantIds(node.id) : [node.id];
+    const affectedIds = getDescendantIds(node.id);
     const startPositions = new Map(
         affectedIds.map((nodeId) => {
             const current = getNode(nodeId);
             return [nodeId, { x: current.x, y: current.y }];
         })
     );
+    const allowedParentTypeCodes = getAllowedParentTypeCodes(node.semantic_type_code || node.node_type);
+    const dragNodeIds = new Set(affectedIds);
+    const candidateIds = new Set(
+        state.nodes
+            .filter((candidate) => {
+                if (dragNodeIds.has(candidate.id)) {
+                    return false;
+                }
+                const candidateType = candidate.semantic_type_code || candidate.node_type;
+                return allowedParentTypeCodes.includes(candidateType);
+            })
+            .map((candidate) => candidate.id)
+    );
 
     state.selectedNodeId = node.id;
     state.selectedEdgeId = null;
     state.drag = {
         anchor: origin,
+        sourceNodeId: node.id,
         affectedIds,
+        dragNodeIds,
         startPositions,
         moved: false,
+        reparent: {
+            allowedParentTypeCodes,
+            candidateIds,
+            dropTargetId: null,
+            blockedTargetId: null,
+            reason: null,
+        },
     };
     render();
 }
@@ -1615,6 +1740,11 @@ svg.addEventListener("pointermove", (event) => {
         const start = state.drag.startPositions.get(node.id);
         return { ...node, x: Math.round(start.x + dx), y: Math.round(start.y + dy) };
     });
+    const dropState = findContainmentDropState(point, state.drag);
+    state.drag.reparent = {
+        ...state.drag.reparent,
+        ...dropState,
+    };
     render();
 });
 
@@ -1629,11 +1759,51 @@ svg.addEventListener("pointerup", async () => {
         return;
     }
 
+    const reparentNode = getNode(drag.sourceNodeId);
+    const nextParentNodeId = drag.reparent?.dropTargetId ?? null;
+    const previousParentNodeId = reparentNode?.parent_node_id ?? null;
+    const requiresParent = (drag.reparent?.allowedParentTypeCodes?.length || 0) > 0;
+    const blockedReason = drag.reparent?.blockedTargetId ? drag.reparent.reason : null;
+    if (blockedReason) {
+        state.nodes = state.nodes.map((node) => {
+            if (!drag.affectedIds.includes(node.id)) {
+                return node;
+            }
+            const start = drag.startPositions.get(node.id);
+            return start ? { ...node, x: start.x, y: start.y } : node;
+        });
+        render();
+        showBanner(blockedReason, "error");
+        setStatus("허용되지 않는 containment 대상이어서 위치를 되돌렸습니다.");
+        return;
+    }
+    if (reparentNode && nextParentNodeId !== previousParentNodeId) {
+        if (nextParentNodeId !== null || !requiresParent) {
+            state.nodes = state.nodes.map((node) =>
+                node.id === drag.sourceNodeId ? { ...node, parent_node_id: nextParentNodeId } : node
+            );
+            if (nextParentNodeId) {
+                expandOutlineAncestors(nextParentNodeId);
+                expandOutlineAncestors(drag.sourceNodeId);
+                markOutlineSelectionForScroll();
+            }
+        }
+    }
+
     state.lastDragAt = Date.now();
     setStatus("레이아웃을 저장하는 중입니다.");
     try {
         await persistLayout();
-        setStatus("레이아웃이 저장되었습니다.");
+        if (reparentNode && nextParentNodeId !== previousParentNodeId && (nextParentNodeId !== null || !requiresParent)) {
+            const parentNode = nextParentNodeId ? getNode(nextParentNodeId) : null;
+            setStatus(
+                parentNode
+                    ? `${reparentNode.display_name}을(를) ${parentNode.display_name} 아래로 이동하고 레이아웃을 저장했습니다.`
+                    : `${reparentNode.display_name}을(를) 루트 위치로 이동하고 레이아웃을 저장했습니다.`
+            );
+        } else {
+            setStatus("레이아웃이 저장되었습니다.");
+        }
     } catch (error) {
         showBanner(error.message, "error");
         await loadView();

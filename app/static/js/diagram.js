@@ -173,7 +173,9 @@ export function renderDiagram(svg, options) {
         connectCandidateIds = new Set(),
         connectBlockedIds = new Set(),
         containmentCandidateIds = new Set(),
+        containmentBlockedIds = new Set(),
         containmentRecommendedParentId = null,
+        draggingNodeIds = new Set(),
         latestStatesByTargetId = new Map(),
         latestStatesByMonitoredObjectId = new Map(),
         alertsByMonitoredObjectId = new Map(),
@@ -280,8 +282,14 @@ export function renderDiagram(svg, options) {
         if (containmentCandidateIds instanceof Set && containmentCandidateIds.has(node.id)) {
             classes.push("is-containment-candidate");
         }
+        if (containmentBlockedIds instanceof Set && containmentBlockedIds.has(node.id)) {
+            classes.push("is-containment-blocked");
+        }
         if (containmentRecommendedParentId === node.id) {
             classes.push("is-containment-target");
+        }
+        if (draggingNodeIds instanceof Set && draggingNodeIds.has(node.id)) {
+            classes.push("is-dragging");
         }
         if (statusClass) {
             classes.push(statusClass);
@@ -290,6 +298,7 @@ export function renderDiagram(svg, options) {
         const group = svgEl("g", {
             class: classes.join(" "),
             transform: `translate(${node.x}, ${node.y})`,
+            "pointer-events": "bounding-box",
         });
         group.dataset.nodeId = String(node.id);
         group.dataset.nodeType = node.node_type;
