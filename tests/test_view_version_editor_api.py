@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from app.db import get_db
 
 
@@ -54,6 +56,97 @@ def test_view_version_monitored_objects_returns_current_binding_and_matches(seed
     assert payload["current_binding"]["id"] == 1304
     assert payload["current_binding"]["runtime_binding_key"] == "agent_local:host"
     assert any(item["display_name"] == "App Process" for item in payload["items"])
+
+
+def test_view_version_monitored_objects_rejects_invalid_current_node_id(seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+
+    response = seeded_client.get(
+        f"/api/view-versions/{version_id}/monitored-objects",
+        query_string={"current_node_id": "invalid"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_view_version_monitored_objects_returns_duplicate_and_latest_state_preview(seeded_app, seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+    server_node = next(node for node in draft_payload["nodes"] if node["node_type"] == "PhysicalServer")
+    process_node = next(node for node in draft_payload["nodes"] if node["node_type"] == "SoftwareProcess")
+
+    create_duplicate_response = seeded_client.post(
+        f"/api/view-versions/{version_id}/nodes",
+        json={
+            "revision": draft_payload["version"]["revision"],
+            "node_type": "SoftwareProcess",
+            "parent_node_id": server_node["id"],
+            "display_name": "Duplicate App Process",
+            "target_id": "app_main",
+            "x": 120,
+            "y": 180,
+            "width": 180,
+            "height": 72,
+        },
+    )
+    assert create_duplicate_response.status_code == 201
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        monitored_object_row = db_conn.execute(
+            """
+            SELECT id
+            FROM monitored_objects
+            WHERE runtime_binding_key = 'app_main'
+            LIMIT 1
+            """
+        ).fetchone()
+        db_conn.execute(
+            """
+            INSERT INTO latest_states (
+                id, view_node_id, monitored_object_id, target_id, state_type, status, severity,
+                state_json, occurred_at, received_at, updated_at
+            ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                9910,
+                monitored_object_row["id"],
+                "app_main",
+                "process",
+                "warning",
+                "warning",
+                json.dumps({"cpu_usage": 88.2}),
+                "2026-04-12T21:00:00.000+09:00",
+                "2026-04-12T21:00:01.000+09:00",
+                "2026-04-12T21:00:01.000+09:00",
+            ),
+        )
+        db_conn.commit()
+
+    response = seeded_client.get(
+        f"/api/view-versions/{version_id}/monitored-objects",
+        query_string={
+            "current_node_id": process_node["id"],
+            "current_target_id": "app_main",
+            "limit": 5,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["current_target"]["value"] == "app_main"
+    assert payload["current_target"]["is_mapped"] is True
+    assert payload["current_target"]["duplicate_node_count"] == 1
+    assert payload["current_target"]["duplicate_node_names"] == ["Duplicate App Process"]
+    assert payload["current_binding"]["draft_binding_count"] == 1
+    assert payload["current_binding"]["draft_binding_names"] == ["Duplicate App Process"]
+    assert payload["current_binding"]["latest_state"]["status"] == "warning"
+    assert payload["current_binding"]["latest_state"]["severity"] == "warning"
+    assert payload["current_binding"]["runtime_kind"] == "process"
 
 
 def test_view_version_monitored_objects_rejects_invalid_limit(seeded_client) -> None:

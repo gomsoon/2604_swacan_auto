@@ -77,15 +77,51 @@ def parse_monitored_object_limit():
     return limit, None
 
 
+def parse_optional_current_node_id():
+    raw = request.args.get("current_node_id")
+    if raw is None or raw == "":
+        return None, None
+    try:
+        return int(raw), None
+    except (TypeError, ValueError):
+        return None, error_response("validation_error", "current_node_id must be an integer", 400)
+
+
+def infer_runtime_kind_from_object_type(object_type: str | None) -> str | None:
+    if not object_type:
+        return None
+    normalized = object_type.lower()
+    if "agent" in normalized:
+        return "agent"
+    if "process" in normalized:
+        return "process"
+    if "host" in normalized or "server" in normalized or "virtualmachine" in normalized:
+        return "host"
+    return None
+
+
 def serialize_monitored_object(row) -> dict[str, Any]:
+    latest_state = None
+    if "latest_state_type" in row.keys() and row["latest_state_type"] is not None:
+        latest_state = {
+            "state_type": row["latest_state_type"],
+            "status": row["latest_status"],
+            "severity": row["latest_severity"],
+            "occurred_at": row["latest_occurred_at"],
+            "received_at": row["latest_received_at"],
+        }
     return {
         "id": row["id"],
         "object_type": row["object_type"],
         "display_name": row["display_name"],
         "runtime_binding_key": row["runtime_binding_key"],
+        "runtime_kind": row["runtime_kind"] if "runtime_kind" in row.keys() else infer_runtime_kind_from_object_type(row["object_type"]),
         "active_view_count": row["active_view_count"],
         "active_node_count": row["active_node_count"],
         "open_alert_count": row["open_alert_count"],
+        "draft_binding_count": row["draft_binding_count"] if "draft_binding_count" in row.keys() else 0,
+        "draft_binding_names": json.loads(row["draft_binding_names_json"] or "[]") if "draft_binding_names_json" in row.keys() else [],
+        "latest_state": latest_state,
     }
 
 
@@ -542,9 +578,24 @@ def list_version_monitored_objects(version_id: int):
     limit, limit_error = parse_monitored_object_limit()
     if limit_error:
         return limit_error
+    current_node_id, node_error = parse_optional_current_node_id()
+    if node_error:
+        return node_error
 
     query = (request.args.get("query") or "").strip()
     current_target_id = (request.args.get("current_target_id") or "").strip()
+    if current_node_id is not None:
+        owned_node = get_db().execute(
+            """
+            SELECT id
+            FROM view_version_nodes
+            WHERE view_version_id = ? AND id = ? AND is_deleted = 0
+            """,
+            (version_id, current_node_id),
+        ).fetchone()
+        if owned_node is None:
+            return error_response("validation_error", "current_node_id must belong to the selected draft version", 400)
+
     clauses: list[str] = ["mo.runtime_binding_key IS NOT NULL"]
     params: list[Any] = []
 
@@ -586,11 +637,71 @@ def list_version_monitored_objects(version_id: int):
                 WHERE alerts.monitored_object_id = mo.id
                   AND alerts.status != 'resolved'
             ) AS open_alert_count
+            ,
+            (
+                SELECT COUNT(*)
+                FROM node_bindings AS nb
+                JOIN view_version_nodes AS vn ON vn.id = nb.view_version_node_id
+                WHERE nb.monitored_object_id = mo.id
+                  AND vn.view_version_id = ?
+                  AND vn.is_deleted = 0
+                  AND (? IS NULL OR vn.id != ?)
+            ) AS draft_binding_count,
+            (
+                SELECT json_group_array(vn.display_name)
+                FROM (
+                    SELECT vn.display_name
+                    FROM node_bindings AS nb
+                    JOIN view_version_nodes AS vn ON vn.id = nb.view_version_node_id
+                    WHERE nb.monitored_object_id = mo.id
+                      AND vn.view_version_id = ?
+                      AND vn.is_deleted = 0
+                      AND (? IS NULL OR vn.id != ?)
+                    ORDER BY vn.display_name ASC, vn.id ASC
+                    LIMIT 5
+                ) AS vn
+            ) AS draft_binding_names_json,
+            (
+                SELECT ls.state_type
+                FROM latest_states AS ls
+                WHERE ls.monitored_object_id = mo.id
+                ORDER BY ls.updated_at DESC, ls.id DESC
+                LIMIT 1
+            ) AS latest_state_type,
+            (
+                SELECT ls.status
+                FROM latest_states AS ls
+                WHERE ls.monitored_object_id = mo.id
+                ORDER BY ls.updated_at DESC, ls.id DESC
+                LIMIT 1
+            ) AS latest_status,
+            (
+                SELECT ls.severity
+                FROM latest_states AS ls
+                WHERE ls.monitored_object_id = mo.id
+                ORDER BY ls.updated_at DESC, ls.id DESC
+                LIMIT 1
+            ) AS latest_severity,
+            (
+                SELECT ls.occurred_at
+                FROM latest_states AS ls
+                WHERE ls.monitored_object_id = mo.id
+                ORDER BY ls.updated_at DESC, ls.id DESC
+                LIMIT 1
+            ) AS latest_occurred_at,
+            (
+                SELECT ls.received_at
+                FROM latest_states AS ls
+                WHERE ls.monitored_object_id = mo.id
+                ORDER BY ls.updated_at DESC, ls.id DESC
+                LIMIT 1
+            ) AS latest_received_at
         FROM monitored_objects AS mo
     """
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
     sql += f" ORDER BY {order_prefix}mo.display_name ASC, mo.id ASC LIMIT ?"
+    params = [version_id, current_node_id, current_node_id, version_id, current_node_id, current_node_id, *params]
     params.append(limit)
 
     rows = get_db().execute(sql, tuple(params)).fetchall()
@@ -625,19 +736,112 @@ def list_version_monitored_objects(version_id: int):
                     WHERE alerts.monitored_object_id = mo.id
                       AND alerts.status != 'resolved'
                 ) AS open_alert_count
+                ,
+                (
+                    SELECT COUNT(*)
+                    FROM node_bindings AS nb
+                    JOIN view_version_nodes AS vn ON vn.id = nb.view_version_node_id
+                    WHERE nb.monitored_object_id = mo.id
+                      AND vn.view_version_id = ?
+                      AND vn.is_deleted = 0
+                      AND (? IS NULL OR vn.id != ?)
+                ) AS draft_binding_count,
+                (
+                    SELECT json_group_array(vn.display_name)
+                    FROM (
+                        SELECT vn.display_name
+                        FROM node_bindings AS nb
+                        JOIN view_version_nodes AS vn ON vn.id = nb.view_version_node_id
+                        WHERE nb.monitored_object_id = mo.id
+                          AND vn.view_version_id = ?
+                          AND vn.is_deleted = 0
+                          AND (? IS NULL OR vn.id != ?)
+                        ORDER BY vn.display_name ASC, vn.id ASC
+                        LIMIT 5
+                    ) AS vn
+                ) AS draft_binding_names_json,
+                (
+                    SELECT ls.state_type
+                    FROM latest_states AS ls
+                    WHERE ls.monitored_object_id = mo.id
+                    ORDER BY ls.updated_at DESC, ls.id DESC
+                    LIMIT 1
+                ) AS latest_state_type,
+                (
+                    SELECT ls.status
+                    FROM latest_states AS ls
+                    WHERE ls.monitored_object_id = mo.id
+                    ORDER BY ls.updated_at DESC, ls.id DESC
+                    LIMIT 1
+                ) AS latest_status,
+                (
+                    SELECT ls.severity
+                    FROM latest_states AS ls
+                    WHERE ls.monitored_object_id = mo.id
+                    ORDER BY ls.updated_at DESC, ls.id DESC
+                    LIMIT 1
+                ) AS latest_severity,
+                (
+                    SELECT ls.occurred_at
+                    FROM latest_states AS ls
+                    WHERE ls.monitored_object_id = mo.id
+                    ORDER BY ls.updated_at DESC, ls.id DESC
+                    LIMIT 1
+                ) AS latest_occurred_at,
+                (
+                    SELECT ls.received_at
+                    FROM latest_states AS ls
+                    WHERE ls.monitored_object_id = mo.id
+                    ORDER BY ls.updated_at DESC, ls.id DESC
+                    LIMIT 1
+                ) AS latest_received_at
             FROM monitored_objects AS mo
             WHERE mo.runtime_binding_key = ?
             LIMIT 1
             """,
-            (current_target_id,),
+            (version_id, current_node_id, current_node_id, version_id, current_node_id, current_node_id, current_target_id),
         ).fetchone()
         if current_row is not None:
             current_binding = serialize_monitored_object(current_row)
+
+    current_target = None
+    if current_target_id:
+        duplicate_rows = get_db().execute(
+            """
+            SELECT display_name
+            FROM view_version_nodes
+            WHERE view_version_id = ?
+              AND is_deleted = 0
+              AND target_id = ?
+              AND (? IS NULL OR id != ?)
+            ORDER BY display_name ASC, id ASC
+            LIMIT 5
+            """,
+            (version_id, current_target_id, current_node_id, current_node_id),
+        ).fetchall()
+        duplicate_count = get_db().execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM view_version_nodes
+            WHERE view_version_id = ?
+              AND is_deleted = 0
+              AND target_id = ?
+              AND (? IS NULL OR id != ?)
+            """,
+            (version_id, current_target_id, current_node_id, current_node_id),
+        ).fetchone()["count"]
+        current_target = {
+            "value": current_target_id,
+            "is_mapped": current_binding is not None,
+            "duplicate_node_count": duplicate_count,
+            "duplicate_node_names": [row["display_name"] for row in duplicate_rows],
+        }
 
     return {
         "version": serialize_view_version(dict(version_row)),
         "query": query,
         "current_binding": current_binding,
+        "current_target": current_target,
         "items": [serialize_monitored_object(row) for row in rows],
     }
 

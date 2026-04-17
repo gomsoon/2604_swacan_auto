@@ -1,5 +1,6 @@
 ﻿import { apiFetch, clearBanner, readNumber, showBanner, slugify } from "./common.js";
 import { clientToSvg, renderDiagram } from "./diagram.js";
+import { formatTimestamp } from "./common.js";
 import { loadViewVersionMetamodel } from "./metamodel.js";
 const appRoot = document.getElementById("editor-app");
 const svg = document.getElementById("editor-canvas");
@@ -20,6 +21,8 @@ const dynamicPropertiesPanel = document.getElementById("node-dynamic-properties"
 const dynamicPropertiesFields = document.getElementById("node-dynamic-properties-fields");
 const runtimeBindingPanel = document.getElementById("runtime-binding-panel");
 const runtimeBindingSummary = document.getElementById("runtime-binding-summary");
+const runtimeBindingWarning = document.getElementById("runtime-binding-warning");
+const runtimeBindingPreview = document.getElementById("runtime-binding-preview");
 const runtimeBindingQueryInput = document.getElementById("runtime-binding-query");
 const runtimeBindingSearchButton = document.getElementById("runtime-binding-search-button");
 const runtimeBindingClearButton = document.getElementById("runtime-binding-clear-button");
@@ -62,6 +65,7 @@ const state = {
         query: "",
         items: [],
         currentBinding: null,
+        currentTarget: null,
         loading: false,
         lastRequestSignature: null,
         token: 0,
@@ -1066,10 +1070,15 @@ function collectDynamicProperties(node) {
     return nextProperties;
 }
 
+function getCurrentTargetId(node) {
+    return formFields.targetId?.value.trim() || node?.target_id || "";
+}
+
 function getRuntimeBindingRequestSignature(node) {
     return JSON.stringify({
         nodeId: node?.id || null,
-        targetId: node?.target_id || "",
+        currentNodeId: node?.id || null,
+        targetId: getCurrentTargetId(node),
         query: state.bindingSearch.query.trim(),
     });
 }
@@ -1081,6 +1090,168 @@ function getRuntimeBindingDisplay(item) {
     return item.runtime_binding_key || item.display_name || `object #${item.id}`;
 }
 
+function resolveRuntimeBindingSelection(node) {
+    const targetIdValue = getCurrentTargetId(node);
+    if (!targetIdValue) {
+        return null;
+    }
+    if (state.bindingSearch.pendingSelection?.runtime_binding_key === targetIdValue) {
+        return state.bindingSearch.pendingSelection;
+    }
+    if (state.bindingSearch.currentBinding?.runtime_binding_key === targetIdValue) {
+        return state.bindingSearch.currentBinding;
+    }
+    return (state.bindingSearch.items || []).find((item) => item.runtime_binding_key === targetIdValue) || null;
+}
+
+function runtimeKindsMatch(semanticType, bindingItem) {
+    const expectedRuntimeKind = semanticType?.runtime_kind || null;
+    const actualRuntimeKind = bindingItem?.runtime_kind || null;
+    if (!expectedRuntimeKind || !actualRuntimeKind) {
+        return true;
+    }
+    return expectedRuntimeKind === actualRuntimeKind;
+}
+
+function getLatestStateTone(item) {
+    const severity = item?.latest_state?.severity || "";
+    const status = item?.latest_state?.status || "";
+    if (severity === "critical" || severity === "error" || status === "down" || status === "error") {
+        return "danger";
+    }
+    if (severity === "warning" || status === "warning") {
+        return "warning";
+    }
+    return "ok";
+}
+
+function buildRuntimeBindingWarnings(node, semanticType, previewItem, currentTarget) {
+    const warnings = [];
+    const targetIdValue = getCurrentTargetId(node);
+    if (!targetIdValue) {
+        return warnings;
+    }
+
+    if (currentTarget && !currentTarget.is_mapped) {
+        warnings.push({
+            tone: "danger",
+            message: `현재 target_id '${targetIdValue}'는 monitored object에 매핑되지 않았습니다. 저장은 가능하지만 Monitoring View 연결은 되지 않습니다.`,
+        });
+    }
+
+    if (currentTarget?.duplicate_node_count > 0) {
+        const duplicateNames = currentTarget.duplicate_node_names?.length
+            ? ` (${currentTarget.duplicate_node_names.join(", ")})`
+            : "";
+        warnings.push({
+            tone: "danger",
+            message: `이 draft 안에서 같은 target_id를 사용하는 노드가 ${currentTarget.duplicate_node_count}개 더 있습니다${duplicateNames}.`,
+        });
+    }
+
+    if (previewItem?.draft_binding_count > 0) {
+        const bindingNames = previewItem.draft_binding_names?.length
+            ? ` (${previewItem.draft_binding_names.join(", ")})`
+            : "";
+        warnings.push({
+            tone: "warning",
+            message: `이 monitored object는 현재 draft에서 다른 노드 ${previewItem.draft_binding_count}개와도 연결되어 있습니다${bindingNames}.`,
+        });
+    }
+
+    if (previewItem && !runtimeKindsMatch(semanticType, previewItem)) {
+        warnings.push({
+            tone: "danger",
+            message: `semantic type runtime kind '${semanticType?.runtime_kind || "-"}'와 monitored object runtime kind '${previewItem.runtime_kind || "-"}'가 일치하지 않습니다.`,
+        });
+    }
+
+    if (previewItem?.open_alert_count > 0) {
+        warnings.push({
+            tone: "warning",
+            message: `현재 이 monitored object에는 open alert가 ${previewItem.open_alert_count}건 있습니다.`,
+        });
+    }
+
+    if (previewItem?.latest_state && getLatestStateTone(previewItem) !== "ok") {
+        warnings.push({
+            tone: getLatestStateTone(previewItem) === "danger" ? "danger" : "warning",
+            message: `latest state가 ${previewItem.latest_state.status || "-"} / ${previewItem.latest_state.severity || "-"} 상태입니다.`,
+        });
+    }
+
+    return warnings;
+}
+
+function renderRuntimeBindingWarningPanel(node, semanticType) {
+    if (!runtimeBindingWarning) {
+        return;
+    }
+    const previewItem = resolveRuntimeBindingSelection(node);
+    const warnings = buildRuntimeBindingWarnings(node, semanticType, previewItem, state.bindingSearch.currentTarget);
+    runtimeBindingWarning.hidden = warnings.length === 0;
+    runtimeBindingWarning.textContent = warnings.map((item) => item.message).join(" ");
+    runtimeBindingWarning.classList.toggle(
+        "is-danger",
+        warnings.some((item) => item.tone === "danger")
+    );
+}
+
+function appendRuntimeBindingPreviewRow(parent, label, value) {
+    const row = document.createElement("p");
+    row.className = "detail-row";
+    const key = document.createElement("span");
+    key.className = "detail-key";
+    key.textContent = label;
+    const detailValue = document.createElement("span");
+    detailValue.className = "detail-value";
+    detailValue.textContent = value || "-";
+    row.append(key, detailValue);
+    parent.appendChild(row);
+}
+
+function renderRuntimeBindingPreview(node) {
+    if (!runtimeBindingPreview) {
+        return;
+    }
+    const previewItem = resolveRuntimeBindingSelection(node);
+    runtimeBindingPreview.hidden = !previewItem;
+    runtimeBindingPreview.replaceChildren();
+    if (!previewItem) {
+        return;
+    }
+
+    const title = document.createElement("div");
+    title.className = "runtime-binding-preview-title";
+    title.textContent = node.target_id && node.target_id === previewItem.runtime_binding_key
+        ? "현재 연결된 Monitored Object"
+        : "저장 전 Monitored Object 미리보기";
+    runtimeBindingPreview.appendChild(title);
+
+    const grid = document.createElement("div");
+    grid.className = "runtime-binding-preview-grid";
+    appendRuntimeBindingPreviewRow(grid, "이름", previewItem.display_name);
+    appendRuntimeBindingPreviewRow(grid, "Binding Key", getRuntimeBindingDisplay(previewItem));
+    appendRuntimeBindingPreviewRow(grid, "Object Type", previewItem.object_type);
+    appendRuntimeBindingPreviewRow(grid, "Runtime Kind", previewItem.runtime_kind || "-");
+    appendRuntimeBindingPreviewRow(grid, "Active View", String(previewItem.active_view_count ?? 0));
+    appendRuntimeBindingPreviewRow(grid, "Active Node", String(previewItem.active_node_count ?? 0));
+    appendRuntimeBindingPreviewRow(grid, "Open Alert", String(previewItem.open_alert_count ?? 0));
+    appendRuntimeBindingPreviewRow(
+        grid,
+        "Latest State",
+        previewItem.latest_state
+            ? `${previewItem.latest_state.state_type || "-"} · ${previewItem.latest_state.status || "-"} · ${previewItem.latest_state.severity || "-"}`
+            : "없음"
+    );
+    appendRuntimeBindingPreviewRow(
+        grid,
+        "최근 수신",
+        previewItem.latest_state?.received_at ? formatTimestamp(previewItem.latest_state.received_at) : "-"
+    );
+    runtimeBindingPreview.appendChild(grid);
+}
+
 function renderRuntimeBindingPanel(node, semanticType) {
     if (!runtimeBindingPanel || !runtimeBindingSummary || !runtimeBindingResults) {
         return;
@@ -1090,6 +1261,12 @@ function renderRuntimeBindingPanel(node, semanticType) {
     runtimeBindingPanel.hidden = !allowsRuntimeBinding;
     if (!allowsRuntimeBinding) {
         runtimeBindingResults.replaceChildren();
+        if (runtimeBindingWarning) {
+            runtimeBindingWarning.hidden = true;
+        }
+        if (runtimeBindingPreview) {
+            runtimeBindingPreview.hidden = true;
+        }
         return;
     }
 
@@ -1099,23 +1276,27 @@ function renderRuntimeBindingPanel(node, semanticType) {
     runtimeBindingClearButton.disabled = !editable;
     runtimeBindingQueryInput.value = state.bindingSearch.query;
 
-    const pendingSelection = state.bindingSearch.pendingSelection;
-    const currentBinding = state.bindingSearch.currentBinding;
-    const targetIdValue = formFields.targetId.value.trim();
+    const targetIdValue = getCurrentTargetId(node);
+    const previewItem = resolveRuntimeBindingSelection(node);
     const isPendingSelection =
-        pendingSelection && pendingSelection.runtime_binding_key === targetIdValue && targetIdValue !== (node.target_id || "");
+        Boolean(previewItem) &&
+        targetIdValue !== "" &&
+        targetIdValue !== (node.target_id || "");
 
     if (state.bindingSearch.loading) {
         runtimeBindingSummary.textContent = "Runtime binding 후보를 불러오는 중입니다.";
-    } else if (isPendingSelection) {
-        runtimeBindingSummary.textContent = `저장 전 선택됨: ${pendingSelection.display_name} · ${getRuntimeBindingDisplay(pendingSelection)}`;
-    } else if (currentBinding) {
-        runtimeBindingSummary.textContent = `현재 binding: ${currentBinding.display_name} · ${getRuntimeBindingDisplay(currentBinding)} · open alert ${currentBinding.open_alert_count}`;
-    } else if (node.target_id) {
-        runtimeBindingSummary.textContent = `현재 target_id는 매핑되지 않았습니다: ${node.target_id}`;
+    } else if (isPendingSelection && previewItem) {
+        runtimeBindingSummary.textContent = `저장 전 변경: ${previewItem.display_name} · ${getRuntimeBindingDisplay(previewItem)}`;
+    } else if (previewItem) {
+        runtimeBindingSummary.textContent = `현재 binding: ${previewItem.display_name} · ${getRuntimeBindingDisplay(previewItem)} · open alert ${previewItem.open_alert_count ?? 0}`;
+    } else if (targetIdValue) {
+        runtimeBindingSummary.textContent = `현재 target_id는 매핑되지 않았습니다: ${targetIdValue}`;
     } else {
         runtimeBindingSummary.textContent = "현재 binding이 없습니다.";
     }
+
+    renderRuntimeBindingWarningPanel(node, semanticType);
+    renderRuntimeBindingPreview(node);
 
     runtimeBindingResults.replaceChildren();
     const items = state.bindingSearch.items || [];
@@ -1133,8 +1314,7 @@ function renderRuntimeBindingPanel(node, semanticType) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "runtime-binding-item";
-        const selectedTargetId = targetIdValue || node.target_id || "";
-        if (item.runtime_binding_key && item.runtime_binding_key === selectedTargetId) {
+        if (item.runtime_binding_key && item.runtime_binding_key === targetIdValue) {
             button.classList.add("is-selected");
         }
 
@@ -1146,8 +1326,10 @@ function renderRuntimeBindingPanel(node, semanticType) {
         meta.className = "runtime-binding-item-meta";
         meta.textContent = [
             item.object_type,
+            item.runtime_kind ? `runtime ${item.runtime_kind}` : null,
             getRuntimeBindingDisplay(item),
-            `open alert ${item.open_alert_count}`,
+            `open alert ${item.open_alert_count ?? 0}`,
+            item.draft_binding_count ? `draft 사용 ${item.draft_binding_count}` : null,
         ]
             .filter(Boolean)
             .join(" · ");
@@ -1156,6 +1338,9 @@ function renderRuntimeBindingPanel(node, semanticType) {
         button.addEventListener("click", () => {
             formFields.targetId.value = item.runtime_binding_key || "";
             state.bindingSearch.pendingSelection = item;
+            state.bindingSearch.currentBinding = null;
+            state.bindingSearch.currentTarget = null;
+            state.bindingSearch.lastRequestSignature = null;
             renderRuntimeBindingPanel(node, semanticType);
             setStatus(`${item.display_name} runtime binding을 적용했습니다. 저장하면 반영됩니다.`);
         });
@@ -1183,12 +1368,14 @@ async function loadRuntimeBindingCandidates(node, { force = false } = {}) {
     try {
         const params = new URLSearchParams();
         const query = state.bindingSearch.query.trim();
+        const targetIdValue = getCurrentTargetId(node);
         if (query) {
             params.set("query", query);
         }
-        if (node.target_id) {
-            params.set("current_target_id", node.target_id);
+        if (targetIdValue) {
+            params.set("current_target_id", targetIdValue);
         }
+        params.set("current_node_id", String(node.id));
         params.set("limit", "8");
 
         const payload = await apiFetch(`${getVersionApiBase()}/monitored-objects?${params.toString()}`);
@@ -1197,11 +1384,13 @@ async function loadRuntimeBindingCandidates(node, { force = false } = {}) {
         }
         state.bindingSearch.items = payload.items || [];
         state.bindingSearch.currentBinding = payload.current_binding || null;
+        state.bindingSearch.currentTarget = payload.current_target || null;
     } catch (error) {
         if (state.bindingSearch.token === token && state.selectedNodeId === node.id) {
             showBanner(error.message, "error");
             state.bindingSearch.items = [];
             state.bindingSearch.currentBinding = null;
+            state.bindingSearch.currentTarget = null;
         }
     } finally {
         if (state.bindingSearch.token === token && state.selectedNodeId === node.id) {
@@ -1225,6 +1414,7 @@ function resetRuntimeBindingPanel(node = null) {
     state.bindingSearch.query = "";
     state.bindingSearch.items = [];
     state.bindingSearch.currentBinding = null;
+    state.bindingSearch.currentTarget = null;
     state.bindingSearch.loading = false;
     state.bindingSearch.lastRequestSignature = null;
     state.bindingSearch.pendingSelection = keepPendingSelection ? existingSelected : null;
@@ -1836,6 +2026,20 @@ runtimeBindingQueryInput?.addEventListener("input", (event) => {
         loadRuntimeBindingCandidates(node, { force: true });
     }
 });
+formFields.targetId?.addEventListener("input", (event) => {
+    const nextValue = event.target.value.trim();
+    if (state.bindingSearch.pendingSelection?.runtime_binding_key !== nextValue) {
+        state.bindingSearch.pendingSelection = null;
+    }
+    state.bindingSearch.currentBinding = null;
+    state.bindingSearch.currentTarget = null;
+    state.bindingSearch.lastRequestSignature = null;
+    const node = getNode(state.selectedNodeId);
+    if (node) {
+        renderRuntimeBindingPanel(node, getSemanticType(node.semantic_type_code || node.node_type));
+        loadRuntimeBindingCandidates(node, { force: true });
+    }
+});
 runtimeBindingSearchButton?.addEventListener("click", () => {
     const node = getNode(state.selectedNodeId);
     if (node) {
@@ -1847,6 +2051,9 @@ runtimeBindingClearButton?.addEventListener("click", () => {
     const node = getNode(state.selectedNodeId);
     formFields.targetId.value = "";
     state.bindingSearch.pendingSelection = null;
+    state.bindingSearch.currentBinding = null;
+    state.bindingSearch.currentTarget = null;
+    state.bindingSearch.lastRequestSignature = null;
     if (node) {
         renderRuntimeBindingPanel(node, getSemanticType(node.semantic_type_code || node.node_type));
         setStatus("Runtime binding을 제거했습니다. 저장하면 반영됩니다.");

@@ -1,61 +1,64 @@
 # Architecture Editor Layout Draft
 
-버전: Draft 0.1  
-작성일: 2026-04-16
+버전: Draft 0.2  
+작성일: 2026-04-17
 
-목적: `Architecture Editor`의 작업공간 레이아웃을 containment 중심 구조에 맞춰 정리하고, 이후 UX 확장의 기준점을 정의한다.
+목적: `Architecture Editor`의 작업공간 레이아웃 원칙과 현재 구현 상태를 정리한다.
 
 ## 1. 기본 방향
 
 - `Architecture Editor`는 `draft View Version`을 편집하는 화면이다.
-- 중심 모델은 자유 배치 도구가 아니라 `containment`를 따르는 구조 편집기다.
-- 따라서 화면은 `좌측 View Outline Tree + 가운데 Architecture Canvas + 우측 Inspector`를 기본 레이아웃으로 사용한다.
+- 이 화면은 자유 배치형 다이어그램 도구라기보다, 메타모델 containment와 association 제약을 따르는 구조 편집기다.
+- 기본 레이아웃은 `좌측 View Outline Tree + 가운데 Architecture Canvas + 우측 Inspector`를 따른다.
 
 ## 2. 화면 구조
 
 ### 2.1 좌측 View Outline Tree
 
-- root는 현재 편집 중인 `draft View Version`이다.
-- 하위 항목은 `containment` 구조에 따라 tree 형태로 정렬한다.
-- tree는 최소한 다음 기능을 제공해야 한다.
-  - containment 계층 탐색
-  - 현재 선택 항목 강조
-  - 선택 시 canvas와 inspector 동기화
-  - 자식 수와 관계선 수 같은 최소 요약 표시
-- `association`과 `CommunicationLink`는 tree의 주 구조가 아니라 보조 정보로 표시한다.
+- root는 현재 편집 중인 `draft View Version`
+- 하위 항목은 containment 구조 기준 tree 정렬
+- 현재 선택과 canvas/inspector 동기화
+- 검색, 모두 펼치기, 모두 접기 지원
+- binding 여부, 자식 수, 관계 수 등 최소 배지 표시
 
 ### 2.2 가운데 Architecture Canvas
 
-- SVG 기반 배치와 연결을 담당한다.
-- 사용자는 palette에서 객체를 추가하고, containment 규칙을 따르며 배치한다.
-- relation 생성 시 메타모델 association 정의를 참고해 기본 edge와 방향을 결정한다.
-- outline에서 선택한 항목과 canvas 선택은 항상 동기화되어야 한다.
+- node와 edge의 실제 배치와 연결을 다룬다.
+- palette를 통한 node 생성
+- relation 생성
+- containment drag-drop 재배치
+- 메타모델 제약 기반 candidate / blocked 가이드 표시
 
 ### 2.3 우측 Inspector
 
-- 현재 선택한 node 또는 edge의 상세 정보를 편집한다.
-- semantic type에 정의된 property를 편집 가능하게 확장하는 방향을 따른다.
-- runtime binding, layout, style, relation summary를 함께 보여줄 수 있어야 한다.
-- outline이나 canvas에서 선택한 항목이 inspector로 즉시 반영되어야 한다.
+- 선택한 node 또는 edge의 상세 편집
+- 메타모델 property 정의 기반 동적 속성 편집
+- runtime binding 검색/선택/미리보기
+- layout, style, relation 요약 확인
 
-## 3. 1차 구현 범위
+## 3. 현재 구현 상태
 
-- `View Outline Tree` 렌더링
-- root + containment tree 표시
-- outline 선택과 canvas / inspector 동기화
-- outline에서 child count, edge count, binding 여부의 최소 배지 표시
+현재 1차 구현 기준으로 다음이 동작한다.
 
-## 4. 후속 확장 후보
+- `View Outline Tree`와 canvas/inspector 선택 동기화
+- outline 검색, 펼치기/접기
+- metamodel snapshot 기반 palette
+- containment / association 제약 검증
+- relation candidate / blocked 시각 가이드
+- containment drag-drop
+- runtime binding 검색, 미리보기, 중복/불일치 경고
 
-- outline 검색
-- 접기 / 펼치기 상태 유지
-- drag 기반 tree 재배치
-- node별 quick action
-- selection sync 시 자동 scroll
-- relation 전용 보조 패널
+## 4. 설계 판단
 
-## 5. 설계 판단
+- `Architecture Editor`는 `Metamodel Editor`에서 정의한 semantic type과 notation을 소비하는 화면이다.
+- 새로운 객체의 의미를 정의하지 않고, 이미 정의된 객체를 배치하고 연결해 `Monitoring View`의 구조를 만든다.
+- 따라서 이 화면의 핵심은 “정의”보다 “구조 배치와 운영 연결”이다.
 
-- `Architecture Editor`는 구조를 편집하는 화면이므로 tree 기반 탐색성이 중요하다.
-- `Monitoring View`는 읽기 중심 화면이므로 동일한 tree 레이아웃을 반드시 요구하지 않는다.
-- `Metamodel Editor`와 유사하게 `좌측 구조 + 가운데 시각 표현 + 우측 inspector` 패턴을 공유하면 제품 전체 UX 일관성이 좋아진다.
+## 5. 후속 방향
+
+- outline tree 기반 대형 view 편집 생산성 강화
+- runtime binding UX polish
+- 제약 기반 직접 편집 2차 고도화
+- Monitoring View와의 반영 경계 안정화
+
+세부 후속 목록은 [architecture-editor-backlog.md](C:/2604_swacan_auto/docs/architecture-editor-backlog.md)에 정리한다.
