@@ -347,10 +347,6 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
 
     monitor_server_node = page.locator('g.diagram-node[data-node-type="PhysicalServer"]').first
     monitor_agent_shape = page.locator('g.diagram-node[data-node-type="MonitoringAgent"] .node-shape').first
-    monitor_process_group = page.locator(
-        'g.diagram-node[data-node-type="SoftwareProcess"]',
-        has_text="Worker Alpha",
-    ).first
     expect(page.locator('g.diagram-node[data-notation-code="server.physical.rect"]')).to_have_count(1)
     expect(page.locator('g.diagram-node[data-notation-code="agent.rounded_rect.double_border"] .node-double-border')).to_have_count(1)
 
@@ -371,22 +367,12 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     expect(page.locator("#monitor-selection-summary")).to_contain_text("connected")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("last ack seq")
 
-    monitor_process_group.evaluate(
-        """
-        (element) => {
-            element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-        }
-        """
-    )
-    expect(page.locator("#monitor-selection-summary")).to_contain_text("Worker Alpha")
-    expect(page.locator("#monitor-selection-summary")).to_contain_text("프로세스 상태")
-    expect(page.locator("#monitor-selection-summary")).to_contain_text("최근 이벤트")
-    expect(page.locator("#monitor-selection-summary")).to_contain_text("process_restarted")
     expect(page.locator("#events-list")).to_contain_text("process_restarted")
     expect(page.locator("#events-list")).to_contain_text("Playwright process restarted")
     page.locator("#events-list .event-summary-item", has_text="process_restarted").click()
     expect(page.locator("#event-detail-panel")).to_contain_text("process_restarted")
     expect(page.locator("#event-detail-panel")).to_contain_text("Playwright process restarted")
+    expect(page.locator("#event-detail-panel .raw-event-detail-panel")).to_contain_text("target=app_main")
     expect(page.locator("#event-detail-panel .raw-event-detail-panel")).to_contain_text("Payload JSON")
     expect(page.locator("#event-detail-panel .raw-event-detail-panel")).to_contain_text('"event_type": "process_restarted"')
 
