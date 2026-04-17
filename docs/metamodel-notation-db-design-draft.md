@@ -1,4 +1,4 @@
-﻿# Software Architecture Runtime Monitoring System
+# Software Architecture Runtime Monitoring System
 
 ## Metamodel/Notation Registry DB 설계 초안
 버전: Draft 0.2  

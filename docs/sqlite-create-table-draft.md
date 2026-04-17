@@ -1,4 +1,4 @@
-﻿# Software Architecture Runtime Monitoring System
+# Software Architecture Runtime Monitoring System
 
 ## SQLite CREATE TABLE 초안
 

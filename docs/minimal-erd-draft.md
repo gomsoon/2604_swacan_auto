@@ -1,4 +1,4 @@
-﻿# Software Architecture Runtime Monitoring System
+# Software Architecture Runtime Monitoring System
 
 ## 최소 ERD 초안
 

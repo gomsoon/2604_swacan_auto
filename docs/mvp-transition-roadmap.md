@@ -1,4 +1,4 @@
-﻿# Software Architecture Runtime Monitoring System
+# Software Architecture Runtime Monitoring System
 
 ## MVP 전환 로드맵
 버전: Draft 0.2  

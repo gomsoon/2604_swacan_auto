@@ -1,4 +1,4 @@
-﻿# Software Architecture Runtime Monitoring System
+# Software Architecture Runtime Monitoring System
 
 ## 최소 E2E 테스트 전략
 
