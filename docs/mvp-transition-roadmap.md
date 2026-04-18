@@ -11,6 +11,8 @@
 - [metamodel-notation-db-design-draft.md](C:/2604_swacan_auto/docs/metamodel-notation-db-design-draft.md)
 - [architecture-editor-layout-draft.md](C:/2604_swacan_auto/docs/architecture-editor-layout-draft.md)
 - [architecture-editor-backlog.md](C:/2604_swacan_auto/docs/architecture-editor-backlog.md)
+- [monitoring-view-backlog.md](C:/2604_swacan_auto/docs/monitoring-view-backlog.md)
+- [monitoring-view-realtime-refresh-draft.md](C:/2604_swacan_auto/docs/monitoring-view-realtime-refresh-draft.md)
 - [terminology-guidelines.md](C:/2604_swacan_auto/docs/terminology-guidelines.md)
 - Git tag: `minimal-e2e-v1`
 
@@ -127,6 +129,7 @@
 - grouped event drill-down UI
 - agent self-state, stale 상태, cleanup 결과의 가시성 보강
 - 필요 시 polling 이후의 실시간 갱신 구조 보강
+- 실시간 갱신은 `view 전체 refreshAll()`보다 `monitored_object 단위 partial refresh`를 우선하고, 느린 주기의 full reconcile을 fallback으로 유지
 
 완료 기준:
 - 운영자가 주요 상태를 적은 클릭으로 파악할 수 있다.

@@ -395,6 +395,64 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     expect(page.locator("#monitor-selection-summary")).to_contain_text("최근 Grouped Event")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("process_restarted")
 
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE latest_states
+            SET state_json = ?, occurred_at = ?, received_at = ?, updated_at = ?
+            WHERE monitored_object_id = ? AND state_type = 'process'
+            """,
+            (
+                json.dumps({"state": "running", "severity": "warning", "cpu_usage": 48.8, "memory_rss": 40960}),
+                "2026-04-12T20:10:03.000+09:00",
+                "2026-04-12T20:10:03.120+09:00",
+                "2026-04-12T20:10:03.120+09:00",
+                1302,
+            ),
+        )
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET latest_message = ?, last_occurred_at = ?, repeat_count = ?, updated_at = ?
+            WHERE monitored_object_id = ?
+            """,
+            (
+                "Playwright process warning escalated",
+                "2026-04-12T20:10:03.200+09:00",
+                2,
+                "2026-04-12T20:10:03.200+09:00",
+                1302,
+            ),
+        )
+        db_conn.execute(
+            """
+            UPDATE grouped_events
+            SET latest_message = ?, last_occurred_at = ?, repeat_count = ?, latest_event_json = ?, updated_at = ?
+            WHERE monitored_object_id = ? AND event_type = 'process_restarted'
+            """,
+            (
+                "Playwright process restarted again",
+                "2026-04-12T20:10:03.300+09:00",
+                2,
+                json.dumps({"restart_count": 2}),
+                "2026-04-12T20:10:03.300+09:00",
+                1302,
+            ),
+        )
+        db_conn.commit()
+
+    monitor_process_shape.click(force=True)
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("48.8", timeout=1500)
+    expect(page.locator("#monitor-selection-summary")).to_contain_text(
+        "Playwright process warning escalated",
+        timeout=1500,
+    )
+    expect(page.locator("#monitor-selection-summary")).to_contain_text(
+        "Playwright process restarted again",
+        timeout=1500,
+    )
+
     monitor_edge.dispatch_event("click")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("monitors")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("연결된 Runtime 대상")

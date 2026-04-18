@@ -9,7 +9,12 @@ from flask import Blueprint, g, request
 from .auth import error_response, login_required
 from .db import get_db
 from .runtime_state import derive_latest_state
-from .view_versioning import get_active_view_target_rows, get_current_draft_view_target_rows
+from .view_versioning import (
+    get_active_view_target_rows,
+    get_active_view_version,
+    get_current_draft_view_target_rows,
+    get_current_draft_view_version,
+)
 
 bp = Blueprint("views_api", __name__, url_prefix="/api/views")
 
@@ -169,7 +174,55 @@ def get_view_target_rows(view_id: int):
     ).fetchall()
 
 
+def get_monitor_target_node_rows(view_id: int):
+    active_row = get_active_view_version(view_id)
+    if active_row is not None:
+        return get_db().execute(
+            """
+            SELECT n.id, n.display_name, n.node_type, n.semantic_type_code, n.notation_code,
+                   n.target_id, n.layer_order, b.monitored_object_id
+            FROM view_version_nodes AS n
+            LEFT JOIN node_bindings AS b ON b.view_version_node_id = n.id AND b.binding_role = 'primary'
+            WHERE n.view_version_id = ? AND n.is_deleted = 0
+              AND (n.target_id IS NOT NULL OR b.monitored_object_id IS NOT NULL)
+            ORDER BY n.layer_order ASC, n.id ASC
+            """,
+            (active_row["id"],),
+        ).fetchall()
+
+    draft_row = get_current_draft_view_version(view_id)
+    if draft_row is not None:
+        return get_db().execute(
+            """
+            SELECT n.id, n.display_name, n.node_type, n.semantic_type_code, n.notation_code,
+                   n.target_id, n.layer_order, b.monitored_object_id
+            FROM view_version_nodes AS n
+            LEFT JOIN node_bindings AS b ON b.view_version_node_id = n.id AND b.binding_role = 'primary'
+            WHERE n.view_version_id = ? AND n.is_deleted = 0
+              AND (n.target_id IS NOT NULL OR b.monitored_object_id IS NOT NULL)
+            ORDER BY n.layer_order ASC, n.id ASC
+            """,
+            (draft_row["id"],),
+        ).fetchall()
+
+    return get_db().execute(
+        """
+        SELECT n.id, n.display_name, n.node_type, n.semantic_type_code, n.notation_code,
+               n.target_id, n.layer_order, mo.id AS monitored_object_id
+        FROM view_nodes AS n
+        LEFT JOIN monitored_objects AS mo ON mo.runtime_binding_key = n.target_id
+        WHERE n.view_id = ? AND n.is_deleted = 0
+          AND (n.target_id IS NOT NULL OR mo.id IS NOT NULL)
+        ORDER BY n.layer_order ASC, n.id ASC
+        """,
+        (view_id,),
+    ).fetchall()
+
+
 def get_monitor_target_rows(view_id: int):
+    node_rows = get_monitor_target_node_rows(view_id)
+    if node_rows:
+        return node_rows
     active_rows = get_active_view_target_rows(view_id)
     if active_rows is not None:
         return active_rows
@@ -276,6 +329,74 @@ def build_runtime_order_maps(target_rows):
         if target_id is not None and target_id not in target_order:
             target_order[target_id] = index
     return object_order, target_order
+
+
+def parse_limit_query_arg(limit_raw: str | None):
+    limit_raw = limit_raw or str(DEFAULT_EVENTS_LIMIT)
+    try:
+        limit = int(limit_raw)
+    except (TypeError, ValueError):
+        return None, error_response("validation_error", "limit must be an integer", 400)
+
+    if limit <= 0 or limit > MAX_EVENTS_LIMIT:
+        return None, error_response("validation_error", f"limit must be between 1 and {MAX_EVENTS_LIMIT}", 400)
+
+    return limit, None
+
+
+def fetch_alert_rows_for_monitored_objects(monitored_object_ids: list[int], *, status_filter: str, limit: int):
+    if not monitored_object_ids:
+        return []
+
+    placeholders = ", ".join("?" for _ in monitored_object_ids)
+    status_clause = "alerts.status != 'resolved'" if status_filter == "active" else "alerts.status = ?"
+    params: tuple[Any, ...]
+    if status_filter == "active":
+        params = tuple(monitored_object_ids) + (limit,)
+    else:
+        params = tuple(monitored_object_ids) + (status_filter, limit)
+
+    return get_db().execute(
+        f"""
+        SELECT alerts.id, alerts.monitored_object_id, alerts.alert_code, alerts.source_rule_id,
+               rules.metric_key AS source_rule_metric_key,
+               COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
+               alerts.severity, alerts.status, alerts.acknowledged_at,
+               ack_user.username AS acknowledged_by_username, alerts.ack_note,
+               alerts.status_updated_at, status_user.username AS status_updated_by_username,
+               alerts.status_note,
+               alerts.resolved_at, resolved_user.username AS resolved_by_username,
+               alerts.first_occurred_at, alerts.last_occurred_at, alerts.repeat_count,
+               alerts.latest_message, alerts.metadata_json
+        FROM alert_instances AS alerts
+        LEFT JOIN alert_rules AS rules ON rules.id = alerts.source_rule_id
+        LEFT JOIN monitored_objects AS rule_mo ON rule_mo.id = rules.monitored_object_id
+        LEFT JOIN users AS ack_user ON ack_user.id = alerts.acknowledged_by_user_id
+        LEFT JOIN users AS status_user ON status_user.id = alerts.status_updated_by_user_id
+        LEFT JOIN users AS resolved_user ON resolved_user.id = alerts.resolved_by_user_id
+        WHERE alerts.monitored_object_id IN ({placeholders})
+          AND {status_clause}
+        ORDER BY
+            CASE alerts.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+            alerts.last_occurred_at DESC,
+            alerts.id DESC
+        LIMIT ?
+        """,
+        params,
+    ).fetchall()
+
+
+def serialize_monitor_target_node(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "display_name": row["display_name"],
+        "node_type": row["node_type"],
+        "semantic_type_code": row["semantic_type_code"],
+        "notation_code": row["notation_code"],
+        "target_id": row["target_id"],
+        "monitored_object_id": row["monitored_object_id"],
+        "layer_order": row["layer_order"],
+    }
 
 
 def validate_nodes(nodes: list[dict[str, Any]]) -> str | None:
@@ -564,14 +685,9 @@ def get_view_events(view_id: int):
     if error:
         return error
 
-    limit_raw = request.args.get("limit", default=str(DEFAULT_EVENTS_LIMIT))
-    try:
-        limit = int(limit_raw)
-    except (TypeError, ValueError):
-        return error_response("validation_error", "limit must be an integer", 400)
-
-    if limit <= 0 or limit > MAX_EVENTS_LIMIT:
-        return error_response("validation_error", f"limit must be between 1 and {MAX_EVENTS_LIMIT}", 400)
+    limit, limit_error = parse_limit_query_arg(request.args.get("limit"))
+    if limit_error:
+        return limit_error
 
     target_rows = get_monitor_target_rows(view_row["id"])
     target_ids = [row["target_id"] for row in target_rows if row["target_id"] is not None]
@@ -603,14 +719,9 @@ def get_view_grouped_event_raw_events(view_id: int, grouped_event_id: int):
     if error:
         return error
 
-    limit_raw = request.args.get("limit", default=str(DEFAULT_EVENTS_LIMIT))
-    try:
-        limit = int(limit_raw)
-    except (TypeError, ValueError):
-        return error_response("validation_error", "limit must be an integer", 400)
-
-    if limit <= 0 or limit > MAX_EVENTS_LIMIT:
-        return error_response("validation_error", f"limit must be between 1 and {MAX_EVENTS_LIMIT}", 400)
+    limit, limit_error = parse_limit_query_arg(request.args.get("limit"))
+    if limit_error:
+        return limit_error
 
     target_rows = get_monitor_target_rows(view_row["id"])
     target_ids = [row["target_id"] for row in target_rows if row["target_id"] is not None]
@@ -640,14 +751,9 @@ def get_view_alerts(view_id: int):
     if error:
         return error
 
-    limit_raw = request.args.get("limit", default=str(DEFAULT_EVENTS_LIMIT))
-    try:
-        limit = int(limit_raw)
-    except (TypeError, ValueError):
-        return error_response("validation_error", "limit must be an integer", 400)
-
-    if limit <= 0 or limit > MAX_EVENTS_LIMIT:
-        return error_response("validation_error", f"limit must be between 1 and {MAX_EVENTS_LIMIT}", 400)
+    limit, limit_error = parse_limit_query_arg(request.args.get("limit"))
+    if limit_error:
+        return limit_error
 
     status_filter = (request.args.get("status") or "active").strip().lower()
     if status_filter not in {"active", "open", "in_progress", "suppressed", "resolved"}:
@@ -662,44 +768,68 @@ def get_view_alerts(view_id: int):
     if not monitored_object_ids:
         return {"items": []}
 
-    placeholders = ", ".join("?" for _ in monitored_object_ids)
-    status_clause = "alerts.status != 'resolved'" if status_filter == "active" else "alerts.status = ?"
-    params: tuple[Any, ...]
-    if status_filter == "active":
-        params = tuple(monitored_object_ids) + (limit,)
-    else:
-        params = tuple(monitored_object_ids) + (status_filter, limit)
-
-    rows = get_db().execute(
-        f"""
-        SELECT alerts.id, alerts.monitored_object_id, alerts.alert_code, alerts.source_rule_id,
-               rules.metric_key AS source_rule_metric_key,
-               COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
-               alerts.severity, alerts.status, alerts.acknowledged_at,
-               ack_user.username AS acknowledged_by_username, alerts.ack_note,
-               alerts.status_updated_at, status_user.username AS status_updated_by_username,
-               alerts.status_note,
-               alerts.resolved_at, resolved_user.username AS resolved_by_username,
-               alerts.first_occurred_at, alerts.last_occurred_at, alerts.repeat_count,
-               alerts.latest_message, alerts.metadata_json
-        FROM alert_instances AS alerts
-        LEFT JOIN alert_rules AS rules ON rules.id = alerts.source_rule_id
-        LEFT JOIN monitored_objects AS rule_mo ON rule_mo.id = rules.monitored_object_id
-        LEFT JOIN users AS ack_user ON ack_user.id = alerts.acknowledged_by_user_id
-        LEFT JOIN users AS status_user ON status_user.id = alerts.status_updated_by_user_id
-        LEFT JOIN users AS resolved_user ON resolved_user.id = alerts.resolved_by_user_id
-        WHERE alerts.monitored_object_id IN ({placeholders})
-          AND {status_clause}
-        ORDER BY
-            CASE alerts.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
-            alerts.last_occurred_at DESC,
-            alerts.id DESC
-        LIMIT ?
-        """,
-        params,
-    ).fetchall()
+    rows = fetch_alert_rows_for_monitored_objects(
+        monitored_object_ids,
+        status_filter=status_filter,
+        limit=limit,
+    )
 
     return {"items": [serialize_alert_instance(row) for row in rows]}
+
+
+@bp.get("/<int:view_id>/runtime-objects/<int:monitored_object_id>/slice")
+@login_required
+def get_view_runtime_object_slice(view_id: int, monitored_object_id: int):
+    view_row, error = get_view_for_user(view_id)
+    if error:
+        return error
+
+    limit, limit_error = parse_limit_query_arg(request.args.get("limit"))
+    if limit_error:
+        return limit_error
+
+    target_rows = get_monitor_target_node_rows(view_row["id"])
+    fanout_rows = [row for row in target_rows if row["monitored_object_id"] == monitored_object_id]
+    if not fanout_rows:
+        return error_response("not_found", "runtime object not found in current view", 404)
+
+    latest_rows = query_by_runtime_targets(
+        """
+        SELECT monitored_object_id, target_id, state_type, status, severity, state_json, occurred_at, received_at
+        FROM latest_states
+        WHERE {runtime_filter}
+        """,
+        target_ids=[],
+        monitored_object_ids=[monitored_object_id],
+    )
+    latest_items = [derive_latest_state(row) for row in sorted(latest_rows, key=lambda row: row["state_type"])]
+
+    alert_rows = fetch_alert_rows_for_monitored_objects(
+        [monitored_object_id],
+        status_filter="active",
+        limit=limit,
+    )
+    event_rows = query_by_runtime_targets(
+        """
+        SELECT id, monitored_object_id, target_id, event_type, severity,
+               first_occurred_at, last_occurred_at, repeat_count, latest_message, latest_event_json
+        FROM grouped_events
+        WHERE {runtime_filter}
+        ORDER BY last_occurred_at DESC, id DESC
+        LIMIT ?
+        """,
+        target_ids=[],
+        monitored_object_ids=[monitored_object_id],
+        extra_params=(limit,),
+    )
+
+    return {
+        "monitored_object_id": monitored_object_id,
+        "fanout_nodes": [serialize_monitor_target_node(row) for row in fanout_rows],
+        "latest_states": latest_items,
+        "alerts": [serialize_alert_instance(row) for row in alert_rows],
+        "events": [serialize_grouped_event(row) for row in event_rows],
+    }
 
 
 @bp.post("")

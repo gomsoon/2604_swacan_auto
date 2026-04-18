@@ -486,6 +486,85 @@ def test_alerts_reject_out_of_range_limits(seeded_client) -> None:
     assert high_response.get_json()["error"]["code"] == "validation_error"
 
 
+def test_runtime_object_slice_returns_current_view_runtime_summary(seeded_app, seeded_client) -> None:
+    seed_monitoring_rows(seeded_app)
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/1/runtime-objects/1302/slice?limit=10")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["monitored_object_id"] == 1302
+    assert [item["display_name"] for item in payload["fanout_nodes"]] == ["App Process"]
+    assert payload["fanout_nodes"][0]["node_type"] == "SoftwareProcess"
+    assert [item["target_id"] for item in payload["latest_states"]] == ["app_main"]
+    assert payload["latest_states"][0]["state"]["pid"] == 1234
+    assert [item["alert_code"] for item in payload["alerts"]] == ["process.down"]
+    assert [item["event_type"] for item in payload["events"]] == ["process_stopped"]
+
+
+def test_runtime_object_slice_prefers_binding_when_active_target_id_changes(seeded_app, seeded_client) -> None:
+    seed_monitoring_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE view_version_nodes
+            SET target_id = 'stale_process_target'
+            WHERE id = 1102
+            """
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/1/runtime-objects/1302/slice?limit=10")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["monitored_object_id"] == 1302
+    assert payload["fanout_nodes"][0]["monitored_object_id"] == 1302
+    assert payload["latest_states"][0]["target_id"] == "app_main"
+
+
+def test_runtime_object_slice_returns_not_found_for_object_outside_current_view(seeded_app, seeded_client) -> None:
+    seed_monitoring_rows(seeded_app)
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/1/runtime-objects/9999/slice?limit=10")
+
+    assert response.status_code == 404
+    assert response.get_json()["error"]["code"] == "not_found"
+
+
+def test_runtime_object_slice_accepts_boundary_limits(seeded_app, seeded_client) -> None:
+    seed_monitoring_rows(seeded_app)
+    login(seeded_client)
+
+    low_response = seeded_client.get("/api/views/1/runtime-objects/1302/slice?limit=1")
+    high_response = seeded_client.get("/api/views/1/runtime-objects/1302/slice?limit=100")
+
+    assert low_response.status_code == 200
+    assert high_response.status_code == 200
+    assert len(low_response.get_json()["alerts"]) == 1
+    assert len(high_response.get_json()["events"]) == 1
+
+
+def test_runtime_object_slice_rejects_out_of_range_limits(seeded_app, seeded_client) -> None:
+    seed_monitoring_rows(seeded_app)
+    login(seeded_client)
+
+    zero_response = seeded_client.get("/api/views/1/runtime-objects/1302/slice?limit=0")
+    over_response = seeded_client.get("/api/views/1/runtime-objects/1302/slice?limit=101")
+    invalid_response = seeded_client.get("/api/views/1/runtime-objects/1302/slice?limit=abc")
+
+    assert zero_response.status_code == 400
+    assert over_response.status_code == 400
+    assert invalid_response.status_code == 400
+    assert zero_response.get_json()["error"]["code"] == "validation_error"
+    assert over_response.get_json()["error"]["code"] == "validation_error"
+    assert invalid_response.get_json()["error"]["code"] == "validation_error"
+
+
 def test_latest_state_prefers_draft_targets_when_active_version_is_missing(seeded_app, seeded_client) -> None:
     seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T10:20:05.000+09:00")
     login(seeded_client)

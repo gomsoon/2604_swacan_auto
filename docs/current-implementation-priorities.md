@@ -9,6 +9,8 @@
 - [mvp-transition-roadmap.md](C:/2604_swacan_auto/docs/mvp-transition-roadmap.md)
 - [metamodel-editor-backlog.md](C:/2604_swacan_auto/docs/metamodel-editor-backlog.md)
 - [architecture-editor-backlog.md](C:/2604_swacan_auto/docs/architecture-editor-backlog.md)
+- [monitoring-view-backlog.md](C:/2604_swacan_auto/docs/monitoring-view-backlog.md)
+- [monitoring-view-realtime-refresh-draft.md](C:/2604_swacan_auto/docs/monitoring-view-realtime-refresh-draft.md)
 - [alert-management-backlog.md](C:/2604_swacan_auto/docs/alert-management-backlog.md)
 
 ## 1. 현재 상태 요약
@@ -29,6 +31,7 @@
 - alert, grouped event, latest state의 운영자 관점 정리
 - monitored object fan-out 결과를 더 직관적으로 보여주는 시각화
 - active view snapshot과 runtime 상태의 연결을 더 명확하게 표현
+- `SSE + monitored_object 단위 partial refresh + 느린 full reconcile` 구조를 다음 실시간 갱신 기본선으로 고정
 
 ### Priority 2. Monitoring View / Architecture Editor 연동 안정화
 

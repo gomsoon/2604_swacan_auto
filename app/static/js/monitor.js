@@ -194,6 +194,54 @@ function uniqueById(items) {
     });
 }
 
+function sortLatestStateItems(items) {
+    return [...items].sort((left, right) => {
+        const leftType = left.state_type || "";
+        const rightType = right.state_type || "";
+        return leftType.localeCompare(rightType, "en");
+    });
+}
+
+function alertSeverityRank(item) {
+    if (item.severity === "critical") {
+        return 0;
+    }
+    if (item.severity === "warning") {
+        return 1;
+    }
+    return 2;
+}
+
+function sortAlertItems(items) {
+    return [...items].sort((left, right) => {
+        const severityGap = alertSeverityRank(left) - alertSeverityRank(right);
+        if (severityGap !== 0) {
+            return severityGap;
+        }
+        const leftTime = left.last_occurred_at || "";
+        const rightTime = right.last_occurred_at || "";
+        if (leftTime !== rightTime) {
+            return rightTime.localeCompare(leftTime);
+        }
+        return (right.id || 0) - (left.id || 0);
+    });
+}
+
+function sortGroupedEventItems(items) {
+    return [...items].sort((left, right) => {
+        const leftTime = left.last_occurred_at || left.occurred_at || "";
+        const rightTime = right.last_occurred_at || right.occurred_at || "";
+        if (leftTime !== rightTime) {
+            return rightTime.localeCompare(leftTime);
+        }
+        return (right.id || 0) - (left.id || 0);
+    });
+}
+
+function replaceItemsForMonitoredObject(items, monitoredObjectId, nextItems) {
+    return items.filter((item) => item.monitored_object_id !== monitoredObjectId).concat(nextItems);
+}
+
 function sectionBlock(title, bodyHtml, metaHtml = "") {
     return `
         <section class="selection-summary-section">
@@ -682,15 +730,11 @@ function render() {
         alertsByMonitoredObjectId,
         onNodeClick: (node, event) => {
             event.stopPropagation();
-            state.selectedNodeId = node.id;
-            state.selectedEdgeId = null;
-            render();
+            void selectNode(node.id);
         },
         onEdgeClick: (edge, event) => {
             event.stopPropagation();
-            state.selectedNodeId = null;
-            state.selectedEdgeId = edge.id;
-            render();
+            void selectEdge(edge.id);
         },
     });
     renderAgentSummary();
@@ -698,6 +742,93 @@ function render() {
     renderEvents();
     renderEventDetails();
     renderSelection();
+}
+
+function mergeRuntimeObjectSlice(payload) {
+    state.latestStates = sortLatestStateItems(
+        replaceItemsForMonitoredObject(state.latestStates, payload.monitored_object_id, payload.latest_states)
+    );
+    state.alerts = sortAlertItems(
+        replaceItemsForMonitoredObject(state.alerts, payload.monitored_object_id, payload.alerts)
+    );
+    state.events = sortGroupedEventItems(
+        replaceItemsForMonitoredObject(state.events, payload.monitored_object_id, payload.events)
+    );
+}
+
+function selectedMonitoredObjectIds() {
+    const selectedIds = new Set();
+    const selectedNode = state.nodes.find((item) => item.id === state.selectedNodeId);
+    if (selectedNode?.monitored_object_id) {
+        selectedIds.add(selectedNode.monitored_object_id);
+    }
+
+    const selectedEdge = state.edges.find((item) => item.id === state.selectedEdgeId);
+    if (selectedEdge) {
+        const sourceNode = state.nodes.find((item) => item.id === selectedEdge.source_node_id);
+        const targetNode = state.nodes.find((item) => item.id === selectedEdge.target_node_id);
+        if (sourceNode?.monitored_object_id) {
+            selectedIds.add(sourceNode.monitored_object_id);
+        }
+        if (targetNode?.monitored_object_id) {
+            selectedIds.add(targetNode.monitored_object_id);
+        }
+    }
+
+    return [...selectedIds];
+}
+
+async function refreshRuntimeObjectSlice(monitoredObjectId, renderAfter = true) {
+    const payload = await apiFetch(`/api/views/${state.viewId}/runtime-objects/${monitoredObjectId}/slice?limit=20`);
+    mergeRuntimeObjectSlice(payload);
+
+    if (state.selectedEventId && state.selectedGroupedEvent?.monitored_object_id === monitoredObjectId) {
+        if (state.events.some((item) => item.id === state.selectedEventId)) {
+            await loadEventDetails(state.selectedEventId);
+            monitorStatus.textContent = `부분 갱신 ${new Date().toLocaleTimeString("ko-KR", { hour12: false })}`;
+            return;
+        }
+        state.selectedEventId = null;
+        state.selectedGroupedEvent = null;
+        state.eventDetails = [];
+        state.selectedRawEventId = null;
+    }
+
+    if (renderAfter) {
+        render();
+    }
+    monitorStatus.textContent = `부분 갱신 ${new Date().toLocaleTimeString("ko-KR", { hour12: false })}`;
+}
+
+async function refreshSelectionRuntimeSlice() {
+    const objectIds = selectedMonitoredObjectIds();
+    if (objectIds.length === 0) {
+        return;
+    }
+    await Promise.all(objectIds.map((monitoredObjectId) => refreshRuntimeObjectSlice(monitoredObjectId, false)));
+    render();
+}
+
+async function selectNode(nodeId) {
+    state.selectedNodeId = nodeId;
+    state.selectedEdgeId = null;
+    render();
+    try {
+        await refreshSelectionRuntimeSlice();
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
+}
+
+async function selectEdge(edgeId) {
+    state.selectedNodeId = null;
+    state.selectedEdgeId = edgeId;
+    render();
+    try {
+        await refreshSelectionRuntimeSlice();
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
 }
 
 async function loadEventDetails(groupedEventId) {
@@ -800,9 +931,7 @@ agentSummary?.addEventListener("click", (event) => {
     if (!card) {
         return;
     }
-    state.selectedNodeId = Number(card.dataset.nodeId);
-    state.selectedEdgeId = null;
-    render();
+    void selectNode(Number(card.dataset.nodeId));
 });
 svg.addEventListener("click", () => {
     state.selectedNodeId = null;
