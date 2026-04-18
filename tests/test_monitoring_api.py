@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 
 from app.db import get_db
+from app.views_api import build_view_runtime_watch_state, detect_view_runtime_changes
 
 
 def login(client, username: str = "admin", password: str = "admin123!"):
@@ -563,6 +564,79 @@ def test_runtime_object_slice_rejects_out_of_range_limits(seeded_app, seeded_cli
     assert zero_response.get_json()["error"]["code"] == "validation_error"
     assert over_response.get_json()["error"]["code"] == "validation_error"
     assert invalid_response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_view_runtime_watch_state_detects_monitored_object_updates(seeded_app) -> None:
+    seed_monitoring_rows(seeded_app)
+
+    with seeded_app.app_context():
+        previous_state = build_view_runtime_watch_state(1)
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE latest_states
+            SET updated_at = ?, state_json = ?
+            WHERE monitored_object_id = ? AND state_type = 'process'
+            """,
+            (
+                "2026-04-10T10:22:00.000+09:00",
+                json.dumps({"pid": 1234, "cpu_usage": 77.7}),
+                1302,
+            ),
+        )
+        db_conn.commit()
+        current_state = build_view_runtime_watch_state(1)
+
+    payload = detect_view_runtime_changes(previous_state, current_state)
+
+    assert payload == {
+        "full_refresh": False,
+        "reason": "runtime_objects_changed",
+        "monitored_object_ids": [1302],
+    }
+
+
+def test_view_runtime_watch_state_detects_alert_count_change_on_resolve(seeded_app) -> None:
+    seed_monitoring_rows(seeded_app)
+
+    with seeded_app.app_context():
+        previous_state = build_view_runtime_watch_state(1)
+        db_conn = get_db()
+        db_conn.execute("DELETE FROM alert_instances WHERE monitored_object_id = ?", (1302,))
+        db_conn.commit()
+        current_state = build_view_runtime_watch_state(1)
+
+    payload = detect_view_runtime_changes(previous_state, current_state)
+
+    assert payload == {
+        "full_refresh": False,
+        "reason": "runtime_objects_changed",
+        "monitored_object_ids": [1302],
+    }
+
+
+def test_view_runtime_watch_state_requests_full_refresh_when_view_signature_changes(seeded_app) -> None:
+    seed_monitoring_rows(seeded_app)
+
+    with seeded_app.app_context():
+        previous_state = build_view_runtime_watch_state(1)
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE view_version_nodes
+            SET target_id = ?
+            WHERE id = ?
+            """,
+            ("app_main_v2", 1102),
+        )
+        db_conn.commit()
+        current_state = build_view_runtime_watch_state(1)
+
+    payload = detect_view_runtime_changes(previous_state, current_state)
+
+    assert payload["full_refresh"] is True
+    assert payload["reason"] == "view_structure_changed"
+    assert payload["monitored_object_ids"] == [1301, 1302, 1303]
 
 
 def test_latest_state_prefers_draft_targets_when_active_version_is_missing(seeded_app, seeded_client) -> None:

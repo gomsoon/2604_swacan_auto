@@ -444,20 +444,19 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
         )
         db_conn.commit()
 
-    monitor_process_shape.click(force=True)
-    expect(page.locator("#monitor-selection-summary")).to_contain_text("48.8", timeout=1500)
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("48.8", timeout=2500)
     expect(page.locator("#monitor-selection-summary")).to_contain_text(
         "Playwright process warning escalated",
-        timeout=1500,
+        timeout=2500,
     )
     expect(page.locator("#monitor-selection-summary")).to_contain_text(
         "Playwright process restarted again",
-        timeout=1500,
+        timeout=2500,
     )
-    expect(monitor_process_node).to_have_class(re.compile(r".*status-warning.*"), timeout=1500)
-    expect(monitor_process_node).to_have_class(re.compile(r".*has-open-alert.*"), timeout=1500)
-    expect(monitor_edge).to_have_class(re.compile(r".*status-warning.*"), timeout=1500)
-    expect(monitor_edge).to_have_class(re.compile(r".*has-open-alert.*"), timeout=1500)
+    expect(monitor_process_node).to_have_class(re.compile(r".*status-warning.*"), timeout=2500)
+    expect(monitor_process_node).to_have_class(re.compile(r".*has-open-alert.*"), timeout=2500)
+    expect(monitor_edge).to_have_class(re.compile(r".*status-warning.*"), timeout=2500)
+    expect(monitor_edge).to_have_class(re.compile(r".*has-open-alert.*"), timeout=2500)
     page.locator("#monitor-selection-summary [data-grouped-event-id]").first.click()
     expect(page.locator("#event-detail-panel")).to_contain_text("process_restarted")
     expect(page.locator("#event-detail-panel")).to_contain_text("Playwright process restarted")

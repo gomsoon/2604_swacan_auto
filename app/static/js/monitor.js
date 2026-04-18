@@ -28,7 +28,11 @@ const state = {
     selectedRawEventId: null,
     selectedNodeId: null,
     selectedEdgeId: null,
+    realtimeSource: null,
+    realtimeReconnectTimerId: null,
 };
+
+let realtimeUpdateQueue = Promise.resolve();
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -815,6 +819,15 @@ function selectedMonitoredObjectIds() {
     return [...selectedIds];
 }
 
+function queueRealtimeUpdate(task) {
+    realtimeUpdateQueue = realtimeUpdateQueue
+        .then(task)
+        .catch((error) => {
+            showBanner(error.message, "error");
+        });
+    return realtimeUpdateQueue;
+}
+
 async function refreshRuntimeObjectSlice(monitoredObjectId, renderAfter = true) {
     const payload = await apiFetch(`/api/views/${state.viewId}/runtime-objects/${monitoredObjectId}/slice?limit=20`);
     mergeRuntimeObjectSlice(payload);
@@ -837,6 +850,16 @@ async function refreshRuntimeObjectSlice(monitoredObjectId, renderAfter = true) 
     monitorStatus.textContent = `부분 갱신 ${new Date().toLocaleTimeString("ko-KR", { hour12: false })}`;
 }
 
+async function refreshRuntimeObjectSlices(monitoredObjectIds) {
+    const uniqueIds = [...new Set(monitoredObjectIds.filter((value) => value !== null && value !== undefined))];
+    if (uniqueIds.length === 0) {
+        return;
+    }
+    await Promise.all(uniqueIds.map((monitoredObjectId) => refreshRuntimeObjectSlice(monitoredObjectId, false)));
+    render();
+    monitorStatus.textContent = `실시간 갱신 ${new Date().toLocaleTimeString("ko-KR", { hour12: false })}`;
+}
+
 async function refreshSelectionRuntimeSlice() {
     const objectIds = selectedMonitoredObjectIds();
     if (objectIds.length === 0) {
@@ -844,6 +867,68 @@ async function refreshSelectionRuntimeSlice() {
     }
     await Promise.all(objectIds.map((monitoredObjectId) => refreshRuntimeObjectSlice(monitoredObjectId, false)));
     render();
+}
+
+function clearRealtimeReconnectTimer() {
+    if (state.realtimeReconnectTimerId !== null) {
+        window.clearTimeout(state.realtimeReconnectTimerId);
+        state.realtimeReconnectTimerId = null;
+    }
+}
+
+function disconnectRealtimeStream() {
+    clearRealtimeReconnectTimer();
+    if (state.realtimeSource) {
+        state.realtimeSource.close();
+        state.realtimeSource = null;
+    }
+}
+
+function scheduleRealtimeReconnect() {
+    if (state.realtimeReconnectTimerId !== null) {
+        return;
+    }
+    state.realtimeReconnectTimerId = window.setTimeout(() => {
+        state.realtimeReconnectTimerId = null;
+        connectRealtimeStream();
+    }, 3000);
+}
+
+function connectRealtimeStream() {
+    if (!window.EventSource || state.realtimeSource) {
+        return;
+    }
+
+    clearRealtimeReconnectTimer();
+    const stream = new window.EventSource(`/api/views/${state.viewId}/stream`);
+    state.realtimeSource = stream;
+
+    stream.addEventListener("connected", () => {
+        monitorStatus.textContent = "실시간 연결됨";
+    });
+
+    stream.addEventListener("runtime_change", (event) => {
+        queueRealtimeUpdate(async () => {
+            const payload = JSON.parse(event.data);
+            if (payload.view_id !== state.viewId) {
+                return;
+            }
+            if (payload.full_refresh) {
+                await refreshAll();
+                return;
+            }
+            await refreshRuntimeObjectSlices(payload.monitored_object_ids || []);
+        });
+    });
+
+    stream.onerror = () => {
+        if (state.realtimeSource === stream) {
+            state.realtimeSource = null;
+        }
+        stream.close();
+        monitorStatus.textContent = "실시간 연결 재시도";
+        scheduleRealtimeReconnect();
+    };
 }
 
 async function selectNode(nodeId) {
@@ -997,7 +1082,11 @@ svg.addEventListener("click", () => {
     render();
 });
 
-refreshAll();
+void refreshAll().then(() => {
+    connectRealtimeStream();
+});
+window.addEventListener("beforeunload", disconnectRealtimeStream);
+window.addEventListener("pagehide", disconnectRealtimeStream);
 window.setInterval(refreshAll, POLL_INTERVAL_MS);
 
 

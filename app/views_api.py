@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime
 from typing import Any
 
-from flask import Blueprint, g, request
+from flask import Blueprint, Response, current_app, g, request, stream_with_context
 
 from .auth import error_response, login_required
-from .db import get_db
+from .db import close_db, get_db
 from .runtime_state import derive_latest_state
 from .view_versioning import (
     get_active_view_target_rows,
@@ -399,6 +400,157 @@ def serialize_monitor_target_node(row) -> dict[str, Any]:
     }
 
 
+def get_monitor_view_source(view_id: int) -> tuple[str, int]:
+    active_row = get_active_view_version(view_id)
+    if active_row is not None:
+        return "active", active_row["id"]
+
+    draft_row = get_current_draft_view_version(view_id)
+    if draft_row is not None:
+        return "draft", draft_row["id"]
+
+    return "legacy", view_id
+
+
+def fetch_runtime_object_update_markers(monitored_object_ids: list[int]) -> dict[int, dict[str, Any]]:
+    markers: dict[int, dict[str, Any]] = {}
+    if not monitored_object_ids:
+        return markers
+
+    placeholders = ", ".join("?" for _ in monitored_object_ids)
+    params = tuple(monitored_object_ids)
+    db_conn = get_db()
+
+    for row in db_conn.execute(
+        f"""
+        SELECT monitored_object_id, MAX(updated_at) AS latest_state_updated_at
+        FROM latest_states
+        WHERE monitored_object_id IN ({placeholders})
+        GROUP BY monitored_object_id
+        """,
+        params,
+    ).fetchall():
+        markers.setdefault(
+            row["monitored_object_id"],
+            {
+                "latest_state_updated_at": None,
+                "alerts_updated_at": None,
+                "alert_count": 0,
+                "events_updated_at": None,
+                "event_count": 0,
+            },
+        )["latest_state_updated_at"] = row["latest_state_updated_at"]
+
+    for row in db_conn.execute(
+        f"""
+        SELECT monitored_object_id, MAX(updated_at) AS alerts_updated_at, COUNT(*) AS alert_count
+        FROM alert_instances
+        WHERE monitored_object_id IN ({placeholders})
+        GROUP BY monitored_object_id
+        """,
+        params,
+    ).fetchall():
+        marker = markers.setdefault(
+            row["monitored_object_id"],
+            {
+                "latest_state_updated_at": None,
+                "alerts_updated_at": None,
+                "alert_count": 0,
+                "events_updated_at": None,
+                "event_count": 0,
+            },
+        )
+        marker["alerts_updated_at"] = row["alerts_updated_at"]
+        marker["alert_count"] = row["alert_count"]
+
+    for row in db_conn.execute(
+        f"""
+        SELECT monitored_object_id, MAX(updated_at) AS events_updated_at, COUNT(*) AS event_count
+        FROM grouped_events
+        WHERE monitored_object_id IN ({placeholders})
+        GROUP BY monitored_object_id
+        """,
+        params,
+    ).fetchall():
+        marker = markers.setdefault(
+            row["monitored_object_id"],
+            {
+                "latest_state_updated_at": None,
+                "alerts_updated_at": None,
+                "alert_count": 0,
+                "events_updated_at": None,
+                "event_count": 0,
+            },
+        )
+        marker["events_updated_at"] = row["events_updated_at"]
+        marker["event_count"] = row["event_count"]
+
+    return markers
+
+
+def build_view_runtime_watch_state(view_id: int) -> dict[str, Any]:
+    source_mode, source_id = get_monitor_view_source(view_id)
+    target_rows = get_monitor_target_node_rows(view_id)
+    monitored_object_ids = sorted(
+        {
+            row["monitored_object_id"]
+            for row in target_rows
+            if row["monitored_object_id"] is not None
+        }
+    )
+    markers = fetch_runtime_object_update_markers(monitored_object_ids)
+    view_signature = (
+        source_mode,
+        source_id,
+        tuple(
+            (row["id"], row["target_id"], row["monitored_object_id"])
+            for row in target_rows
+        ),
+    )
+
+    return {
+        "source_mode": source_mode,
+        "source_id": source_id,
+        "view_signature": view_signature,
+        "monitored_object_ids": monitored_object_ids,
+        "markers": markers,
+    }
+
+
+def detect_view_runtime_changes(
+    previous_state: dict[str, Any] | None,
+    current_state: dict[str, Any],
+) -> dict[str, Any] | None:
+    if previous_state is None:
+        return None
+
+    if previous_state["view_signature"] != current_state["view_signature"]:
+        return {
+            "full_refresh": True,
+            "reason": "view_structure_changed",
+            "monitored_object_ids": current_state["monitored_object_ids"],
+        }
+
+    changed_object_ids: list[int] = []
+    object_ids = set(previous_state["markers"].keys()) | set(current_state["markers"].keys())
+    for monitored_object_id in sorted(object_ids):
+        if previous_state["markers"].get(monitored_object_id) != current_state["markers"].get(monitored_object_id):
+            changed_object_ids.append(monitored_object_id)
+
+    if not changed_object_ids:
+        return None
+
+    return {
+        "full_refresh": False,
+        "reason": "runtime_objects_changed",
+        "monitored_object_ids": changed_object_ids,
+    }
+
+
+def sse_event(event_name: str, payload: dict[str, Any]) -> str:
+    return f"event: {event_name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
 def validate_nodes(nodes: list[dict[str, Any]]) -> str | None:
     if not isinstance(nodes, list):
         return "nodes must be a list"
@@ -775,6 +927,67 @@ def get_view_alerts(view_id: int):
     )
 
     return {"items": [serialize_alert_instance(row) for row in rows]}
+
+
+@bp.get("/<int:view_id>/stream")
+@login_required
+def stream_view_runtime(view_id: int):
+    view_row, error = get_view_for_user(view_id)
+    if error:
+        return error
+
+    poll_seconds = float(current_app.config.get("MONITORING_SSE_POLL_SECONDS", 1.0))
+    keepalive_seconds = float(current_app.config.get("MONITORING_SSE_KEEPALIVE_SECONDS", 15.0))
+
+    @stream_with_context
+    def generate():
+        try:
+            previous_state = build_view_runtime_watch_state(view_row["id"])
+            close_db()
+            yield sse_event(
+                "connected",
+                {
+                    "view_id": view_row["id"],
+                    "source_mode": previous_state["source_mode"],
+                    "source_id": previous_state["source_id"],
+                },
+            )
+            last_keepalive = time.monotonic()
+
+            while True:
+                time.sleep(poll_seconds)
+                current_state = build_view_runtime_watch_state(view_row["id"])
+                close_db()
+                change_payload = detect_view_runtime_changes(previous_state, current_state)
+                previous_state = current_state
+
+                if change_payload is not None:
+                    yield sse_event(
+                        "runtime_change",
+                        {
+                            "view_id": view_row["id"],
+                            "source_mode": current_state["source_mode"],
+                            "source_id": current_state["source_id"],
+                            **change_payload,
+                        },
+                    )
+                    last_keepalive = time.monotonic()
+                    continue
+
+                if time.monotonic() - last_keepalive >= keepalive_seconds:
+                    yield ": keepalive\n\n"
+                    last_keepalive = time.monotonic()
+        finally:
+            close_db()
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @bp.get("/<int:view_id>/runtime-objects/<int:monitored_object_id>/slice")
