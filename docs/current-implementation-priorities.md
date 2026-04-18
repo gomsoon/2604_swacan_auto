@@ -1,98 +1,93 @@
 # Current Implementation Priorities
 
-버전: Draft 0.3  
-작성일: 2026-04-17
+버전: Draft 0.4  
+작성일: 2026-04-18
 
-목적: 현재 구현 상태를 기준으로, 앞으로의 실제 개발 우선순위를 다시 정리한다.
+목적: 현재 구현 상태를 기준으로, 다음 구현 축과 설계 검토 축을 다시 정리한다.
 
 참고 문서:
 - [mvp-transition-roadmap.md](C:/2604_swacan_auto/docs/mvp-transition-roadmap.md)
 - [metamodel-editor-backlog.md](C:/2604_swacan_auto/docs/metamodel-editor-backlog.md)
 - [architecture-editor-backlog.md](C:/2604_swacan_auto/docs/architecture-editor-backlog.md)
 - [monitoring-view-backlog.md](C:/2604_swacan_auto/docs/monitoring-view-backlog.md)
-- [monitoring-view-realtime-refresh-draft.md](C:/2604_swacan_auto/docs/monitoring-view-realtime-refresh-draft.md)
 - [alert-management-backlog.md](C:/2604_swacan_auto/docs/alert-management-backlog.md)
+- [alert-condition-flexibility-draft.md](C:/2604_swacan_auto/docs/alert-condition-flexibility-draft.md)
 
 ## 1. 현재 상태 요약
 
-- `Metamodel Editor`는 draft 편집, diff, validation, 권한/감사 로그, canvas 기반 직접 편집까지 1차 흐름이 갖춰졌다.
-- `Architecture Editor`는 metamodel snapshot을 실제로 소비하며, `View Outline Tree + Architecture Canvas + Inspector` 작업공간, runtime binding 검색/미리보기, containment drag-drop, relation 생성 가이드까지 올라온 상태다.
-- `Monitoring View`는 active snapshot, runtime identity, alert, grouped event를 바탕으로 안정적으로 동작하지만, 운영 화면으로서의 깊이는 더 키울 여지가 많다.
-- `Alert`는 운영 가능한 1차 수준까지 올라왔고, 이후에는 backlog 기반 고도화 축으로 관리하는 것이 적절하다.
+- `Metamodel Editor`는 draft 편집, diff, validation, 권한/감사 로그, canvas 기반 직접 편집까지 1차 기준점에 도달했다.
+- `Architecture Editor`는 metamodel snapshot 기반 palette, containment tree, runtime binding 검색/미리보기, containment drag-drop, relation direct edit까지 1차 기준점에 도달했다.
+- `Monitoring View`는 selection summary, alert/event drill-down, SSE partial refresh, 최소 운영 액션, 객체 이력 요약까지 1차 운영 사용 수준에 도달했다.
+- `Alert`는 운영 가능한 1차 기능을 확보했고, 이제부터는 기능을 급히 더 늘리기보다 조건 설계와 lifecycle 정리 방향을 다시 보는 단계로 넘어간다.
 
 ## 2. 현재 최우선 3개
 
-### Priority 1. Monitoring View 구현 확대
+### Priority 1. Backend Alert Condition Flexibility 설계
 
-지금부터의 주력 축은 `Monitoring View`다.
-
-중점 항목:
-- node/edge 선택에 따른 runtime overlay 정보 확대
-- alert, grouped event, latest state의 운영자 관점 정리
-- monitored object fan-out 결과를 더 직관적으로 보여주는 시각화
-- active view snapshot과 runtime 상태의 연결을 더 명확하게 표현
-- `SSE + monitored_object 단위 partial refresh + 느린 full reconcile` 구조를 다음 실시간 갱신 기본선으로 고정
-
-### Priority 2. Monitoring View / Architecture Editor 연동 안정화
-
-두 화면이 같은 메타모델과 같은 runtime identity 계층을 일관되게 소비하도록 더 다듬는 축이다.
+지금 다음으로 가장 중요한 축은 backend가 alert을 어떤 조건으로, 얼마나 유연하게 생성할 수 있어야 하는지 다시 정의하는 것이다.
 
 중점 항목:
-- Architecture Editor에서 설정한 runtime binding이 Monitoring View에서 어떻게 해석되는지 경계 정리
-- active snapshot 전환 후 Monitoring View 반영 시나리오 점검
-- 메타모델 변경 이후 Monitoring View가 깨지지 않도록 compatibility 경로 점검
+- 현재 threshold rule 모델의 한계 정리
+- `selector / signal / condition / aggregation / lifecycle policy` 관점으로 분리 설계
+- 단순 threshold, event rule, stale/no-data rule, windowed rule을 어떤 단계로 도입할지 정의
+- runtime identity(`monitored_object`)와 alert fan-out 구조를 유지하면서 rule만 더 유연하게 만드는 방향 검토
 
-### Priority 3. 운영/감사 추적 고도화
-
-운영 관점에서 누가 무엇을 바꾸고, 무엇이 실제 운영 화면에 영향을 주는지 추적하는 축이다.
+### Priority 2. Alert Lifecycle / Archive 구조 정교화
 
 중점 항목:
-- metamodel publish / activate 이후 영향 범위 추적
-- view version publish / activate 흐름 감사 로그 강화
-- Monitoring View에서 alert/event/operator action 사이의 연결성 보강
+- `alert_instances(current)`와 `alert_history/archive` 역할 분리 재정의
+- `resolution_source / resolution_reason` 모델 정교화
+- manual resolve, auto recovery, policy timeout, cleanup 기반 종료의 의미 차이 명확화
+- 향후 `alert_action_log` 필요성 검토
+
+### Priority 3. Monitoring / Alert 운영 모델 정리
+
+중점 항목:
+- Monitoring View에서 어디까지 운영 액션을 수행할지 경계 정의
+- Admin 화면과 Monitoring View의 역할 구분
+- backlog로 남겨둘 Monitoring View 고도화 항목 정리
 
 ## 3. 2차 우선순위
 
 ### 3.1 Architecture Editor backlog
+
+- 대형 view 편집 UX 강화
 - outline tree 고도화
 - runtime binding UX 후속 polish
 - 제약 기반 직접 편집 2차 고도화
-- 대형 view 편집 생산성 기능
 
-자세한 목록은 [architecture-editor-backlog.md](C:/2604_swacan_auto/docs/architecture-editor-backlog.md)를 따른다.
+자세한 항목은 [architecture-editor-backlog.md](C:/2604_swacan_auto/docs/architecture-editor-backlog.md)를 따른다.
 
-### 3.2 Metamodel Editor backlog
-- semantic type aggregate 중심 lifecycle 추가 보강
-- publish validation 확장
-- diff / review / version 운영 UX polish
+### 3.2 Monitoring View backlog
 
-### 3.3 Alert backlog
-- archive / action log 역할 분리 정교화
-- suppression / escalation 정책 고도화
-- 운영자 처리 흐름 세분화
+- 대형 view 탐색 UX
+- alert/event 컨텍스트 고도화
+- 운영 액션 2차 고도화
+- 상태 시각화 2차 고도화
+- 객체 이력 / 트렌드 확장
+
+자세한 항목은 [monitoring-view-backlog.md](C:/2604_swacan_auto/docs/monitoring-view-backlog.md)를 따른다.
+
+### 3.3 Metamodel / Architecture / Monitoring 후속 연동
+
+- publish된 metamodel 변경이 editor / monitor에 주는 영향 점검
+- compatibility fallback 정리
+- 권한/감사 로그의 후속 polish
 
 ## 4. 지금 바로 무겁게 들어가지 않아도 되는 항목
 
-- Architecture Editor의 과도한 시각 효과 확장
-- Metamodel Canvas의 고급 배치 알고리즘
-- alert correlation / root-cause grouping 고도화
-- 고급 실시간 push 구조 전환
-- agent productization 마무리 작업
+- Monitoring View의 고급 시각 효과 확장
+- Architecture Editor의 대형 view 편집 기능 전체 확장
+- Alert correlation / root-cause grouping 고도화
+- Agent productization 후속 작업
 
 ## 5. 권장 진행 방식
 
-1. 기능 시작 전 구조 점검
-- 작은 refactoring이 먼저 필요한지 확인
-
-2. 최소 구현
-- API / DB / UI를 작은 닫힌 흐름으로 먼저 완성
-
-3. 경계값 테스트 보강
-- `boundary value analysis` 기준을 계속 적용
-
-4. 그 다음 확장
-- quick UX 개선이나 고급 기능은 1차 흐름이 닫힌 뒤 추가
+1. 기능 구현 전에 설계 문서로 먼저 방향을 고정한다.
+2. alert 조건 설계는 schema를 바로 바꾸기보다 개념 모델부터 정리한다.
+3. 다음 단계 구현은 설계 문서가 어느 정도 합의된 뒤 작은 slice로 나눈다.
+4. 구현이 시작되면 기존 원칙대로 boundary value analysis 기준 테스트를 유지한다.
 
 ## 6. 현재 결론
 
-지금은 `Architecture Editor`를 계속 넓히기보다, 현재 수준을 backlog로 명확히 관리하면서 `Monitoring View`를 다음 주력 구현 축으로 가져가는 것이 맞다.
+지금은 `Monitoring View`를 급하게 더 넓히기보다, 남은 작업을 backlog로 관리하면서 `backend alert 조건을 얼마나 유연하게 만들 것인가`를 다시 설계하는 것이 가장 적절하다.

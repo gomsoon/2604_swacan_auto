@@ -1,265 +1,84 @@
 # Alert Management Backlog
 
-## 1. 목적
+버전: Draft 0.3  
+작성일: 2026-04-18
 
-이 문서는 현재까지 구현된 alert 관리 기능을 정리하고, 이후 MVP 단계에서 이어서 개발할 항목을 backlog 형태로 관리하기 위한 기준 문서이다.
+목적: 현재까지 구현된 alert 관리 기능을 기준으로, 남은 기능을 backlog 형태로 정리한다.
 
-alert 관리 기능은 단순히 alert를 생성하는 수준을 넘어서, 운영자가 실제로 alert를 확인하고 상태를 변경하며 원인과 영향 범위를 판단할 수 있는 수준까지 발전시키는 것을 목표로 한다.
+## 1. 현재까지 확보된 기준점
 
-## 2. 현재까지 구현된 기능
+- `alert_instances` 기반 current alert 관리
+- `open / in_progress / suppressed / resolved` 상태
+- ACK / ACK 해제
+- 수동 resolve
+- `alert_history_archive` 기반 종료 이력 요약
+- `grouped_events`와 alert fan-out 연계
+- rule preview
+- Monitoring View에서의 최소 운영 액션
 
-### 2.1 Alert 생성과 해소
+즉 alert는 “운영자가 실제로 사용할 수 있는 1차 수준”까지는 올라온 상태로 본다.
 
-- `latest_states`와 threshold rule 평가 결과를 기반으로 `alert_instances`를 생성한다.
-- 동일한 `monitored_object`와 동일한 `alert_code`에 대해서는 반복 발생 시 `repeat_count`를 증가시키고 최신 메시지를 갱신한다.
-- 조건이 해소되면 기존 alert를 `resolved` 상태로 전환한다.
-- `monitored_object_id` 기준으로 alert를 저장하여, 여러 active view에 동일 alert를 fan-out 할 수 있다.
+## 2. 지금 남아 있는 큰 축
 
-### 2.2 Alert lifecycle
+### 2.1 Backend alert 조건 유연화
 
-- 현재 지원 상태:
-  - `open`
-  - `in_progress`
-  - `suppressed`
-  - `resolved`
-- 운영자는 관리 화면에서 alert 상태를 직접 전환할 수 있다.
-- `resolved` 상태에서는 `resolved_at`, `resolved_by_user_id`가 기록된다.
-- 수동으로 `in_progress` 또는 `suppressed`로 변경한 alert는 동일 조건이 반복 발생해도 자동으로 `open`으로 되돌리지 않는다.
+현재 가장 중요한 축이다.
 
-### 2.3 ACK 처리
+중점 항목:
+- threshold rule의 한계 정리
+- `selector / signal / condition / aggregation / lifecycle policy` 모델 검토
+- 단순 metric threshold 외에 event, stale, no-data rule을 어떻게 단계적으로 도입할지 정리
+- rule preview / dry-run / validation 방향 정리
 
-- 운영자는 alert를 `ACK` 또는 `ACK 해제`할 수 있다.
-- `acknowledged_at`, `acknowledged_by_user_id`, `ack_note`가 저장된다.
-- resolved alert는 ACK할 수 없다.
+참고 문서:
+- [alert-condition-flexibility-draft.md](C:/2604_swacan_auto/docs/alert-condition-flexibility-draft.md)
 
-### 2.4 Rule 기반 threshold 관리
+### 2.2 Alert lifecycle / archive 구조 정교화
 
-- `alert_rules`를 관리자 화면에서 생성, 수정, 활성화, 비활성화할 수 있다.
-- rule scope:
-  - `object_type`
-  - `monitored_object`
-- rule은 다음 속성을 가진다.
-  - `state_type`
-  - `metric_key`
-  - `comparison`
-  - `warning_threshold`
-  - `critical_threshold`
+중점 항목:
+- `alert_instances(current)`와 `alert_history(archive)` 역할 분리 정리
+- `resolution_source / resolution_reason` 정교화
+- manual resolve / auto recovery / policy timeout / cleanup 기반 종료 구분
+- 필요 시 `alert_action_log` 검토
 
-### 2.5 Rule preview와 영향도 확인
+### 2.3 운영 UX 고도화
 
-- 특정 rule에 대해 현재 매칭되는 monitored object 목록을 조회할 수 있다.
-- preview summary에서 다음 정보를 확인할 수 있다.
-  - `matched_object_count`
-  - `active_view_count`
-  - `active_node_count`
-  - `open_alert_count`
-  - `source_rule_open_alert_count`
-  - `metric_available_count`
-  - `warning_match_count`
-  - `critical_match_count`
-- 각 monitored object에 대해 다음 정보를 확인할 수 있다.
-  - `display_name`
-  - `runtime_binding_key`
-  - `object_type`
-  - `active_view_count`
-  - `active_node_count`
-  - `open_alert_count`
-  - `source_rule_open_alert_count`
-  - `latest_state_status`
-  - `latest_state_severity`
-  - `latest_received_at`
-  - `current_metric_value`
-  - `threshold_level`
+중점 항목:
+- Monitoring View 운영 액션 2차 고도화
+- 운영 메모
+- 상태 변경 이력 노출
+- 관련 admin 화면 deep link
 
-### 2.6 Event 연계
+## 3. 후속 backlog
 
-- raw event는 그대로 저장된다.
-- 반복 event는 `grouped_events`로 요약된다.
-- grouped event에서 raw event drill-down이 가능하다.
-- alert와 event는 모두 monitored object 기준으로 운영 화면에 fan-out 된다.
+### 3.1 suppression / escalation 고도화
 
-### 2.7 운영 화면 반영
+- suppression 기간
+- auto escalation
+- auto resolve 정책
+- policy 조건과 lifecycle의 연결 정리
 
-- monitoring 화면에서 active view 기준 alert 목록을 조회할 수 있다.
-- admin 화면에서 alert 목록, 상태, ACK, source rule, 상태 메모를 확인할 수 있다.
-- monitoring/admin 모두 `active` 필터 개념을 사용하여 unresolved alert를 조회할 수 있다.
+### 3.2 rule 영향도 / diff
 
-### 2.8 테스트
+- rule 변경 전후 영향도 비교
+- threshold 변경 dry-run
+- preview 고도화
 
-- alert lifecycle, ACK, status transition, preview, grouped event 관련 경계값 테스트가 추가되어 있다.
-- 현재 regression 기준:
-  - `205 passed`
-  - `2 skipped`
-- 앞으로도 test case는 `boundary value analysis` 기준을 우선 적용한다.
+### 3.3 alert correlation
 
-### 2.9 Alert history action log skeleton
+- parent/child alert
+- correlated alert group
+- root cause 후보 표현
 
-- `alert_history` 테이블이 추가되어 alert 운영 이력의 기본 저장 구조가 준비되었다.
-- 현재 기록되는 action:
-  - `created`
-  - `acknowledged`
-  - `unacknowledged`
-  - `status_changed`
-  - `resolved`
-- admin 수동 액션과 worker 자동 생성/해소가 같은 history 테이블에 기록된다.
-- 관리 화면 API에서 alert별 history 조회가 가능하다.
-- 다만 이 구조는 임시 skeleton으로 보고 있으며, 장기적으로는 `current alert`와 `archive history`를 분리하는 방향을 검토 중이다.
+### 3.4 fan-out 가시성
 
-### 2.10 Alert archive summary 최소 구현
+- 특정 alert가 현재 어떤 active view들에 fan-out 되는지 표시
+- active view count / active node count 표시 강화
 
-- `alert_history_archive` 테이블이 추가되어 종료된 alert lifecycle 요약을 별도로 저장할 수 있게 되었다.
-- 현재는 `manual resolve` 경로가 archive summary를 생성한다.
-- 관리자 API:
-  - `POST /api/admin/alerts/{id}/resolve`
-  - `GET /api/admin/alert-history`
-- 관리자 화면에서 현재 alert를 수동으로 해결 처리하고, 종료된 alert 이력을 별도 목록으로 확인할 수 있다.
-- archive summary에는 다음 정보가 저장된다.
-  - `opened_at`
-  - `resolved_at`
-  - `first/highest/final severity`
-  - `repeat_count`
-  - `was_acknowledged`
-  - `resolution_source`
-  - `resolution_reason`
-  - `resolved_by_user_id`
-- 현재 단계는 “최소 구현”이며, worker 자동 resolve와 full archive 전환은 후속 backlog로 남아 있다.
+## 4. 현재 결론
 
-## 3. 현재 구조의 강점
+지금은 alert 기능을 계속 빠르게 넓히기보다,
 
-- runtime identity가 `monitored_object` 기준으로 분리되어 있어, 동일 대상이 여러 view에 존재해도 alert는 한 번만 생성하고 여러 화면에 표시할 수 있다.
-- alert rule preview가 단순 목록을 넘어서 실제 현재 상태 기반 영향도까지 보여준다.
-- ACK와 상태 전이를 분리하여 운영자가 더 세밀하게 대응할 수 있다.
-- grouped event와 retention/cleanup 구조가 이미 있어 운영 부하를 줄일 기반이 마련되어 있다.
-
-## 4. 현재 구조에서 더 다듬으면 좋은 포인트
-
-### 4.1 current/action-log/archive 역할 정리 필요
-
-- `alert_history`는 현재 action log 역할로 쓰이고 있고, `alert_history_archive`는 종료 lifecycle summary 역할을 시작했다.
-- 다만 worker의 자동 resolve가 아직 archive summary까지 일관되게 연결되지는 않았다.
-- 장기적으로는 아래 역할 분리가 더 명확해질 필요가 있다.
-  - `alert_instances`: unresolved current alert
-  - `alert_history_archive`: lifecycle 1건당 1 row summary
-  - `alert_action_log` 또는 현재 `alert_history`: append-only action log
-
-### 4.2 Suppression 의미 고도화 부족
-
-- 현재 `suppressed`는 상태값으로만 존재한다.
-- suppression 기간, 자동 해제, 규칙 단위 suppression 등은 아직 없다.
-
-### 4.3 Rule 영향도 시뮬레이션 부족
-
-- 현재 preview는 “지금 기준” 영향도만 보여준다.
-- threshold를 변경했을 때 어떤 object가 새롭게 warning/critical이 되는지 비교하는 기능은 아직 없다.
-
-### 4.4 운영자 처리 흐름 부족
-
-- `ACK`와 `status`는 있으나, 운영자 메모 이력, 처리 담당자, 처리 시작/종료 기준 시간, resolution reason 같은 운영 메타데이터는 아직 부족하다.
-- 수동 resolve는 최소 구현이 들어갔지만, bulk resolve, note history, resolution reason taxonomy는 더 다듬을 여지가 있다.
-
-### 4.5 Alert fan-out 가시성 부족
-
-- 현재 구조상 여러 active view에 fan-out 할 수 있지만, 특정 alert가 어떤 active view에 표시되는지 직접 확인하는 UI는 아직 없다.
-
-## 5. 우선순위 Backlog
-
-### P1. Archive/action log 정리
-
-- 현재 상태:
-  - action log skeleton 구현 완료
-  - manual resolve archive summary 최소 구현 완료
-- 다음 목표:
-  - worker 자동 resolve도 archive summary 경로로 통일
-  - `alert_instances(current)` / `archive summary` / `action log` 역할 명확화
-  - lifecycle 1건당 archive 1 row 구조 고도화
-  - resolution source / reason taxonomy 확장
-  - action log drill-down UX 보강
-- 기대 효과:
-  - 감사 추적 강화
-  - 운영자 간 인수인계 개선
-
-### P2. Alert suppression 고도화
-
-- 목표:
-  - `suppressed`를 일시적인 운영 도구로 확장
-- 후보 기능:
-  - suppression until timestamp
-  - source rule 단위 suppression
-  - monitored object 단위 suppression
-  - suppression reason 필수화
-- 기대 효과:
-  - known noise를 더 안전하게 제어
-
-### P3. Rule 변경 영향도 시뮬레이션
-
-- 목표:
-  - 현재 preview를 넘어서 “변경 후 영향”을 비교
-- 후보 기능:
-  - threshold draft 값 입력 후 dry-run preview
-  - warning/critical 매칭 변화량 표시
-  - 새로 열릴 가능성이 있는 alert 대상 목록 표시
-- 기대 효과:
-  - 운영자가 rule 변경을 더 안전하게 수행 가능
-
-### P4. Alert 운영 상태 추가 확장
-
-- 목표:
-  - 현재 상태 집합을 더 운영 친화적으로 확장
-- 후보 상태:
-  - `acknowledged`
-  - `monitoring`
-  - `closed_with_exception`
-- 참고:
-  - 현재는 ACK를 별도 필드로 유지하고 있으므로, 상태 체계와의 관계를 먼저 정리해야 한다.
-
-### P5. Operator note history와 resolution reason
-
-- 목표:
-  - 마지막 메모만이 아니라 메모 히스토리와 해결 사유를 남김
-- 후보 기능:
-  - resolution reason
-  - resolution source (`manual_operator`, `auto_recovery`, `auto_policy_timeout` 등)
-  - operator note append-only log
-  - 마지막 메모와 전체 이력 분리
-
-### P6. Alert fan-out visibility
-
-- 목표:
-  - 특정 alert가 현재 어떤 active view에 표시되는지 확인
-- 후보 기능:
-  - active view count
-  - active view 목록
-  - 해당 view 내 node count
-- 기대 효과:
-  - 운영 영향 범위 파악이 쉬워진다.
-
-### P7. Alert correlation
-
-- 목표:
-  - 동일 monitored object 또는 동일 source rule에서 연관된 alert끼리 묶기
-- 후보 기능:
-  - parent/child alert
-  - correlated alert group
-  - root cause 후보 표시
-
-## 6. Metamodel 작업으로 넘어가기 전 기준
-
-alert 관리 기능은 아래 조건이 충족되면 1차 정리 완료로 보고, metamodel draft 내부 편집으로 우선순위를 이동해도 된다.
-
-- lifecycle이 운영 화면에서 일관되게 동작한다.
-- rule preview가 현재 운영 판단에 충분한 정보를 제공한다.
-- ACK와 상태 전이가 경계값 테스트 기준으로 안정화되어 있다.
-- alert, event, grouped event의 저장 및 cleanup 정책이 정리되어 있다.
-
-현재 기준으로는 위 조건에 실질적으로 도달했다고 판단한다.  
-따라서 alert 관리는 아래 원칙으로 backlog 전환하고, 다음 주 개발 초점은 `metamodel draft 내부 편집`으로 이동하는 것이 적절하다.
-
-- alert는 현재 운영에 사용할 수 있는 1차 수준까지 도달했다.
-- 남은 alert backlog는 구조 정리와 운영 고도화 성격으로 관리한다.
-- 다음 주요 구현 축은 `metamodel registry의 draft 내부 편집`으로 전환한다.
-
-## 7. 추천 다음 순서
-
-1. `metamodel draft 내부 편집` 시작
-2. alert backlog는 `archive/action log 정리`와 `suppression 정책`을 후속 과제로 유지
-3. rule 영향도 dry-run preview는 alert 개선 2차 사이클에서 재개
+1. backend alert 조건을 어떻게 유연하게 설계할지 먼저 정리하고
+2. lifecycle / archive 구조를 다시 점검한 뒤
+3. 구현은 작은 slice로 나누어 천천히 들어가는 것이 적절하다.
