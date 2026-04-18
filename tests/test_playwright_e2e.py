@@ -360,6 +360,8 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     page.get_by_role("link", name="모니터링 보기").click()
     page.wait_for_url(re.compile(r".*/views/\d+/monitor$"))
     expect(page.get_by_role("heading", name="최근 이벤트")).to_be_visible()
+    expect(page.locator(".monitor-canvas-legend")).to_contain_text("정상")
+    expect(page.locator(".monitor-canvas-legend")).to_contain_text("열린 Alert")
 
     monitor_server_node = page.locator('g.diagram-node[data-node-type="PhysicalServer"]').first
     monitor_process_node = page.locator('g.diagram-node[data-node-type="SoftwareProcess"]', has_text="Worker Alpha").first
@@ -452,6 +454,13 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
         "Playwright process restarted again",
         timeout=1500,
     )
+    expect(monitor_process_node).to_have_class(re.compile(r".*status-warning.*"), timeout=1500)
+    expect(monitor_process_node).to_have_class(re.compile(r".*has-open-alert.*"), timeout=1500)
+    expect(monitor_edge).to_have_class(re.compile(r".*status-warning.*"), timeout=1500)
+    expect(monitor_edge).to_have_class(re.compile(r".*has-open-alert.*"), timeout=1500)
+    page.locator("#monitor-selection-summary [data-grouped-event-id]").first.click()
+    expect(page.locator("#event-detail-panel")).to_contain_text("process_restarted")
+    expect(page.locator("#event-detail-panel")).to_contain_text("Playwright process restarted")
 
     monitor_edge.dispatch_event("click")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("monitors")

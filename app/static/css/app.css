@@ -386,6 +386,38 @@ a {
     overflow: hidden;
 }
 
+.monitor-canvas-legend {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 14px 18px 0;
+}
+
+.legend-pill {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 0 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--panel-strong);
+    color: var(--muted);
+    font-size: 0.84rem;
+}
+
+.legend-pill.status-up {
+    background: var(--ok-soft);
+}
+
+.legend-pill.status-warning {
+    background: var(--warning-soft);
+}
+
+.legend-pill.status-down,
+.legend-pill.has-alert {
+    background: var(--danger-soft);
+}
+
 .diagram-canvas {
     display: block;
     width: 100%;
@@ -752,6 +784,16 @@ a {
     background: var(--ok-soft);
 }
 
+.selection-summary-card.is-actionable {
+    cursor: pointer;
+}
+
+.selection-summary-card.is-actionable:hover,
+.selection-summary-card.is-actionable:focus-within {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px rgba(22, 93, 91, 0.16);
+}
+
 .selection-fanout-list {
     display: flex;
     flex-wrap: wrap;
@@ -958,6 +1000,24 @@ a {
     cursor: pointer;
 }
 
+.diagram-edge.status-up {
+    stroke: var(--ok);
+}
+
+.diagram-edge.status-warning {
+    stroke: var(--warning);
+    stroke-width: 3;
+}
+
+.diagram-edge.status-down {
+    stroke: var(--danger);
+    stroke-width: 3.2;
+}
+
+.diagram-edge.has-open-alert {
+    stroke-dasharray: 10 5;
+}
+
 .diagram-edge.is-selected {
     stroke: var(--accent);
     stroke-width: 3.5;
@@ -1086,6 +1146,11 @@ a {
     stroke-width: 2.4;
 }
 
+.diagram-node.has-open-alert .node-shape {
+    stroke: var(--danger);
+    stroke-width: 3;
+}
+
 .diagram-node.status-up .node-badge-shape {
     fill: rgba(255, 255, 255, 0.9);
     stroke: rgba(31, 122, 70, 0.2);
@@ -1099,6 +1164,18 @@ a {
 .diagram-node.status-down .node-badge-shape {
     fill: rgba(255, 255, 255, 0.92);
     stroke: rgba(180, 74, 60, 0.22);
+}
+
+.edge-alert-badge-shape {
+    fill: var(--danger);
+    stroke: rgba(64, 81, 98, 0.16);
+    stroke-width: 1;
+}
+
+.edge-alert-badge-text {
+    font-size: 10px;
+    font-weight: 700;
+    fill: #fff;
 }
 
 @media (max-width: 960px) {

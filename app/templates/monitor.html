@@ -16,6 +16,12 @@
 
     <div class="workspace-grid monitor-grid">
         <section class="card canvas-card">
+            <div class="monitor-canvas-legend">
+                <span class="legend-pill status-up">정상</span>
+                <span class="legend-pill status-warning">경고/지연</span>
+                <span class="legend-pill status-down">중요/장애</span>
+                <span class="legend-pill has-alert">열린 Alert</span>
+            </div>
             <svg id="monitor-canvas" class="diagram-canvas" aria-label="monitoring canvas"></svg>
         </section>
 

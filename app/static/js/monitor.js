@@ -242,6 +242,40 @@ function replaceItemsForMonitoredObject(items, monitoredObjectId, nextItems) {
     return items.filter((item) => item.monitored_object_id !== monitoredObjectId).concat(nextItems);
 }
 
+function findGroupedEventForAlert(alert) {
+    if (!alert) {
+        return null;
+    }
+
+    const eventType = alert.metadata?.event_type;
+    const monitoredObjectId = alert.monitored_object_id;
+    const targetId = alert.target_id;
+
+    if (eventType && monitoredObjectId !== null && monitoredObjectId !== undefined) {
+        const byObjectAndType = state.events.find(
+            (event) => event.monitored_object_id === monitoredObjectId && event.event_type === eventType
+        );
+        if (byObjectAndType) {
+            return byObjectAndType;
+        }
+    }
+
+    if (eventType && targetId) {
+        const byTargetAndType = state.events.find(
+            (event) => event.target_id === targetId && event.event_type === eventType
+        );
+        if (byTargetAndType) {
+            return byTargetAndType;
+        }
+    }
+
+    if (monitoredObjectId !== null && monitoredObjectId !== undefined) {
+        return state.events.find((event) => event.monitored_object_id === monitoredObjectId) || null;
+    }
+
+    return null;
+}
+
 function sectionBlock(title, bodyHtml, metaHtml = "") {
     return `
         <section class="selection-summary-section">
@@ -261,16 +295,18 @@ function renderAlertCards(items, emptyMessage) {
     return `
         <div class="selection-summary-card-list">
             ${items
-                .map(
-                    (alert) => `
-                        <article class="selection-summary-card ${cardSeverityClass(alert.severity)}">
+                .map((alert) => {
+                    const linkedEvent = findGroupedEventForAlert(alert);
+                    return `
+                        <article class="selection-summary-card ${cardSeverityClass(alert.severity)}${linkedEvent ? " is-actionable" : ""}" data-alert-id="${escapeHtml(alert.id)}"${linkedEvent ? ` data-linked-grouped-event-id="${escapeHtml(linkedEvent.id)}"` : ""}>
                             <h4>${escapeHtml(alert.alert_code)}</h4>
                             <p>${escapeHtml(alert.latest_message || "메시지 없음")}</p>
                             <p>${escapeHtml(alert.severity)} | ${escapeHtml(alert.status)} | 반복 ${escapeHtml(alert.repeat_count ?? 1)}회</p>
                             <p>${escapeHtml(formatTimestamp(alert.last_occurred_at))}</p>
+                            ${linkedEvent ? `<p>관련 이벤트 열기: ${escapeHtml(linkedEvent.event_type)}</p>` : ""}
                         </article>
-                    `
-                )
+                    `;
+                })
                 .join("")}
         </div>
     `;
@@ -285,11 +321,12 @@ function renderGroupedEventCards(items, emptyMessage) {
             ${items
                 .map(
                     (event) => `
-                        <article class="selection-summary-card ${cardSeverityClass(event.severity)}">
+                        <article class="selection-summary-card ${cardSeverityClass(event.severity)} is-actionable" data-grouped-event-id="${escapeHtml(event.id)}">
                             <h4>${escapeHtml(event.event_type)}</h4>
                             <p>${escapeHtml(event.latest_message || "메시지 없음")}</p>
                             <p>${escapeHtml(event.severity)} | 반복 ${escapeHtml(event.repeat_count ?? 1)}회</p>
                             <p>${escapeHtml(formatTimestamp(event.last_occurred_at || event.occurred_at))}</p>
+                            <p>raw event 상세 열기</p>
                         </article>
                     `
                 )
@@ -914,6 +951,27 @@ eventsList?.addEventListener("click", async (event) => {
     try {
         clearBanner();
         await loadEventDetails(Number(card.dataset.groupedEventId));
+    } catch (error) {
+        showBanner(error.message, "error");
+    }
+});
+selectionSummary?.addEventListener("click", async (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) {
+        return;
+    }
+
+    const groupedEventCard = target.closest("[data-grouped-event-id]");
+    const alertCard = target.closest("[data-alert-id]");
+    const linkedGroupedEventId = alertCard?.dataset.linkedGroupedEventId;
+    const groupedEventId = groupedEventCard?.dataset.groupedEventId || linkedGroupedEventId;
+    if (!groupedEventId) {
+        return;
+    }
+
+    try {
+        clearBanner();
+        await loadEventDetails(Number(groupedEventId));
     } catch (error) {
         showBanner(error.message, "error");
     }

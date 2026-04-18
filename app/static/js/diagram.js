@@ -151,6 +151,32 @@ function alertCountForNode(node, alertsByMonitoredObjectId) {
     return alertsByMonitoredObjectId.get(node.monitored_object_id)?.length || 0;
 }
 
+function alertsForNode(node, alertsByMonitoredObjectId) {
+    if (!node.monitored_object_id || !(alertsByMonitoredObjectId instanceof Map)) {
+        return [];
+    }
+    return alertsByMonitoredObjectId.get(node.monitored_object_id) || [];
+}
+
+function visualLevelForRuntime({ latestState, alerts }) {
+    if (alerts.some((alert) => alert.severity === "critical")) {
+        return "down";
+    }
+    if (latestState && (latestState.status === "down" || latestState.severity === "critical")) {
+        return "down";
+    }
+    if (alerts.some((alert) => alert.severity === "warning")) {
+        return "warning";
+    }
+    if (latestState && (latestState.status === "warning" || latestState.severity === "warning")) {
+        return "warning";
+    }
+    if (latestState && (latestState.status === "up" || latestState.status === "healthy" || latestState.severity === "info")) {
+        return "up";
+    }
+    return "";
+}
+
 function buildViewBox(nodes) {
     if (nodes.length === 0) {
         return "0 0 1200 800";
@@ -228,9 +254,25 @@ export function renderDiagram(svg, options) {
 
         const source = resolveAnchorPoint(sourceNode, edge.source_anchor);
         const target = resolveAnchorPoint(targetNode, edge.target_anchor);
+        const sourceState = runtimeStateForNode(sourceNode, latestStatesByTargetId, latestStatesByMonitoredObjectId);
+        const targetState = runtimeStateForNode(targetNode, latestStatesByTargetId, latestStatesByMonitoredObjectId);
+        const sourceAlerts = alertsForNode(sourceNode, alertsByMonitoredObjectId);
+        const targetAlerts = alertsForNode(targetNode, alertsByMonitoredObjectId);
+        const edgeAlertCount = sourceAlerts.length + targetAlerts.length;
+        const edgeLevel =
+            visualLevelForRuntime({ latestState: sourceState, alerts: sourceAlerts }) === "down" ||
+            visualLevelForRuntime({ latestState: targetState, alerts: targetAlerts }) === "down"
+                ? "status-down"
+                : visualLevelForRuntime({ latestState: sourceState, alerts: sourceAlerts }) === "warning" ||
+                    visualLevelForRuntime({ latestState: targetState, alerts: targetAlerts }) === "warning"
+                  ? "status-warning"
+                  : visualLevelForRuntime({ latestState: sourceState, alerts: sourceAlerts }) === "up" ||
+                      visualLevelForRuntime({ latestState: targetState, alerts: targetAlerts }) === "up"
+                    ? "status-up"
+                    : "";
         const path = svgEl("path", {
             d: `M ${source.x} ${source.y} L ${target.x} ${target.y}`,
-            class: `diagram-edge${edge.id === selectedEdgeId ? " is-selected" : ""}`,
+            class: `diagram-edge${edge.id === selectedEdgeId ? " is-selected" : ""}${edgeLevel ? ` ${edgeLevel}` : ""}${edgeAlertCount > 0 ? " has-open-alert" : ""}`,
             "marker-end": "url(#edge-arrow)",
         });
         path.dataset.edgeId = String(edge.id);
@@ -250,6 +292,30 @@ export function renderDiagram(svg, options) {
             });
             label.textContent = edge.label;
             edgeLayer.appendChild(label);
+        }
+
+        if (edgeAlertCount > 0) {
+            const badgeGroup = svgEl("g", {
+                class: "edge-alert-badge",
+                transform: `translate(${(source.x + target.x) / 2 + 18}, ${(source.y + target.y) / 2 - 18})`,
+            });
+            badgeGroup.appendChild(
+                svgEl("circle", {
+                    class: "edge-alert-badge-shape",
+                    cx: 0,
+                    cy: 0,
+                    r: 10,
+                })
+            );
+            const badgeText = svgEl("text", {
+                class: "edge-alert-badge-text",
+                x: 0,
+                y: 4,
+                "text-anchor": "middle",
+            });
+            badgeText.textContent = String(Math.min(edgeAlertCount, 99));
+            badgeGroup.appendChild(badgeText);
+            edgeLayer.appendChild(badgeGroup);
         }
     }
 
@@ -293,6 +359,11 @@ export function renderDiagram(svg, options) {
         }
         if (statusClass) {
             classes.push(statusClass);
+        }
+
+        const alertCount = alertCountForNode(node, alertsByMonitoredObjectId);
+        if (alertCount > 0) {
+            classes.push("has-open-alert");
         }
 
         const group = svgEl("g", {
@@ -350,7 +421,6 @@ export function renderDiagram(svg, options) {
         group.appendChild(meta);
 
         const agentBadgeText = agentBadgeTextForNode(node, latestStatesByTargetId, latestStatesByMonitoredObjectId);
-        const alertCount = alertCountForNode(node, alertsByMonitoredObjectId);
         if (agentBadgeText) {
             const badgeWidth = Math.min(Math.max(agentBadgeText.length * 7 + 18, 78), Math.max(node.width - 16, 78));
             const badgeGroup = svgEl("g", {
