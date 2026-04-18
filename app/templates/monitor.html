@@ -1,7 +1,7 @@
 ﻿{% extends "base.html" %}
 
 {% block content %}
-<section id="monitor-app" class="workspace" data-view-id="{{ view_id }}">
+<section id="monitor-app" class="workspace" data-view-id="{{ view_id }}" data-user-role="{{ current_user['role'] if current_user else '' }}">
     <div class="page-title-row">
         <div>
             <p class="eyebrow">Monitoring</p>

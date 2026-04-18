@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
+from app.alert_archive import insert_alert_history_archive
 from app.db import get_db
 from app.views_api import build_view_runtime_watch_state, detect_view_runtime_changes
 
@@ -502,6 +503,45 @@ def test_runtime_object_slice_returns_current_view_runtime_summary(seeded_app, s
     assert payload["latest_states"][0]["state"]["pid"] == 1234
     assert [item["alert_code"] for item in payload["alerts"]] == ["process.down"]
     assert [item["event_type"] for item in payload["events"]] == ["process_stopped"]
+    assert payload["history"]["summary"]["resolved_alert_count"] == 0
+    assert payload["history"]["summary"]["raw_event_count"] == 1
+    assert payload["history"]["raw_events"][0]["event_type"] == "process_stopped"
+
+
+def test_runtime_object_slice_returns_alert_history_archive_summary(seeded_app, seeded_client) -> None:
+    seed_monitoring_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        alert_row = db_conn.execute(
+            """
+            SELECT monitored_object_id, alert_code, source_rule_id, severity,
+                   acknowledged_at, acknowledged_by_user_id,
+                   first_occurred_at, last_occurred_at, repeat_count,
+                   latest_message, metadata_json
+            FROM alert_instances
+            WHERE monitored_object_id = ?
+            """,
+            (1302,),
+        ).fetchone()
+        insert_alert_history_archive(
+            db_conn,
+            alert_row=alert_row,
+            resolved_at="2026-04-10T10:25:00.000+09:00",
+            resolution_source="manual_operator",
+            resolution_reason="resolved from monitoring view test",
+            resolved_by_user_id=1,
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/1/runtime-objects/1302/slice?limit=10")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["history"]["summary"]["resolved_alert_count"] == 1
+    assert payload["history"]["summary"]["latest_resolved_at"] == "2026-04-10T10:25:00.000+09:00"
+    assert payload["history"]["alert_history"][0]["resolution_source"] == "manual_operator"
+    assert payload["history"]["alert_history"][0]["resolution_reason"] == "resolved from monitoring view test"
 
 
 def test_runtime_object_slice_prefers_binding_when_active_target_id_changes(seeded_app, seeded_client) -> None:

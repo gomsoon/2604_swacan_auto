@@ -461,6 +461,20 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     expect(page.locator("#event-detail-panel")).to_contain_text("process_restarted")
     expect(page.locator("#event-detail-panel")).to_contain_text("Playwright process restarted")
 
+    page.locator('#monitor-selection-summary [data-alert-action="ack"]').first.click()
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("ACK", timeout=2500)
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("Monitoring View ACK", timeout=2500)
+
+    page.locator('#monitor-selection-summary [data-alert-action="in_progress"]').first.click()
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("in_progress", timeout=2500)
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("Monitoring View에서 처리중 전환", timeout=2500)
+
+    page.locator('#monitor-selection-summary [data-alert-action="resolve"]').first.click()
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("현재 열린 alert가 없습니다.", timeout=2500)
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("객체 이력 / 트렌드", timeout=2500)
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("manual_operator", timeout=2500)
+    expect(page.locator("#monitor-selection-summary")).to_contain_text("Monitoring View에서 수동 해결", timeout=2500)
+
     monitor_edge.dispatch_event("click")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("monitors")
     expect(page.locator("#monitor-selection-summary")).to_contain_text("연결된 Runtime 대상")

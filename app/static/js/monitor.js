@@ -15,6 +15,7 @@ const refreshEventsButton = document.getElementById("refresh-events-button");
 
 const state = {
     viewId: Number(appRoot.dataset.viewId),
+    userRole: appRoot.dataset.userRole || "",
     metamodelVersionCode: null,
     notationDefinitionsByCode: new Map(),
     nodes: [],
@@ -22,6 +23,7 @@ const state = {
     latestStates: [],
     alerts: [],
     events: [],
+    runtimeHistoryByMonitoredObjectId: new Map(),
     selectedEventId: null,
     eventDetails: [],
     selectedGroupedEvent: null,
@@ -33,6 +35,10 @@ const state = {
 };
 
 let realtimeUpdateQueue = Promise.resolve();
+
+function isAdminUser() {
+    return state.userRole === "admin";
+}
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -292,6 +298,45 @@ function sectionBlock(title, bodyHtml, metaHtml = "") {
     `;
 }
 
+function renderAlertActionButtons(alert) {
+    if (!isAdminUser()) {
+        return "";
+    }
+
+    const monitoredObjectId = alert.monitored_object_id;
+    const ackAction = alert.is_acknowledged ? "unack" : "ack";
+    const ackLabel = alert.is_acknowledged ? "ACK 해제" : "ACK";
+    const inProgressButton =
+        alert.status === "in_progress"
+            ? ""
+            : `
+                <button class="button ghost small" type="button"
+                    data-alert-action="in_progress"
+                    data-alert-id="${escapeHtml(alert.id)}"
+                    data-monitored-object-id="${escapeHtml(monitoredObjectId)}">
+                    처리중
+                </button>
+            `;
+
+    return `
+        <div class="selection-card-actions">
+            <button class="button ghost small" type="button"
+                data-alert-action="${ackAction}"
+                data-alert-id="${escapeHtml(alert.id)}"
+                data-monitored-object-id="${escapeHtml(monitoredObjectId)}">
+                ${escapeHtml(ackLabel)}
+            </button>
+            ${inProgressButton}
+            <button class="button danger small" type="button"
+                data-alert-action="resolve"
+                data-alert-id="${escapeHtml(alert.id)}"
+                data-monitored-object-id="${escapeHtml(monitoredObjectId)}">
+                해결
+            </button>
+        </div>
+    `;
+}
+
 function renderAlertCards(items, emptyMessage) {
     if (items.length === 0) {
         return `<p class="section-copy">${escapeHtml(emptyMessage)}</p>`;
@@ -305,9 +350,12 @@ function renderAlertCards(items, emptyMessage) {
                         <article class="selection-summary-card ${cardSeverityClass(alert.severity)}${linkedEvent ? " is-actionable" : ""}" data-alert-id="${escapeHtml(alert.id)}"${linkedEvent ? ` data-linked-grouped-event-id="${escapeHtml(linkedEvent.id)}"` : ""}>
                             <h4>${escapeHtml(alert.alert_code)}</h4>
                             <p>${escapeHtml(alert.latest_message || "메시지 없음")}</p>
-                            <p>${escapeHtml(alert.severity)} | ${escapeHtml(alert.status)} | 반복 ${escapeHtml(alert.repeat_count ?? 1)}회</p>
+                            <p>${escapeHtml(alert.severity)} | ${escapeHtml(alert.status)} | 반복 ${escapeHtml(alert.repeat_count ?? 1)}회${alert.is_acknowledged ? " | ACK" : ""}</p>
                             <p>${escapeHtml(formatTimestamp(alert.last_occurred_at))}</p>
+                            ${alert.ack_note ? `<p>ACK 메모: ${escapeHtml(alert.ack_note)}</p>` : ""}
+                            ${alert.status_note ? `<p>상태 메모: ${escapeHtml(alert.status_note)}</p>` : ""}
                             ${linkedEvent ? `<p>관련 이벤트 열기: ${escapeHtml(linkedEvent.event_type)}</p>` : ""}
+                            ${renderAlertActionButtons(alert)}
                         </article>
                     `;
                 })
@@ -357,6 +405,106 @@ function renderFanoutPills(items, currentNodeId) {
                 .join("")}
         </div>
     `;
+}
+
+function defaultRuntimeHistory() {
+    return {
+        summary: {
+            resolved_alert_count: 0,
+            latest_resolved_at: null,
+            raw_event_count: 0,
+            latest_event_at: null,
+        },
+        alert_history: [],
+        raw_events: [],
+    };
+}
+
+function runtimeHistoryForMonitoredObject(monitoredObjectId) {
+    if (monitoredObjectId === null || monitoredObjectId === undefined) {
+        return null;
+    }
+    return state.runtimeHistoryByMonitoredObjectId.get(monitoredObjectId) || null;
+}
+
+function renderHistoryCards(items, emptyMessage, renderer) {
+    if (!items || items.length === 0) {
+        return `<p class="section-copy">${escapeHtml(emptyMessage)}</p>`;
+    }
+    return `
+        <div class="selection-summary-card-list">
+            ${items.map(renderer).join("")}
+        </div>
+    `;
+}
+
+function renderRuntimeHistorySection(monitoredObjectId) {
+    if (monitoredObjectId === null || monitoredObjectId === undefined) {
+        return sectionBlock(
+            "객체 이력 / 트렌드",
+            '<p class="section-copy">runtime binding이 연결된 객체에서만 이력과 트렌드를 볼 수 있습니다.</p>'
+        );
+    }
+
+    const history = runtimeHistoryForMonitoredObject(monitoredObjectId);
+    if (!history) {
+        return sectionBlock(
+            "객체 이력 / 트렌드",
+            '<p class="section-copy">선택한 runtime object의 최근 이력을 불러오는 중입니다.</p>'
+        );
+    }
+
+    const summaryRows = [
+        { label: "해결된 alert", value: `${history.summary.resolved_alert_count ?? 0}건` },
+        { label: "최근 해결 시각", value: formatTimestamp(history.summary.latest_resolved_at) },
+        { label: "누적 raw event", value: `${history.summary.raw_event_count ?? 0}건` },
+        { label: "최근 이벤트 시각", value: formatTimestamp(history.summary.latest_event_at) },
+    ];
+
+    const alertHistoryHtml = renderHistoryCards(
+        history.alert_history.slice(0, 3),
+        "최근 해결 이력이 없습니다.",
+        (item) => `
+            <article class="selection-summary-card">
+                <h4>${escapeHtml(item.alert_code)}</h4>
+                <p>${escapeHtml(item.latest_message || "메시지 없음")}</p>
+                <p>${escapeHtml(item.final_severity)} | ${escapeHtml(item.resolution_source || "-")} | 반복 ${escapeHtml(item.repeat_count ?? 1)}회</p>
+                <p>${escapeHtml(formatTimestamp(item.resolved_at))}</p>
+                ${item.resolution_reason ? `<p>해결 사유: ${escapeHtml(item.resolution_reason)}</p>` : ""}
+            </article>
+        `
+    );
+
+    const rawEventHtml = renderHistoryCards(
+        history.raw_events.slice(0, 3),
+        "최근 raw event 이력이 없습니다.",
+        (item) => `
+            <article class="selection-summary-card">
+                <h4>${escapeHtml(item.event_type)}</h4>
+                <p>${escapeHtml(item.message || "메시지 없음")}</p>
+                <p>${escapeHtml(item.severity)} | agent ${escapeHtml(item.agent_id || "-")}</p>
+                <p>${escapeHtml(formatTimestamp(item.occurred_at))}</p>
+            </article>
+        `
+    );
+
+    return sectionBlock(
+        "객체 이력 / 트렌드",
+        `
+            <div class="detail-grid">${renderDetailRows(summaryRows)}</div>
+            <div class="selection-history-stack">
+                <div>
+                    <h4 class="selection-subtitle">최근 해결 이력</h4>
+                    ${alertHistoryHtml}
+                </div>
+                <div>
+                    <h4 class="selection-subtitle">최근 Raw Event</h4>
+                    ${rawEventHtml}
+                </div>
+            </div>
+        `,
+        `<span class="meta-pill">최근 ${escapeHtml(history.raw_events.length)}개 raw event</span>`
+    );
 }
 
 function formatHeartbeatAge(payload) {
@@ -647,6 +795,7 @@ function renderNodeSelection(node) {
             ${renderFanoutPills(fanoutNodes, node.id)}
         `
     );
+    const historySection = renderRuntimeHistorySection(node.monitored_object_id);
 
     if (!stateRow) {
         selectionSummary.innerHTML = `
@@ -654,6 +803,7 @@ function renderNodeSelection(node) {
             ${bindingSection}
             ${sectionBlock("Open Alert", renderAlertCards(nodeAlerts.slice(0, 3), "현재 열린 alert가 없습니다."))}
             ${sectionBlock("최근 Grouped Event", renderGroupedEventCards(nodeEvents.slice(0, 3), "최근 grouped event가 없습니다."))}
+            ${historySection}
         `;
         return;
     }
@@ -675,6 +825,7 @@ function renderNodeSelection(node) {
         )}
         ${sectionBlock("Open Alert", renderAlertCards(nodeAlerts.slice(0, 3), "현재 열린 alert가 없습니다."))}
         ${sectionBlock("최근 Grouped Event", renderGroupedEventCards(nodeEvents.slice(0, 3), "최근 grouped event가 없습니다."))}
+        ${historySection}
     `;
 }
 
@@ -794,6 +945,10 @@ function mergeRuntimeObjectSlice(payload) {
     );
     state.events = sortGroupedEventItems(
         replaceItemsForMonitoredObject(state.events, payload.monitored_object_id, payload.events)
+    );
+    state.runtimeHistoryByMonitoredObjectId.set(
+        payload.monitored_object_id,
+        payload.history || defaultRuntimeHistory()
     );
 }
 
@@ -962,6 +1117,52 @@ async function loadEventDetails(groupedEventId) {
     render();
 }
 
+async function performAlertAction(action, alertId, monitoredObjectId) {
+    if (!isAdminUser()) {
+        return;
+    }
+
+    if (action === "ack") {
+        await apiFetch(`/api/admin/alerts/${alertId}`, {
+            method: "PATCH",
+            body: {
+                acknowledged: true,
+                ack_note: "Monitoring View ACK",
+            },
+        });
+        showBanner("Alert를 ACK 했습니다.", "success");
+    } else if (action === "unack") {
+        await apiFetch(`/api/admin/alerts/${alertId}`, {
+            method: "PATCH",
+            body: {
+                acknowledged: false,
+            },
+        });
+        showBanner("Alert ACK를 해제했습니다.", "success");
+    } else if (action === "in_progress") {
+        await apiFetch(`/api/admin/alerts/${alertId}/status`, {
+            method: "PATCH",
+            body: {
+                status: "in_progress",
+                status_note: "Monitoring View에서 처리중 전환",
+            },
+        });
+        showBanner("Alert를 처리중으로 전환했습니다.", "success");
+    } else if (action === "resolve") {
+        await apiFetch(`/api/admin/alerts/${alertId}/resolve`, {
+            method: "POST",
+            body: {
+                resolution_reason: "Monitoring View에서 수동 해결",
+            },
+        });
+        showBanner("Alert를 해결 처리했습니다.", "success");
+    } else {
+        return;
+    }
+
+    await refreshRuntimeObjectSlice(monitoredObjectId);
+}
+
 async function loadView() {
     let payload;
     let metamodelVersionCode;
@@ -1043,6 +1244,21 @@ eventsList?.addEventListener("click", async (event) => {
 selectionSummary?.addEventListener("click", async (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) {
+        return;
+    }
+
+    const alertActionButton = target.closest("[data-alert-action]");
+    if (alertActionButton) {
+        try {
+            clearBanner();
+            await performAlertAction(
+                alertActionButton.dataset.alertAction,
+                Number(alertActionButton.dataset.alertId),
+                Number(alertActionButton.dataset.monitoredObjectId)
+            );
+        } catch (error) {
+            showBanner(error.message, "error");
+        }
         return;
     }
 

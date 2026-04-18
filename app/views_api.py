@@ -7,6 +7,7 @@ from typing import Any
 
 from flask import Blueprint, Response, current_app, g, request, stream_with_context
 
+from .alert_archive import serialize_alert_archive_row
 from .auth import error_response, login_required
 from .db import close_db, get_db
 from .runtime_state import derive_latest_state
@@ -385,6 +386,71 @@ def fetch_alert_rows_for_monitored_objects(monitored_object_ids: list[int], *, s
         """,
         params,
     ).fetchall()
+
+
+def fetch_alert_archive_rows_for_monitored_object(monitored_object_id: int, *, limit: int):
+    return get_db().execute(
+        """
+        SELECT archive.id, archive.monitored_object_id, mo.runtime_binding_key, mo.display_name,
+               mo.object_type AS semantic_type_code,
+               archive.alert_code, archive.source_rule_id,
+               rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
+               COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
+               archive.opened_at, archive.resolved_at,
+               archive.first_severity, archive.highest_severity, archive.final_severity, archive.final_status,
+               archive.repeat_count, archive.was_acknowledged,
+               archive.last_acknowledged_at, archive.last_acknowledged_by_user_id,
+               ack_user.username AS last_acknowledged_by_username,
+               archive.resolution_source, archive.resolution_reason,
+               archive.resolved_by_user_id, resolved_user.username AS resolved_by_username,
+               archive.latest_message, archive.metadata_json, archive.created_at, archive.updated_at
+        FROM alert_history_archive AS archive
+        JOIN monitored_objects AS mo ON mo.id = archive.monitored_object_id
+        LEFT JOIN alert_rules AS rules ON rules.id = archive.source_rule_id
+        LEFT JOIN monitored_objects AS rule_mo ON rule_mo.id = rules.monitored_object_id
+        LEFT JOIN users AS ack_user ON ack_user.id = archive.last_acknowledged_by_user_id
+        LEFT JOIN users AS resolved_user ON resolved_user.id = archive.resolved_by_user_id
+        WHERE archive.monitored_object_id = ?
+        ORDER BY archive.resolved_at DESC, archive.id DESC
+        LIMIT ?
+        """,
+        (monitored_object_id, limit),
+    ).fetchall()
+
+
+def build_runtime_object_history(monitored_object_id: int, *, limit: int) -> dict[str, Any]:
+    archive_rows = fetch_alert_archive_rows_for_monitored_object(monitored_object_id, limit=limit)
+    raw_event_rows = get_db().execute(
+        """
+        SELECT id, agent_id, monitored_object_id, target_id, event_type, severity, message, event_json, occurred_at, received_at
+        FROM raw_events
+        WHERE monitored_object_id = ?
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT ?
+        """,
+        (monitored_object_id, limit),
+    ).fetchall()
+    summary_row = get_db().execute(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM alert_history_archive WHERE monitored_object_id = ?) AS resolved_alert_count,
+            (SELECT MAX(resolved_at) FROM alert_history_archive WHERE monitored_object_id = ?) AS latest_resolved_at,
+            (SELECT COUNT(*) FROM raw_events WHERE monitored_object_id = ?) AS raw_event_count,
+            (SELECT MAX(occurred_at) FROM raw_events WHERE monitored_object_id = ?) AS latest_event_at
+        """,
+        (monitored_object_id, monitored_object_id, monitored_object_id, monitored_object_id),
+    ).fetchone()
+
+    return {
+        "summary": {
+            "resolved_alert_count": summary_row["resolved_alert_count"],
+            "latest_resolved_at": summary_row["latest_resolved_at"],
+            "raw_event_count": summary_row["raw_event_count"],
+            "latest_event_at": summary_row["latest_event_at"],
+        },
+        "alert_history": [serialize_alert_archive_row(row) for row in archive_rows],
+        "raw_events": [serialize_raw_event(row) for row in raw_event_rows],
+    }
 
 
 def serialize_monitor_target_node(row) -> dict[str, Any]:
@@ -1042,6 +1108,7 @@ def get_view_runtime_object_slice(view_id: int, monitored_object_id: int):
         "latest_states": latest_items,
         "alerts": [serialize_alert_instance(row) for row in alert_rows],
         "events": [serialize_grouped_event(row) for row in event_rows],
+        "history": build_runtime_object_history(monitored_object_id, limit=min(limit, 5)),
     }
 
 
