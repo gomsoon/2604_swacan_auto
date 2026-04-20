@@ -488,6 +488,23 @@ MVP preview 응답은 다음 5개 블록으로 구성하는 것이 적절하다.
 
 즉 `matched_object_sample`과 `evaluation_sample`은 분리하되, row shape는 비슷하게 맞추는 것이 frontend 구현에도 유리하다.
 
+MVP에서는 `evaluation_sample`을 다음처럼 나누어 생각하는 것이 적절하다.
+
+- 최소 필드 세트:
+  - `monitored_object_id`
+  - `display_name`
+  - `object_type`
+  - `current_value`
+  - `severity`
+  - `would_fire`
+  - `winner_rule_scope`
+  - `reason`
+- 선택 필드:
+  - `winner_rule_id`
+  - `suppressed_rule_ids`
+
+즉 MVP에서는 운영자가 “왜 이 객체가 warning/critical이 되는지”를 이해하는 데 필요한 설명 필드를 우선 두고, 디버깅 성격이 강한 식별자 필드는 optional로 두는 편이 좋다.
+
 ### 7.4 MVP에서의 응답 범위 제한
 
 preview 응답은 너무 커지지 않게 제한하는 편이 좋다.
