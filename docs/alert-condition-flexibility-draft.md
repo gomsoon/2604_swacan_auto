@@ -173,7 +173,75 @@ alert를 어떻게 유지/상향/해소할지 정한다.
 - `auto_resolve_after_seconds`
 - `policy_json`
 
-## 4. 단계별 확장 추천
+## 4. 현재 `alert_rules`와 개념 모델의 매핑
+
+현재 `alert_rules`는 이미 아주 작은 형태의
+
+- `selector`
+- `signal`
+- `condition`
+
+모델로 해석할 수 있다.
+
+다만 `aggregation / window`와 `lifecycle policy`는 아직 구조적으로 모델링되어 있지 않고, 일부는 worker 동작에 흩어져 있다.
+
+### 4.1 필드 매핑표
+
+| 현재 필드 | 새 개념 모델 | 현재 의미 | 비고 |
+| --- | --- | --- | --- |
+| `scope_type` | `selector` | 어떤 범위에 적용할지 | 현재는 `object_type`, `monitored_object` 두 종류만 지원 |
+| `object_type` | `selector` | 특정 object type 선택 | `scope_type = object_type`일 때 사용 |
+| `monitored_object_id` | `selector` | 특정 monitored object 선택 | `scope_type = monitored_object`일 때 사용 |
+| `state_type` | `signal` | 어떤 latest state 축을 볼지 | 현재는 `process`, `agent`, `host` |
+| `metric_key` | `signal` | 어떤 metric을 읽을지 | 예: `cpu_usage`, `outbox_queue_depth` |
+| `comparison` | `condition` | 어떤 비교식인지 | 현재는 `gte`, `lte`만 지원 |
+| `warning_threshold` | `condition` | warning 기준값 | optional |
+| `critical_threshold` | `condition` | critical 기준값 | optional |
+| `is_enabled` | rule metadata | rule 활성/비활성 | 개념 모델 핵심은 아니지만 계속 필요 |
+| `description` | rule metadata | 운영 설명 | 계속 필요 |
+
+### 4.2 현재 구조에서 이미 되는 것
+
+- 특정 object type 전체에 대한 metric threshold rule
+- 특정 monitored object 하나에 대한 metric threshold rule
+- `process / agent / host` latest state를 기준으로 한 비교 rule
+- `warning / critical` 2단계 severity 판정
+
+즉 현재 구조는 다음 형태를 이미 표현할 수 있다.
+
+- selector:
+  - `object_type = SoftwareProcess`
+- signal:
+  - `latest_state_metric(process.cpu_usage)`
+- condition:
+  - `gte 80 / 95`
+
+### 4.3 현재 구조에서 아직 어려운 것
+
+- event 자체를 signal로 쓰는 rule
+- grouped event repeat count rule
+- `no-data`, `stale`를 rule 차원에서 명시하는 구조
+- 최근 N분 평균/최댓값/횟수 같은 window rule
+- cooldown, auto escalation, auto resolve 같은 lifecycle policy
+- selector를 `semantic_type`, tag, group, namespace 수준으로 확장하는 구조
+
+### 4.4 현재 worker에 암묵적으로 있는 정책
+
+일부 lifecycle 의미는 현재 `alert_rules` 필드가 아니라 worker 로직에 암묵적으로 들어 있다.
+
+예:
+- 동일 rule / object 기준 alert reopen
+- 조건 해소 시 auto recovery
+- 일부 상태 유지(`in_progress`, `suppressed`) 처리
+
+즉 앞으로는 다음 둘을 명확히 분리하는 게 좋다.
+
+- `rule evaluation`
+  - selector / signal / condition / aggregation
+- `alert lifecycle policy`
+  - cooldown / auto escalation / auto resolve / suppression
+
+## 5. 단계별 확장 추천
 
 한 번에 모든 rule 타입을 넣는 건 과합니다.  
 다음처럼 단계적으로 가는 게 좋습니다.
@@ -227,7 +295,7 @@ alert를 어떻게 유지/상향/해소할지 정한다.
 
 이 단계는 alert lifecycle과 같이 움직여야 한다.
 
-## 5. 권장 API/DB 방향
+## 6. 권장 API/DB 방향
 
 ### 5.1 현재 `alert_rules`를 유지하되 확장
 
@@ -260,7 +328,7 @@ alert를 어떻게 유지/상향/해소할지 정한다.
 
 현재 시점에서는 `기존 alert_rules 확장`이 더 현실적이다.
 
-## 6. UI / 운영 관점
+## 7. UI / 운영 관점
 
 유연한 alert 조건은 단순히 DB schema 문제가 아니다.  
 운영자가 이해할 수 있어야 한다.
@@ -282,7 +350,7 @@ alert를 어떻게 유지/상향/해소할지 정한다.
 
 가 되어야 한다.
 
-## 7. 현재 시점의 권장 결론
+## 8. 현재 시점의 권장 결론
 
 현재 backend alert 조건은 다음 방향으로 설계 검토를 진행하는 것이 적절하다.
 
@@ -296,7 +364,7 @@ alert를 어떻게 유지/상향/해소할지 정한다.
 
 를 먼저 하는 것이 맞다.
 
-## 8. 다음 권장 작업
+## 9. 다음 권장 작업
 
 1. 현재 `alert_rules` 필드와 위 개념 모델의 매핑표 작성
 2. 어떤 rule 타입을 MVP에 포함할지 범위 고정
