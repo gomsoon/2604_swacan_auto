@@ -402,6 +402,22 @@ MVP preview 응답은 다음 5개 블록으로 구성하는 것이 적절하다.
 - `evaluation_summary`
 - `evaluation_sample`
 
+특히 sample은 다음 둘을 분리하는 것이 좋다.
+
+- `matched_object_sample`
+  - selector에 의해 “적용 대상”으로 매칭된 객체 sample
+- `evaluation_sample`
+  - 현재 값 기준으로 실제 fire / suppress 판단이 있었던 객체 sample
+
+이 둘은 질문 자체가 다르다.
+
+- `matched_object_sample`
+  - “이 rule이 어디에 적용되는가?”
+- `evaluation_sample`
+  - “그중 지금 실제로 무엇이 fire되는가?”
+
+즉 `matched != firing`을 분리해서 보여주는 편이 운영자에게 더 명확하다.
+
 ### 7.3 권장 필드
 
 #### `normalized_rule`
@@ -439,6 +455,11 @@ MVP preview 응답은 다음 5개 블록으로 구성하는 것이 적절하다.
 - `matched_object_count`
 - `matched_object_sample`
 
+권장 공통 필드:
+- `monitored_object_id`
+- `display_name`
+- `object_type`
+
 #### `evaluation_summary`
 
 현재 latest state 기준으로 몇 개 object가 실제로 fire될지 요약한다.
@@ -456,6 +477,7 @@ MVP preview 응답은 다음 5개 블록으로 구성하는 것이 적절하다.
 예:
 - `monitored_object_id`
 - `display_name`
+- `object_type`
 - `current_value`
 - `severity`
 - `would_fire`
@@ -463,6 +485,8 @@ MVP preview 응답은 다음 5개 블록으로 구성하는 것이 적절하다.
 - `winner_rule_id`
 - `suppressed_rule_ids`
 - `reason`
+
+즉 `matched_object_sample`과 `evaluation_sample`은 분리하되, row shape는 비슷하게 맞추는 것이 frontend 구현에도 유리하다.
 
 ### 7.4 MVP에서의 응답 범위 제한
 
