@@ -290,13 +290,33 @@ alert를 어떻게 유지/상향/해소할지 정한다.
 ### 5.3 Threshold Rule validation 권장 기준
 
 - `warning_threshold`, `critical_threshold` 중 적어도 하나는 있어야 한다.
-- `comparison = gte`이면:
+- `warning_threshold`만 있는 rule은 허용한다.
+- `critical_threshold`만 있는 rule도 허용한다.
+- 두 threshold가 모두 없는 rule은 invalid다.
+- 두 threshold가 모두 존재하고 `comparison = gte`이면:
   - `critical_threshold >= warning_threshold`
-- `comparison = lte`이면:
+- 두 threshold가 모두 존재하고 `comparison = lte`이면:
   - `critical_threshold <= warning_threshold`
 - `scope_type = monitored_object`이면 `monitored_object_id`는 필수
 - `scope_type = object_type`이면 `object_type`은 필수
 - `metric_key`는 해당 `state_type`에서 실제로 지원되는 숫자형 metric이어야 한다.
+
+### 5.4 Severity 단독 rule 허용 정책
+
+MVP에서는 다음 둘을 모두 허용하는 것이 적절하다.
+
+- `warning-only` rule
+- `critical-only` rule
+
+이유:
+- 운영 초기에는 “경고만 받고 싶은 rule”이 존재할 수 있다.
+- 반대로 정말 치명적인 상태만 잡고 싶은 `critical-only` rule도 실용적이다.
+
+다만 preview와 validation에서 다음 사실을 명확히 보여줘야 한다.
+
+- `warning-only` rule은 critical을 생성하지 않는다.
+- `critical-only` rule은 warning을 생성하지 않는다.
+- 둘 다 있으면 warning/critical 2단계로 평가한다.
 
 ## 6. Rule 우선순위와 suppression 정책
 
@@ -357,7 +377,113 @@ MVP에서는 다음이 같으면 같은 family로 본다.
 - suppress된 general rule 목록
 - 현재 값 기준 예상 severity
 
-## 7. 단계별 확장 추천
+## 7. Preview / Dry-run 응답 방향
+
+MVP에서는 `preview`와 `dry-run`을 엄격히 분리하지 않아도 된다.
+
+즉 운영자에게는 `preview`라는 하나의 기능으로 제공하되, 내부적으로는 “실제 평가 로직을 DB write 없이 실행하는 dry-run”처럼 동작하는 구조가 적절하다.
+
+### 7.1 Preview가 답해야 하는 질문
+
+preview는 최소한 다음 질문에 답해야 한다.
+
+1. 이 rule은 어디에 적용되는가
+2. 지금 당장 어떤 객체가 warning / critical이 되는가
+3. 어떤 rule이 winner이고 어떤 rule이 suppress되는가
+4. 왜 그런 판단이 나왔는가
+
+### 7.2 권장 응답 구성
+
+MVP preview 응답은 다음 5개 블록으로 구성하는 것이 적절하다.
+
+- `normalized_rule`
+- `validation`
+- `selector_resolution`
+- `evaluation_summary`
+- `evaluation_sample`
+
+### 7.3 권장 필드
+
+#### `normalized_rule`
+
+사용자가 입력한 rule을 backend 기준으로 정규화해서 보여준다.
+
+예:
+- `scope_type`
+- `object_type`
+- `monitored_object_id`
+- `state_type`
+- `metric_key`
+- `comparison`
+- `warning_threshold`
+- `critical_threshold`
+
+#### `validation`
+
+현재 rule 정의 자체가 유효한지 보여준다.
+
+예:
+- `is_valid`
+- `errors`
+- `warnings`
+- `supported_severities`
+  - `["warning"]`
+  - `["critical"]`
+  - `["warning", "critical"]`
+
+#### `selector_resolution`
+
+이 rule이 실제로 몇 개 object에 적용되는지 보여준다.
+
+예:
+- `matched_object_count`
+- `matched_object_sample`
+
+#### `evaluation_summary`
+
+현재 latest state 기준으로 몇 개 object가 실제로 fire될지 요약한다.
+
+예:
+- `would_fire_count`
+- `warning_count`
+- `critical_count`
+- `suppressed_count`
+
+#### `evaluation_sample`
+
+실제 예시 몇 건을 보여준다.
+
+예:
+- `monitored_object_id`
+- `display_name`
+- `current_value`
+- `severity`
+- `would_fire`
+- `winner_rule_scope`
+- `winner_rule_id`
+- `suppressed_rule_ids`
+- `reason`
+
+### 7.4 MVP에서의 응답 범위 제한
+
+preview 응답은 너무 커지지 않게 제한하는 편이 좋다.
+
+권장:
+- 전체 count는 summary로 제공
+- 상세는 sample 위주로 제공
+- sample은 예를 들어 최대 20건
+- 필요 시 이후 pagination 확장
+
+### 7.5 MVP에서 아직 하지 않는 것
+
+- historical replay
+- window 계산 preview
+- event rule preview
+- lifecycle policy preview
+
+MVP preview는 “현재 latest state 기준으로 threshold rule이 어떻게 평가되는가”에 집중하는 것이 적절하다.
+
+## 8. 단계별 확장 추천
 
 한 번에 모든 rule 타입을 넣는 건 과합니다.  
 다음처럼 단계적으로 가는 게 좋습니다.
@@ -411,9 +537,9 @@ MVP에서는 다음이 같으면 같은 family로 본다.
 
 이 단계는 alert lifecycle과 같이 움직여야 한다.
 
-## 8. 권장 API/DB 방향
+## 9. 권장 API/DB 방향
 
-### 5.1 현재 `alert_rules`를 유지하되 확장
+### 9.1 현재 `alert_rules`를 유지하되 확장
 
 가장 안전한 방법은 기존 `alert_rules`를 즉시 버리지 않고, 점진적으로 확장하는 것이다.
 
@@ -433,7 +559,7 @@ MVP에서는 다음이 같으면 같은 family로 본다.
 - 기존 필드를 우선 사용
 - 새 필드는 optional
 
-### 5.2 또는 `alert_rules_v2` 분리
+### 9.2 또는 `alert_rules_v2` 분리
 
 장점:
 - 현재 구조를 깔끔하게 보존
@@ -444,7 +570,7 @@ MVP에서는 다음이 같으면 같은 family로 본다.
 
 현재 시점에서는 `기존 alert_rules 확장`이 더 현실적이다.
 
-## 9. UI / 운영 관점
+## 10. UI / 운영 관점
 
 유연한 alert 조건은 단순히 DB schema 문제가 아니다.  
 운영자가 이해할 수 있어야 한다.
@@ -466,7 +592,7 @@ MVP에서는 다음이 같으면 같은 family로 본다.
 
 가 되어야 한다.
 
-## 10. 현재 시점의 권장 결론
+## 11. 현재 시점의 권장 결론
 
 현재 backend alert 조건은 다음 방향으로 설계 검토를 진행하는 것이 적절하다.
 
@@ -480,7 +606,7 @@ MVP에서는 다음이 같으면 같은 family로 본다.
 
 를 먼저 하는 것이 맞다.
 
-## 11. 다음 권장 작업
+## 12. 다음 권장 작업
 
 1. 현재 `alert_rules` 필드와 위 개념 모델의 매핑표 작성
 2. 어떤 rule 타입을 MVP에 포함할지 범위 고정
