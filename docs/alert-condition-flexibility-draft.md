@@ -468,6 +468,20 @@ MVP preview 응답은 다음 5개 블록으로 구성하는 것이 적절하다.
 - `display_name`
 - `object_type`
 
+MVP 기본형에서는 `matched_object_sample`에 `current_value`를 포함하지 않는 것이 적절하다.
+
+이유:
+- 이 블록은 “어디에 적용되는가?”를 설명하는 selector 결과이기 때문이다.
+- 현재값을 넣기 시작하면 evaluation 의미와 경계가 흐려질 수 있다.
+
+다만 확장 여지는 남겨두는 것이 좋다.
+
+예:
+- `include_current_values = true` 같은 옵션
+- 별도 확장 응답 블록
+
+즉 MVP 기본형은 가볍게 유지하되, 운영 편의를 위해 이후 선택적으로 풍부한 selector sample을 제공할 수 있게 여지를 열어두는 것이 적절하다.
+
 #### `evaluation_summary`
 
 현재 latest state 기준으로 몇 개 object가 실제로 fire될지 요약한다.
