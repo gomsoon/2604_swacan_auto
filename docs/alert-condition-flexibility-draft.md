@@ -241,7 +241,123 @@ alert를 어떻게 유지/상향/해소할지 정한다.
 - `alert lifecycle policy`
   - cooldown / auto escalation / auto resolve / suppression
 
-## 5. 단계별 확장 추천
+## 5. Threshold Rule MVP 범위
+
+현재 MVP에서 먼저 고정할 대상은 `threshold rule`이다.
+
+이 단계에서는 rule을 최대한 단순하게 유지하는 편이 좋다.
+
+### 5.1 MVP에서 허용하는 범위
+
+- selector:
+  - `scope_type = object_type`
+  - `scope_type = monitored_object`
+- signal:
+  - `signal_type = latest_state_metric`
+- state 축:
+  - `process`
+  - `agent`
+  - `host`
+- metric:
+  - 숫자형 metric만 허용
+- comparison:
+  - `gte`
+  - `lte`
+- severity:
+  - `warning_threshold`
+  - `critical_threshold`
+- 평가 방식:
+  - `latest value`만 사용
+- 해소 방식:
+  - 조건 해소 시 auto recovery
+
+즉 MVP threshold rule은 다음 한 문장으로 정의할 수 있다.
+
+> 최신 latest_state의 단일 숫자 metric에 대해, 특정 monitored_object 또는 object_type 범위에서 `gte/lte` 비교로 warning/critical을 판단하는 rule
+
+### 5.2 MVP에서 아직 넣지 않는 것
+
+- `semantic_type_code` selector
+- tag / group / namespace selector
+- 평균 / 최댓값 / window / count
+- boolean / string metric
+- 여러 조건 조합
+- expression language
+- threshold와 event/stale 혼합 rule
+- cooldown / hysteresis
+- auto escalation / auto resolve policy
+
+### 5.3 Threshold Rule validation 권장 기준
+
+- `warning_threshold`, `critical_threshold` 중 적어도 하나는 있어야 한다.
+- `comparison = gte`이면:
+  - `critical_threshold >= warning_threshold`
+- `comparison = lte`이면:
+  - `critical_threshold <= warning_threshold`
+- `scope_type = monitored_object`이면 `monitored_object_id`는 필수
+- `scope_type = object_type`이면 `object_type`은 필수
+- `metric_key`는 해당 `state_type`에서 실제로 지원되는 숫자형 metric이어야 한다.
+
+## 6. Rule 우선순위와 suppression 정책
+
+현재 구조에서는 같은 대상에 대해
+
+- `object_type` rule
+- `monitored_object` rule
+
+이 동시에 존재할 수 있다.
+
+이 경우 더 구체적인 rule이 우선하도록 정책을 명확히 정하는 편이 좋다.
+
+### 6.1 Specificity 원칙
+
+selector의 구체성은 다음 순서로 본다.
+
+- `monitored_object` > `object_type`
+
+즉 특정 monitored object에 직접 걸린 rule이, 같은 object type 전체에 걸린 rule보다 우선한다.
+
+### 6.2 Same Rule Family 정의
+
+우선순위 / suppression 정책은 같은 `rule family` 안에서만 적용하는 것이 적절하다.
+
+MVP에서는 다음이 같으면 같은 family로 본다.
+
+- `signal_type`
+- `state_type`
+- `metric_key`
+- `comparison`
+
+예:
+- 둘 다 `latest_state_metric`
+- 둘 다 `process`
+- 둘 다 `cpu_usage`
+- 둘 다 `gte`
+
+이면 같은 family로 본다.
+
+### 6.3 발화 정책
+
+같은 family 안에서:
+
+1. `monitored_object` rule을 먼저 평가
+2. 해당 rule이 fire되면
+   - `object_type` rule은 같은 평가 사이클에서 fire되지 않는다
+3. `monitored_object` rule이 fire되지 않을 때만
+   - `object_type` rule을 평가한다
+
+즉 MVP에서는 `specific-over-general suppression` 정책을 채택하는 것이 적절하다.
+
+### 6.4 Preview에서 꼭 보여줄 것
+
+이 정책은 운영자가 이해할 수 있어야 하므로 preview에 다음 정보가 필요하다.
+
+- 매칭 후보 rule 목록
+- 실제 winner rule
+- suppress된 general rule 목록
+- 현재 값 기준 예상 severity
+
+## 7. 단계별 확장 추천
 
 한 번에 모든 rule 타입을 넣는 건 과합니다.  
 다음처럼 단계적으로 가는 게 좋습니다.
@@ -295,7 +411,7 @@ alert를 어떻게 유지/상향/해소할지 정한다.
 
 이 단계는 alert lifecycle과 같이 움직여야 한다.
 
-## 6. 권장 API/DB 방향
+## 8. 권장 API/DB 방향
 
 ### 5.1 현재 `alert_rules`를 유지하되 확장
 
@@ -328,7 +444,7 @@ alert를 어떻게 유지/상향/해소할지 정한다.
 
 현재 시점에서는 `기존 alert_rules 확장`이 더 현실적이다.
 
-## 7. UI / 운영 관점
+## 9. UI / 운영 관점
 
 유연한 alert 조건은 단순히 DB schema 문제가 아니다.  
 운영자가 이해할 수 있어야 한다.
@@ -350,7 +466,7 @@ alert를 어떻게 유지/상향/해소할지 정한다.
 
 가 되어야 한다.
 
-## 8. 현재 시점의 권장 결론
+## 10. 현재 시점의 권장 결론
 
 현재 backend alert 조건은 다음 방향으로 설계 검토를 진행하는 것이 적절하다.
 
@@ -364,7 +480,7 @@ alert를 어떻게 유지/상향/해소할지 정한다.
 
 를 먼저 하는 것이 맞다.
 
-## 9. 다음 권장 작업
+## 11. 다음 권장 작업
 
 1. 현재 `alert_rules` 필드와 위 개념 모델의 매핑표 작성
 2. 어떤 rule 타입을 MVP에 포함할지 범위 고정

@@ -26,6 +26,8 @@
 
 중점 항목:
 - threshold rule의 한계 정리
+- threshold MVP 범위와 validation 기준 고정
+- `monitored_object > object_type` 우선순위 / suppression 정책 정리
 - `selector / signal / condition / aggregation / lifecycle policy` 모델 검토
 - 단순 metric threshold 외에 event, stale, no-data rule을 어떻게 단계적으로 도입할지 정리
 - rule preview / dry-run / validation 방향 정리
