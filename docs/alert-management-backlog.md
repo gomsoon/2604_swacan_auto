@@ -42,6 +42,9 @@
 - `resolution_source / resolution_reason` 정교화
 - manual resolve / auto recovery / policy timeout / cleanup 기반 종료 구분
 - 필요 시 `alert_action_log` 검토
+- product 단계에서 `alert occurrence ledger` 분리 검토
+  - 현재는 `repeat_count` 기반 한 줄 집계가 실용적
+  - 이후 occurrence 통계 / noise 분석 / burst 분석 요구가 생기면 재검토
 
 ### 2.3 운영 UX 고도화
 

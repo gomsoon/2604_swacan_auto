@@ -17,6 +17,9 @@
 현재 구현은 다음과 같은 특징을 가진다.
 
 - `alert_instances`가 현재 alert 상태를 저장한다.
+- 동일한 unresolved alert는 `alert_instances`에서 한 줄로 집계된다.
+  - 반복 발생 시 새 row를 만들기보다
+  - `repeat_count`, `last_occurred_at`, `latest_message`를 갱신한다.
 - `alert_history`는 action row 기반 skeleton으로 동작한다.
 - alert 생성 시 `alert_history`에 한 줄이 추가된다.
 - ACK, status 변경, resolve 시에도 action row가 추가된다.
@@ -33,6 +36,21 @@
 - 운영자는 이를 선택해서 수동으로 resolve 해야 한다.
 - 일정 시간 이상 해소되지 않은 alert는 severity 상향 또는 자동 resolve 정책이 필요할 수 있다.
 - 이러한 해소 방식은 `자동 복구`, `수동 운영자 처리`, `시간 경과 정책`을 구분해서 기록할 수 있어야 한다.
+
+추가로 product 단계에서는 다음 질문도 다시 검토할 가치가 있다.
+
+- 동일 alert의 반복 발생을 현재처럼 `repeat_count` 집계만으로 충분히 표현할 것인가
+- 아니면 alert occurrence 자체를 별도 raw ledger로 남길 것인가
+
+현재 MVP 관점에서는 “운영 화면에 한 줄로 보이게 하는 것”이 더 중요하므로, 지금 구조는 실용적이다.
+다만 이후 다음 요구가 커질 수 있다.
+
+- alert 발생 간격 분석
+- 동일 alert의 반복 패턴 통계
+- alert noise / storm 분석
+- 특정 alert의 occurrence timeline 재구성
+
+이 경우에는 `current alert summary`와 별도의 `alert occurrence ledger`를 분리하는 구조가 더 적절할 수 있다.
 
 ## 3. 제안하는 목표 구조
 
@@ -52,6 +70,7 @@
 특징:
 - ACK, repeat count, latest message, 최신 severity, 최신 상태 메모를 계속 update
 - resolve 되면 더 이상 current set에 남지 않음
+- 운영 화면에서는 “동일 alert 한 줄” 표현의 기준 테이블 역할을 한다
 
 ### 3.2 `alert_history`
 
@@ -95,6 +114,30 @@
 - `note_added`
 
 이 테이블은 감사 추적과 drill-down에 유리하지만, MVP에서는 선택 항목으로 둘 수 있다.
+
+### 3.4 `alert_occurrence_log` (product 단계 검토)
+
+역할:
+- 동일 alert의 개별 발생 occurrence를 append-only로 기록
+
+기록 예시:
+- `alert_code`
+- `monitored_object_id`
+- `occurred_at`
+- `severity_at_occurrence`
+- `metric_value`
+- `message`
+- `source_rule_id`
+
+이 테이블은 MVP 필수는 아니다.
+현재 MVP에서는 `alert_instances.repeat_count`와 `last_occurred_at`로도 운영 화면 목적을 충분히 달성할 수 있다.
+
+다만 product 단계에서는 다음 목적 때문에 검토 가치가 있다.
+
+- 반복 발생 패턴 분석
+- alert noise 통계
+- rule 튜닝을 위한 occurrence 기반 분석
+- alert correlation / burst 탐지
 
 ## 4. resolve 방식과 기록 모델
 
@@ -177,6 +220,18 @@
 필요 시 세부 액션은:
 - `alert_action_log`에 append-only insert
 
+product 단계에서 필요 시에는:
+- `alert_occurrence_log`에 발생 단위 append-only insert
+
+즉 장기적으로는 다음 세 층이 공존할 수 있다.
+
+- `alert_instances`
+  - current alert summary
+- `alert_history`
+  - resolved lifecycle archive
+- `alert_occurrence_log`
+  - raw occurrence ledger
+
 ### 6.2 피하고 싶은 방향
 
 다음 구조는 가능은 하지만 장기적으로는 덜 권장된다.
@@ -216,10 +271,13 @@
 현재 단계에서는 아래 판단을 권장한다.
 
 - `alert_instances`는 current alert 테이블로 유지한다.
+- 현재는 동일 alert을 한 줄로 집계하는 구조를 유지한다.
+- `repeat_count`, `last_occurred_at`, `latest_message`로 운영 화면 표현을 단순하게 유지한다.
 - `alert_history`는 장기적으로 `1 lifecycle = 1 row` archive 구조로 전환한다.
 - 수동 resolve는 반드시 지원한다.
 - resolve 방식은 boolean이 아니라 `resolution_source / resolution_reason` 계열로 기록한다.
 - 시간 경과 정책은 `auto escalation`을 먼저, `auto resolve`는 선택적으로 도입한다.
+- 다만 product 단계에서는 `alert occurrence ledger`를 별도 도입할지 다시 검토한다.
 
 ## 9. 추천 다음 순서
 
