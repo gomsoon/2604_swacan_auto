@@ -470,6 +470,29 @@ MVP preview 응답은 다음 5개 블록으로 구성하는 것이 적절하다.
   - `["critical"]`
   - `["warning", "critical"]`
 
+MVP에서도 `errors` / `warnings`는 단순 문자열 배열보다 구조화된 항목 배열로 두는 것이 적절하다.
+
+권장 최소 shape:
+- `code`
+- `message`
+- `field`
+
+예:
+
+```json
+{
+  "code": "threshold_order_invalid",
+  "message": "critical_threshold must be greater than or equal to warning_threshold",
+  "field": "critical_threshold"
+}
+```
+
+이 방향의 장점:
+- form field highlight 용이
+- 다국어 처리 확장성
+- 통계 / 테스트 안정성
+- 이후 validation rule 증가 시 구조 유지 가능
+
 #### `selector_resolution`
 
 이 rule이 실제로 몇 개 object에 적용되는지 보여준다.
@@ -516,6 +539,16 @@ preview 평가에 참여하는 candidate rule 목록을 top-level catalog로 제
 - `critical_threshold`
 
 `rule_key`는 sample에서 rule을 참조하는 안정 키 역할을 한다.
+
+MVP에서는 `state_type`, `metric_key`, `comparison` 같은 family 공통 필드를 catalog item마다 반복해서 넣는 것이 적절하다.
+
+이유:
+- payload가 아직 크지 않다
+- 각 rule row가 self-contained하게 읽힌다
+- 디버깅과 로그 확인이 쉽다
+- 이후 family 종류가 늘어나도 catalog item을 독립적으로 해석하기 쉽다
+
+즉 MVP에서는 중복 최적화보다 `읽기 쉬움`, `안정성`, `확장성`을 우선한다.
 
 예:
 - `preview`
@@ -730,6 +763,187 @@ preview 응답은 너무 커지지 않게 제한하는 편이 좋다.
 - lifecycle policy preview
 
 MVP preview는 “현재 latest state 기준으로 threshold rule이 어떻게 평가되는가”에 집중하는 것이 적절하다.
+
+### 7.6 권장 Preview API 설계
+
+현재 구현에는 저장된 rule id를 기준으로 미리보기를 보여주는 경로가 이미 있다.
+
+- `GET /api/admin/alert-rules/{id}/targets-preview`
+
+다만 앞으로의 preview는 “저장 전 draft rule”도 다뤄야 하므로, MVP 기준의 표준 경로는 다음처럼 가는 것이 적절하다.
+
+- `POST /api/admin/alert-rules/preview`
+
+권장 방향:
+- `POST /preview`
+  - 표준 preview endpoint
+  - 저장되지 않은 draft rule도 평가 가능
+- `GET /alert-rules/{id}/targets-preview`
+  - compatibility wrapper
+  - 기존 저장 rule을 읽은 뒤 공통 evaluator를 호출
+
+즉 외부 API는 2개가 될 수 있지만, 내부 평가는 하나의 preview evaluator를 공유하는 구조가 적절하다.
+
+### 7.7 권장 request shape
+
+MVP에서는 threshold rule만 지원하는 request로 고정하는 것이 적절하다.
+
+예:
+
+```json
+{
+  "rule": {
+    "scope_type": "object_type",
+    "object_type": "SoftwareProcess",
+    "monitored_object_id": null,
+    "state_type": "process",
+    "metric_key": "cpu_usage",
+    "comparison": "gte",
+    "warning_threshold": 80,
+    "critical_threshold": 95,
+    "is_enabled": true,
+    "description": "Process CPU threshold"
+  },
+  "options": {
+    "sample_limit": 20
+  }
+}
+```
+
+MVP에서는 `options.sample_limit` 정도만 두어도 충분하다.
+
+### 7.8 권장 response shape 예시
+
+예:
+
+```json
+{
+  "normalized_rule": {
+    "scope_type": "object_type",
+    "object_type": "SoftwareProcess",
+    "monitored_object_id": null,
+    "state_type": "process",
+    "metric_key": "cpu_usage",
+    "comparison": "gte",
+    "warning_threshold": 80,
+    "critical_threshold": 95
+  },
+  "validation": {
+    "is_valid": true,
+    "errors": [],
+    "warnings": [],
+    "supported_severities": ["warning", "critical"]
+  },
+  "selector_resolution": {
+    "matched_object_count": 12,
+    "matched_object_sample": [
+      {
+        "monitored_object_id": 101,
+        "display_name": "proc-a",
+        "object_type": "SoftwareProcess"
+      }
+    ]
+  },
+  "candidate_rule_catalog": [
+    {
+      "rule_key": "preview",
+      "kind": "preview",
+      "rule_id": null,
+      "scope_type": "object_type",
+      "scope_target_label": "SoftwareProcess",
+      "state_type": "process",
+      "metric_key": "cpu_usage",
+      "comparison": "gte",
+      "warning_threshold": 80,
+      "critical_threshold": 95
+    },
+    {
+      "rule_key": "rule:17",
+      "kind": "existing",
+      "rule_id": 17,
+      "scope_type": "monitored_object",
+      "scope_target_label": "proc-a",
+      "state_type": "process",
+      "metric_key": "cpu_usage",
+      "comparison": "gte",
+      "warning_threshold": 70,
+      "critical_threshold": 85
+    }
+  ],
+  "evaluation_summary": {
+    "would_fire_count": 4,
+    "warning_count": 3,
+    "critical_count": 1,
+    "suppressed_count": 2
+  },
+  "evaluation_sample": [
+    {
+      "monitored_object_id": 101,
+      "display_name": "proc-a",
+      "object_type": "SoftwareProcess",
+      "current_value": 97.2,
+      "severity": "critical",
+      "would_fire": true,
+      "matched_candidate_rule_keys": ["preview", "rule:17"],
+      "winner_rule_key": "rule:17",
+      "winner_rule_scope": "monitored_object",
+      "suppressed_rule_keys": ["preview"],
+      "reason": "specific monitored_object rule overrides object_type rule"
+    }
+  ]
+}
+```
+
+### 7.9 DB / runtime 매핑 방향
+
+preview 응답은 DB row를 그대로 노출하는 것이 아니라, 저장된 데이터와 계산 결과를 조합해서 만드는 것이 적절하다.
+
+권장 매핑:
+
+- `normalized_rule`
+  - source: preview 요청 body
+- `selector_resolution`
+  - source:
+    - `monitored_objects`
+- `candidate_rule_catalog`
+  - source:
+    - 요청 rule 1건
+    - 기존 `alert_rules` 중 같은 family의 경쟁 후보
+- `evaluation_summary`
+  - source:
+    - selector 대상 object
+    - `latest_states`
+    - 기존 `alert_rules`
+    - suppression 정책 적용 결과를 메모리에서 집계
+- `evaluation_sample`
+  - source:
+    - object별 latest state
+    - object별 candidate rule 매칭 결과
+    - winner / suppressed 판정 결과
+
+즉 MVP에서는 별도 preview 테이블을 만들기보다:
+
+1. 요청 rule 정규화
+2. 같은 family의 기존 rule 조회
+3. selector로 대상 object 해석
+4. object별 latest state와 candidate rules 평가
+5. catalog + summary + sample 응답 조립
+
+방식이 가장 현실적이다.
+
+중요한 점:
+- `preview` rule은 저장되지 않은 synthetic candidate일 수 있다.
+- `existing` candidate만 실제 `alert_rules.id`를 가진다.
+- 따라서 `winner_rule_key`를 기본 참조 키로 쓰고, `winner_rule_id`는 optional 보조 필드로 두는 것이 적절하다.
+
+### 7.10 권장 구현 slice
+
+MVP 구현은 다음 순서가 적절하다.
+
+1. 공통 preview evaluator 추출
+2. `POST /api/admin/alert-rules/preview` 추가
+3. 기존 `GET /alert-rules/{id}/targets-preview`를 compatibility wrapper로 정리
+4. admin preview 패널을 새 response shape로 전환
 
 ## 8. 단계별 확장 추천
 
