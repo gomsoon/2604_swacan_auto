@@ -407,6 +407,104 @@ compound threshold를 도입하면 validation이 더 중요해진다.
 
 즉 이 확장은 preview / validation과 반드시 함께 가야 한다.
 
+권장 validation은 다음 3단계로 나누는 것이 적절하다.
+
+#### 5.7.1 Shape validation
+
+입력 구조 자체가 올바른지 확인한다.
+
+예:
+- clause 0개 -> invalid
+- clause 1개인데 `logical_operator` 존재 -> warning 또는 normalize
+- clause 2개 이상인데 `logical_operator` 없음 -> invalid
+- 지원하지 않는 comparison / operator -> invalid
+- 숫자가 아닌 value -> invalid
+
+#### 5.7.2 Condition group satisfiability validation
+
+각 severity group이 스스로 의미가 있는지 확인한다.
+
+예:
+- `gte 80 AND lte 20` -> 항상 false -> invalid
+- `gte 80 OR gte 90` -> 하나의 clause가 사실상 중복 -> warning
+- `lte 20 AND lte 10` -> 더 강한 조건 하나로 축약 가능 -> warning
+
+즉 각 group이 실제로 만족 가능한지, 또는 과도하게 중복되는지를 본다.
+
+#### 5.7.3 Severity consistency validation
+
+`warning_condition`과 `critical_condition` 사이의 관계가 운영적으로 자연스러운지 확인한다.
+
+권장 원칙:
+- `critical_condition`이 존재하면, 그 매칭 영역은 원칙적으로 `warning_condition`의 부분집합이어야 한다.
+- 즉 critical은 warning보다 더 좁고 더 강한 영역이어야 한다.
+
+예:
+- warning: `cpu <= 20 OR cpu >= 80`
+- critical: `cpu <= 10 OR cpu >= 90`
+  - valid
+
+- warning: `cpu >= 80`
+- critical: `cpu <= 10`
+  - 같은 rule 안에서 severity ladder 의미가 흐려짐
+  - invalid
+
+- warning: `cpu >= 80`
+- critical: `cpu >= 80`
+  - critical이 warning과 동일
+  - warning path가 사실상 무의미
+  - warning 또는 invalid 후보
+
+현재 시점 권장:
+- `warning-only` rule 허용
+- `critical-only` rule 허용
+- 둘 다 존재할 때는 `critical ⊆ warning` consistency를 강하게 검증
+
+### 5.7.4 구현 관점의 권장 방향
+
+MVP 범위의 compound threshold는 다음 제약이 있으므로, interval normalization 기반으로 검증하는 것이 적절하다.
+
+- 단일 metric
+- 최대 2 clauses
+- comparison:
+  - `gt`
+  - `gte`
+  - `lt`
+  - `lte`
+- logical operator:
+  - `and`
+  - `or`
+  - `null`
+
+예:
+- `gte 80` -> `[80, +inf)`
+- `lte 20 OR gte 80` -> `(-inf, 20] U [80, +inf)`
+- `gte 40 AND lte 60` -> `[40, 60]`
+
+이렇게 interval set으로 정규화하면 다음 검증이 가능하다.
+
+- 결과 interval set이 empty -> invalid
+- 중복/포함 관계 -> warning
+- `critical_set ⊄ warning_set` -> invalid
+- `warning_set == critical_set` -> warning
+- `critical_set`이 `warning_set`의 proper subset -> valid
+
+이 접근의 장점:
+- 구현 복잡도를 과도하게 올리지 않는다
+- preview evaluator와 validation이 같은 정규화 결과를 재사용할 수 있다
+- 이후 `reason_code`, validation code, 통계화에도 유리하다
+
+### 5.7.5 Validation code 방향
+
+향후 구조화된 validation 응답에서는 다음 code들을 권장한다.
+
+- `condition_unsatisfiable`
+- `redundant_clause`
+- `subsumed_clause`
+- `critical_not_subset_of_warning`
+- `warning_shadowed_by_critical`
+- `single_severity_rule`
+
 ### 5.8 현재 시점의 권장 결론
 
 현재 시점에서는 compound threshold를 바로 구현하기보다:
