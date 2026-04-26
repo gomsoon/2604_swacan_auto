@@ -318,6 +318,105 @@ MVP에서는 다음 둘을 모두 허용하는 것이 적절하다.
 - `critical-only` rule은 warning을 생성하지 않는다.
 - 둘 다 있으면 warning/critical 2단계로 평가한다.
 
+### 5.5 Compound Threshold 확장 방향
+
+현재 MVP 기준은 단방향 scalar threshold rule이지만, 이후 확장으로 `양방향 threshold + logical operator` 구조를 검토할 가치가 있다.
+
+실제 운영에서는 다음 패턴이 자연스럽게 필요해질 수 있다.
+
+- 단방향:
+  - `cpu >= 80`
+  - `memory <= 10`
+- 양방향 `AND`:
+  - `40 <= cpu <= 60`
+- 양방향 `OR`:
+  - `cpu <= 20 OR cpu >= 80`
+
+이 요구는 threshold rule의 자연스러운 확장으로 볼 수 있다.
+
+다만 자유식 expression 전체를 허용하기보다, 구조화된 `condition group`으로 제한하는 편이 적절하다.
+
+권장 방향:
+- severity마다 독립된 condition group
+- condition group은
+  - `logical_operator`
+  - `clauses`
+  로 구성
+
+예:
+
+```json
+{
+  "warning_condition": {
+    "logical_operator": "or",
+    "clauses": [
+      { "comparison": "lte", "value": 20 },
+      { "comparison": "gte", "value": 80 }
+    ]
+  },
+  "critical_condition": {
+    "logical_operator": "or",
+    "clauses": [
+      { "comparison": "lte", "value": 10 },
+      { "comparison": "gte", "value": 90 }
+    ]
+  }
+}
+```
+
+단방향 rule은 같은 구조 안에서 clause 1개로도 표현할 수 있다.
+
+예:
+
+```json
+{
+  "warning_condition": {
+    "logical_operator": null,
+    "clauses": [
+      { "comparison": "gte", "value": 80 }
+    ]
+  }
+}
+```
+
+### 5.6 Compound Threshold 설계 원칙
+
+- MVP의 scalar threshold와 compatibility를 유지한다.
+- 자유식 expression language는 도입하지 않는다.
+- 초기 확장에서는 clause 개수를 제한한다.
+  - 권장: 최대 2개
+- operator는 최소 범위만 허용한다.
+  - `and`
+  - `or`
+  - `null`
+- comparison은 threshold 성격에 맞는 범위만 허용한다.
+  - `gt`
+  - `gte`
+  - `lt`
+  - `lte`
+
+### 5.7 Validation 관점
+
+compound threshold를 도입하면 validation이 더 중요해진다.
+
+예시:
+- clause 2개인데 operator 없음 -> invalid
+- clause 1개인데 operator 있음 -> normalize 또는 warning
+- `gte 80 AND lte 20`처럼 항상 false가 되는 조합 -> invalid
+- warning/critical 관계가 비정상적인 조합 -> warning 또는 invalid
+
+즉 이 확장은 preview / validation과 반드시 함께 가야 한다.
+
+### 5.8 현재 시점의 권장 결론
+
+현재 시점에서는 compound threshold를 바로 구현하기보다:
+
+1. 현재 scalar threshold MVP를 먼저 고정하고
+2. 이후 확장 방향으로 `condition_json` 또는 severity별 condition group 구조를 문서에 유지하며
+3. 실제 구현은 preview evaluator와 validation이 충분히 정리된 뒤 진행
+
+하는 것이 적절하다.
+
 ## 6. Rule 우선순위와 suppression 정책
 
 현재 구조에서는 같은 대상에 대해
