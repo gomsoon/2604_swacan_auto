@@ -65,6 +65,7 @@
 - rule 변경 전후 영향도 비교
 - threshold 변경 dry-run
 - preview 고도화
+- product 단계에서 `reason_code` 기반 발화 원인 통계/분석 검토
 
 ### 3.3 alert correlation
 
