@@ -29,6 +29,7 @@
 - threshold MVP 범위와 validation 기준 고정
 - `monitored_object > object_type` 우선순위 / suppression 정책 정리
 - 단방향 scalar threshold 이후 `compound threshold(and/or + 양방향 범위)` 확장 검토
+- compound threshold는 저장 모델보다 `preview shape + evaluator + validation` 정규화부터 우선 검토
 - `selector / signal / condition / aggregation / lifecycle policy` 모델 검토
 - 단순 metric threshold 외에 event, stale, no-data rule을 어떻게 단계적으로 도입할지 정리
 - rule preview / dry-run / validation 방향 정리

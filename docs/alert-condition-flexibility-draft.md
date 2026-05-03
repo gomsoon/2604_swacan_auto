@@ -1142,6 +1142,138 @@ MVP 구현은 다음 순서가 적절하다.
 3. 기존 `GET /alert-rules/{id}/targets-preview`를 compatibility wrapper로 정리
 4. admin preview 패널을 새 response shape로 전환
 
+### 7.11 Compound Threshold Preview Shape 확장 방향
+
+`compound threshold`는 저장 모델을 바로 바꾸기보다, 먼저 preview shape와 evaluator를 compound 친화적으로 확장하는 것이 적절하다.
+
+핵심 원칙:
+- 기존 `evaluation_summary`와 `evaluation_sample`의 stable shape는 유지한다.
+- rule 정규화 표현만 `scalar -> compound-compatible` 방향으로 확장한다.
+- 저장 전 synthetic preview rule과 저장된 existing rule을 같은 evaluator로 비교할 수 있어야 한다.
+
+#### 7.11.1 `normalized_rule` 확장
+
+`normalized_rule`은 향후 compound threshold를 기준으로 다음 필드를 가질 수 있다.
+
+- `condition_mode`
+  - `scalar`
+  - `compound`
+- `warning_condition`
+- `critical_condition`
+
+예시:
+
+```json
+{
+  "condition_mode": "compound",
+  "warning_condition": {
+    "logical_operator": "or",
+    "clauses": [
+      { "comparison": "lte", "value": 20 },
+      { "comparison": "gte", "value": 80 }
+    ]
+  },
+  "critical_condition": {
+    "logical_operator": "or",
+    "clauses": [
+      { "comparison": "lte", "value": 10 },
+      { "comparison": "gte", "value": 90 }
+    ]
+  }
+}
+```
+
+현재 scalar threshold rule도 내부적으로는 다음처럼 정규화할 수 있다.
+
+```json
+{
+  "condition_mode": "scalar",
+  "warning_condition": {
+    "logical_operator": null,
+    "clauses": [
+      { "comparison": "gte", "value": 80 }
+    ]
+  },
+  "critical_condition": {
+    "logical_operator": null,
+    "clauses": [
+      { "comparison": "gte", "value": 95 }
+    ]
+  }
+}
+```
+
+즉 preview evaluator는 저장된 rule이 scalar인지 compound인지와 무관하게, severity별 condition group으로 정규화된 입력을 받는 구조가 적절하다.
+
+#### 7.11.2 `candidate_rule_catalog` 확장
+
+`candidate_rule_catalog`의 각 item도 self-contained 원칙을 유지하며, compound threshold 기준 필드를 함께 포함하는 것이 적절하다.
+
+권장 방향:
+- `state_type`
+- `metric_key`
+- `comparison`
+- `warning_condition`
+- `critical_condition`
+
+즉 기존 scalar field를 compatibility를 위해 유지하더라도, preview shape는 condition group 표현을 함께 제공하는 방향이 좋다.
+
+#### 7.11.3 `evaluation_summary` 유지
+
+compound threshold를 도입하더라도 `evaluation_summary`의 shape와 의미는 바꾸지 않는 것이 적절하다.
+
+- `would_fire_count`
+- `warning_count`
+- `critical_count`
+- `suppressed_count`
+
+즉 compound threshold는 rule 내부 condition 표현의 확장이지, preview summary의 집계 의미를 바꾸는 방향은 아니다.
+
+#### 7.11.4 `evaluation_sample`의 얇은 condition trace
+
+`evaluation_sample`은 기존 stable shape를 유지하되, compound threshold 설명력을 위해 얇은 trace 필드를 추가하는 것이 적절하다.
+
+권장 확장 필드:
+- `winning_condition_trace`
+
+예시:
+
+```json
+{
+  "monitored_object_id": 101,
+  "display_name": "proc-a",
+  "object_type": "SoftwareProcess",
+  "current_value": 97.2,
+  "severity": "critical",
+  "would_fire": true,
+  "matched_candidate_rule_keys": ["preview", "rule:17"],
+  "winner_rule_key": "preview",
+  "suppressed_rule_keys": [],
+  "reason": "value matched critical upper-bound clause",
+  "winning_condition_trace": {
+    "severity": "critical",
+    "logical_operator": "or",
+    "matched_clause_indexes": [1]
+  }
+}
+```
+
+이 필드의 목적:
+- MVP에서는 `reason` 문자열만으로도 운영자가 빠르게 읽을 수 있게 한다.
+- 이후 product 단계에서는 어떤 clause가 매칭되었는지 시각적으로 표시할 수 있다.
+- scalar rule도 `matched_clause_indexes = [0]` 형태로 같은 구조를 유지할 수 있다.
+
+#### 7.11.5 현재 시점의 권장 결론
+
+현재 시점에서는 compound threshold를 즉시 저장 모델에 반영하기보다:
+
+1. preview shape를 severity별 condition group 기준으로 정규화하고
+2. validation과 evaluator를 같은 정규화 구조 위에 올리고
+3. `evaluation_sample`에 최소 trace만 추가할 수 있게 준비한 뒤
+4. 실제 DB schema / admin editor 확장은 다음 단계에서 검토
+
+하는 것이 가장 안전하다.
+
 ## 8. 단계별 확장 추천
 
 한 번에 모든 rule 타입을 넣는 건 과합니다.  
