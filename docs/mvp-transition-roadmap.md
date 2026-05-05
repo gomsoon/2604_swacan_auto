@@ -37,6 +37,7 @@
 - `display_name` rename 기준과 `rule_key` 전역 unique / 재사용 금지 정책 정리
 - `rule_key` 자동 제안 slug 규칙과 suffix 충돌 정책 정리
 - `rule_key` validation 문자 집합과 segment 규칙 고정
+- `alert_rules`를 `draft / published / deprecated` lifecycle 엔터티로 끌어올리는 schema/API/UI slice 정리
 - `selector / signal / condition / aggregation / lifecycle policy` 모델 검토
 - MVP에 포함할 rule 타입 범위 고정
 - validation / preview / dry-run 방향 정리
