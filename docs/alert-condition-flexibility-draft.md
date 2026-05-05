@@ -262,6 +262,61 @@ threshold rule이 복잡해질수록, 운영자는 조건식 자체보다 “이
 - `event.process.process_stopped.process-stop-burst`
 - `stale.agent.heartbeat.agent-heartbeat-missing`
 
+#### `rule_key` 자동 제안 방향
+
+자동 제안은 `display_name` 단독 slug보다, 다음 조합으로 만드는 편이 적절하다.
+
+- `family`
+- `state_type`
+- `metric_key` 또는 `signal_key`
+- `display_name`에서 파생한 `short_slug`
+
+즉 기본 제안 형식은 다음과 같다.
+
+- `family.state_type.metric_or_signal.short_slug`
+
+예:
+- `threshold.process.cpu_usage.process-cpu-high`
+- `threshold.agent.outbox_queue_depth.agent-queue-high`
+- `stale.agent.heartbeat.agent-heartbeat-missing`
+
+권장 이유:
+- rule family가 즉시 드러난다
+- 어떤 state/signal 축을 다루는지 바로 알 수 있다
+- 마지막 slug는 운영자가 읽기 쉬운 의미를 담는다
+- `display_name`이 일부 바뀌더라도 앞의 구조적 prefix는 안정적으로 유지된다
+
+#### `short_slug` 생성 규칙
+
+MVP에서는 `short_slug`를 과하게 똑똑하게 만들기보다, 단순 slugify를 우선 적용하는 것이 적절하다.
+
+권장 규칙:
+- source: `display_name`
+- 소문자 변환
+- 공백은 `-`로 치환
+- 특수문자는 제거
+- 너무 길면 뒤를 truncate
+
+예:
+- `Process CPU High` -> `process-cpu-high`
+- `Agent Queue High` -> `agent-queue-high`
+
+현재 시점에서는 stop word 제거, 중복 단어 축약 같은 공격적인 최적화보다, 예측 가능하고 안정적인 slugify가 더 적절하다.
+
+#### 충돌 처리
+
+자동 제안된 `rule_key`가 이미 존재하면 suffix를 붙이는 방식이 적절하다.
+
+예:
+- `threshold.process.cpu_usage.process-cpu-high`
+- `threshold.process.cpu_usage.process-cpu-high-2`
+- `threshold.process.cpu_usage.process-cpu-high-3`
+
+즉 MVP에서는
+- 제안 규칙은 단순하게
+- uniqueness는 validation으로 보장하고
+- 충돌 시 suffix를 붙이는 방식으로 해결하는 것이 가장 안전하다.
+
 권장 정책:
 - `rule_key`는 생성 시 사용자가 직접 입력 가능
 - UI는 자동 제안을 제공하되, 최종 결정은 사용자가 한다
