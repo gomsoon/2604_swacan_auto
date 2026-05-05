@@ -236,12 +236,21 @@ threshold rule이 복잡해질수록, 운영자는 조건식 자체보다 “이
 권장 원칙:
 - 소문자 ASCII 사용
 - 공백 없음
-- 구분자는 `.` 또는 `-`
+- 허용 문자는 `a-z`, `0-9`, `.`, `-`, `_`
+- 구조 segment 구분은 `.`를 우선 사용
 - 생성 후에는 가능하면 고정
 - uniqueness는 전역 기준
 - 사용자가 직접 입력할 수 있어야 한다
 - 다만 UI는 `display_name`, `state_type`, `metric_key`를 바탕으로 자동 제안을 함께 제공하는 편이 좋다
 - deprecated 포함 전체 rule 집합에서 재사용하지 않는 것이 적절하다
+
+권장 해석:
+- `.`
+  - segment separator
+- `_`
+  - `metric_key`, `signal_key`, event name 같은 system token 보존용
+- `-`
+  - 사람 친화 slug 표현용
 
 권장 포맷:
 
@@ -261,6 +270,15 @@ threshold rule이 복잡해질수록, 운영자는 조건식 자체보다 “이
 확장 예시:
 - `event.process.process_stopped.process-stop-burst`
 - `stale.agent.heartbeat.agent-heartbeat-missing`
+
+즉 다음과 같은 혼합 표현이 자연스럽다.
+
+- `threshold.process.cpu_usage.process-cpu-high`
+- `event.process.process_stopped.process-stop-burst`
+
+여기서
+- `cpu_usage`, `process_stopped`는 system token을 그대로 유지하고
+- `process-cpu-high`, `process-stop-burst`는 사람이 읽기 쉬운 slug로 유지한다.
 
 #### `rule_key` 자동 제안 방향
 
@@ -302,6 +320,29 @@ MVP에서는 `short_slug`를 과하게 똑똑하게 만들기보다, 단순 slug
 - `Agent Queue High` -> `agent-queue-high`
 
 현재 시점에서는 stop word 제거, 중복 단어 축약 같은 공격적인 최적화보다, 예측 가능하고 안정적인 slugify가 더 적절하다.
+
+#### `rule_key` validation 방향
+
+권장 허용 문자 집합:
+
+- `a-z`
+- `0-9`
+- `.`
+- `-`
+- `_`
+
+예시 정규식:
+
+- `^[a-z0-9._-]+$`
+
+권장 추가 규칙:
+- leading / trailing separator 금지
+- `.` 기준 빈 segment 금지
+  - 예: `threshold..cpu_usage` -> invalid
+- 자동 제안에서는 `--`, `__` 같은 중복 separator를 만들지 않는 편이 좋다
+- `metric_key` / `signal_key`는 가능하면 원래 token을 보존한다
+
+즉 validation은 `_`를 허용하되, 구조는 `.` 기준 segment로 읽고, 사람 친화 slug는 `-` 중심으로 유지하는 방향이 적절하다.
 
 #### 충돌 처리
 
