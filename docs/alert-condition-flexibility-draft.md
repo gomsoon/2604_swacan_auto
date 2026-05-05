@@ -1236,6 +1236,23 @@ compound threshold를 도입하더라도 `evaluation_summary`의 shape와 의미
 권장 확장 필드:
 - `winning_condition_trace`
 
+MVP에서의 권장 최소 shape:
+
+- `severity`
+  - `warning`
+  - `critical`
+- `condition_mode`
+  - `scalar`
+  - `compound`
+- `logical_operator`
+  - `null`
+  - `and`
+  - `or`
+- `matched_clause_indexes`
+  - winner condition 내부에서 실제로 매칭된 clause index 배열
+
+즉 MVP trace는 “어떤 severity가 이겼는지”, “이 condition이 scalar인지 compound인지”, “and/or 중 어떤 방식으로 평가됐는지”, “어느 clause가 실제로 매칭됐는지”만 담는 최소 winner-trace로 유지하는 것이 적절하다.
+
 예시:
 
 ```json
@@ -1252,6 +1269,7 @@ compound threshold를 도입하더라도 `evaluation_summary`의 shape와 의미
   "reason": "value matched critical upper-bound clause",
   "winning_condition_trace": {
     "severity": "critical",
+    "condition_mode": "compound",
     "logical_operator": "or",
     "matched_clause_indexes": [1]
   }
@@ -1262,6 +1280,28 @@ compound threshold를 도입하더라도 `evaluation_summary`의 shape와 의미
 - MVP에서는 `reason` 문자열만으로도 운영자가 빠르게 읽을 수 있게 한다.
 - 이후 product 단계에서는 어떤 clause가 매칭되었는지 시각적으로 표시할 수 있다.
 - scalar rule도 `matched_clause_indexes = [0]` 형태로 같은 구조를 유지할 수 있다.
+
+권장 해석 규칙:
+- `would_fire = false`이면 `winning_condition_trace = null`
+- `critical_condition`이 성립하면 trace는 `critical_condition` 기준으로만 기록
+- `critical_condition`이 성립하지 않고 `warning_condition`이 성립하면 trace는 `warning_condition` 기준으로 기록
+- suppression이 있더라도 trace는 최종 winner rule의 winner condition만 기록
+- suppress된 후보 rule의 clause trace는 MVP에서 다루지 않음
+
+권장 구현 규칙:
+- `matched_clause_indexes`는 winner condition 내부의 index를 사용
+- index는 `0-based`로 해석
+- clause 순서는 request / normalized order를 그대로 유지
+- scalar rule은 `logical_operator = null`, `matched_clause_indexes = [0]`으로 정규화
+- `and` 조건은 보통 `[0, 1]`처럼 모든 매칭 clause를 기록
+- `or` 조건은 실제로 매칭된 clause만 기록
+
+MVP에서 의도적으로 제외하는 범위:
+- clause별 상세 reason code
+- interval normalization 결과 전체
+- warning / critical 동시 trace
+- suppressed rule의 clause trace
+- non-winning severity trace
 
 #### 7.11.5 현재 시점의 권장 결론
 
