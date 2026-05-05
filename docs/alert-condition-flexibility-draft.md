@@ -381,6 +381,29 @@ MVP에서는 `short_slug`를 과하게 똑똑하게 만들기보다, 단순 slug
 
 즉 `rule_key`는 “읽을 수 있는 immutable slug key”, `display_name`은 “운영자가 보는 이름”으로 분리하는 것이 적절하다.
 
+#### `rule_key` validation message 방향
+
+MVP에서는 `rule_key` validation을 지나치게 세분화된 code 체계보다, 운영자와 관리자가 바로 이해할 수 있는 설명형 message 중심으로 제공하는 것이 적절하다.
+
+권장 원칙:
+- 실패 이유를 바로 이해할 수 있어야 한다
+- 수정 방향이 곧바로 보여야 한다
+- validation 체계가 과도하게 무거워지지 않아야 한다
+- product 단계 확장을 위해 내부적으로는 `code + message` 여지를 남겨둘 수 있다
+
+즉 MVP 우선순위는:
+- UI에는 `message` 중심으로 보여주고
+- backend는 필요 시 내부적으로만 간단한 code를 유지하는 방향이 적절하다
+
+권장 message 예시:
+- `rule_key can use only lowercase letters, digits, '.', '-', and '_'`
+- `rule_key cannot start or end with a separator`
+- `rule_key cannot contain an empty segment between '.' separators`
+- `rule_key must be unique across all alert rules`
+- `rule_key can be edited only while the rule is in draft`
+
+이 단계에서는 `leading_separator`, `trailing_separator`, `double_dot`처럼 지나치게 잘게 쪼갠 error code보다, 사용자가 바로 수정할 수 있는 수준의 설명형 message가 더 실용적이다.
+
 ### 4.2 현재 구조에서 이미 되는 것
 
 - 특정 object type 전체에 대한 metric threshold rule
