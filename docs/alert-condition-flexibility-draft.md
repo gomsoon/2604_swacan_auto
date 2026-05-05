@@ -366,6 +366,9 @@ MVP에서는 다음 둘을 모두 허용하는 것이 적절하다.
 
 단방향 rule은 같은 구조 안에서 clause 1개로도 표현할 수 있다.
 
+다만 이는 `scalar mode` 기준의 내부 정규화 표현으로 보는 것이 적절하다.  
+MVP 범위의 `compound mode`는 shape를 명확히 유지하기 위해 `logical_operator = and | or`와 clause 2개를 전제로 보는 편이 좋다.
+
 예:
 
 ```json
@@ -401,7 +404,9 @@ compound threshold를 도입하면 validation이 더 중요해진다.
 
 예시:
 - clause 2개인데 operator 없음 -> invalid
-- clause 1개인데 operator 있음 -> normalize 또는 warning
+- clause 1개인데 operator 있음 -> invalid
+- `scalar mode`인데 operator가 `and` 또는 `or` -> invalid
+- `compound mode`인데 operator가 `null` -> invalid
 - `gte 80 AND lte 20`처럼 항상 false가 되는 조합 -> invalid
 - warning/critical 관계가 비정상적인 조합 -> warning 또는 invalid
 
@@ -415,10 +420,19 @@ compound threshold를 도입하면 validation이 더 중요해진다.
 
 예:
 - clause 0개 -> invalid
-- clause 1개인데 `logical_operator` 존재 -> warning 또는 normalize
-- clause 2개 이상인데 `logical_operator` 없음 -> invalid
+- `scalar mode`인데 clause 수가 1개가 아님 -> invalid
+- `scalar mode`인데 `logical_operator != null` -> invalid
+- `compound mode`인데 clause 수가 2개가 아님 -> invalid
+- `compound mode`인데 `logical_operator`가 `and | or`가 아님 -> invalid
 - 지원하지 않는 comparison / operator -> invalid
 - 숫자가 아닌 value -> invalid
+
+즉 `shape validation` 단계에서는 다음을 syntax/shape error로 명확히 구분하는 것이 적절하다.
+
+- `scalar + and/or`
+- `compound + null`
+- `scalar + 2 clauses`
+- `compound + 1 clause`
 
 #### 5.7.2 Condition group satisfiability validation
 
@@ -1205,6 +1219,17 @@ MVP 구현은 다음 순서가 적절하다.
 
 즉 preview evaluator는 저장된 rule이 scalar인지 compound인지와 무관하게, severity별 condition group으로 정규화된 입력을 받는 구조가 적절하다.
 
+다만 shape validation 기준은 명확히 유지한다.
+
+- `condition_mode = scalar`
+  - `logical_operator = null`
+  - clause = 정확히 1개
+- `condition_mode = compound`
+  - `logical_operator = and | or`
+  - clause = 정확히 2개
+
+즉 내부 정규화는 “같은 evaluator가 이해할 수 있는 공통 구조”를 만드는 것이고, 잘못된 mode/operator/clause 조합을 normalize로 흡수하는 것은 MVP에서 권장하지 않는다.
+
 #### 7.11.2 `candidate_rule_catalog` 확장
 
 `candidate_rule_catalog`의 각 item도 self-contained 원칙을 유지하며, compound threshold 기준 필드를 함께 포함하는 것이 적절하다.
@@ -1253,6 +1278,9 @@ MVP에서의 권장 최소 shape:
 
 즉 MVP trace는 “어떤 severity가 이겼는지”, “이 condition이 scalar인지 compound인지”, “and/or 중 어떤 방식으로 평가됐는지”, “어느 clause가 실제로 매칭됐는지”만 담는 최소 winner-trace로 유지하는 것이 적절하다.
 
+이때 trace 해석이 깔끔해지려면 shape validation이 먼저 엄격해야 한다.  
+즉 `compound`인데 `logical_operator = null`이거나, `scalar`인데 `logical_operator = and/or`인 상태는 trace 단계까지 오기 전에 invalid로 걸러지는 편이 좋다.
+
 예시:
 
 ```json
@@ -1295,6 +1323,8 @@ MVP에서의 권장 최소 shape:
 - scalar rule은 `logical_operator = null`, `matched_clause_indexes = [0]`으로 정규화
 - `and` 조건은 보통 `[0, 1]`처럼 모든 매칭 clause를 기록
 - `or` 조건은 실제로 매칭된 clause만 기록
+
+즉 `logical_operator = null`은 “single-clause winner condition의 공통 표현”이라기보다, MVP 범위에서는 실질적으로 `scalar mode`와 함께 쓰이는 형태로 유지하는 편이 더 명확하다.
 
 MVP에서 의도적으로 제외하는 범위:
 - clause별 상세 reason code
