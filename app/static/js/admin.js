@@ -160,6 +160,8 @@ const alertRuleFormTitle = document.getElementById("alert-rule-form-title");
 const alertRuleFormMode = document.getElementById("alert-rule-form-mode");
 const alertRuleFormResetButton = document.getElementById("alert-rule-form-reset");
 const alertRuleIdInput = document.getElementById("alert-rule-id");
+const alertRuleRuleKeyInput = document.getElementById("alert-rule-rule-key");
+const alertRuleDisplayNameInput = document.getElementById("alert-rule-display-name");
 const alertRuleScopeTypeSelect = document.getElementById("alert-rule-scope-type");
 const alertRuleStateTypeSelect = document.getElementById("alert-rule-state-type");
 const alertRuleObjectTypeInput = document.getElementById("alert-rule-object-type");
@@ -170,6 +172,7 @@ const alertRuleWarningThresholdInput = document.getElementById("alert-rule-warni
 const alertRuleCriticalThresholdInput = document.getElementById("alert-rule-critical-threshold");
 const alertRuleDescriptionInput = document.getElementById("alert-rule-description");
 const alertRuleEnabledInput = document.getElementById("alert-rule-enabled");
+const saveAlertRuleButton = document.getElementById("save-alert-rule-button");
 const alertRuleObjectTypeFilter = document.getElementById("alert-rule-object-type-filter");
 const alertRuleScopeFilter = document.getElementById("alert-rule-scope-filter");
 const alertRuleStateFilter = document.getElementById("alert-rule-state-filter");
@@ -2935,21 +2938,53 @@ function toggleAlertRuleScopeFields() {
     alertRuleMonitoredObjectIdInput.disabled = isObjectType;
 }
 
+function setAlertRuleFormEditableState(isEditable) {
+    [
+        alertRuleRuleKeyInput,
+        alertRuleDisplayNameInput,
+        alertRuleScopeTypeSelect,
+        alertRuleStateTypeSelect,
+        alertRuleObjectTypeInput,
+        alertRuleMonitoredObjectIdInput,
+        alertRuleMetricKeyInput,
+        alertRuleComparisonSelect,
+        alertRuleWarningThresholdInput,
+        alertRuleCriticalThresholdInput,
+        alertRuleDescriptionInput,
+        alertRuleEnabledInput,
+    ].forEach((input) => {
+        if (input) {
+            input.disabled = !isEditable;
+        }
+    });
+    if (saveAlertRuleButton) {
+        saveAlertRuleButton.disabled = !isEditable;
+    }
+    if (isEditable) {
+        toggleAlertRuleScopeFields();
+    }
+}
+
 function resetAlertRuleForm() {
     alertRuleForm.reset();
     alertRuleIdInput.value = "";
+    alertRuleRuleKeyInput.value = "";
+    alertRuleDisplayNameInput.value = "";
     alertRuleScopeTypeSelect.value = "object_type";
     alertRuleStateTypeSelect.value = "process";
     alertRuleComparisonSelect.value = "gte";
     alertRuleEnabledInput.checked = true;
     alertRuleFormTitle.textContent = "Alert Rule 생성";
     alertRuleFormMode.textContent = "create";
+    setAlertRuleFormEditableState(true);
     toggleAlertRuleScopeFields();
     renderMonitoredObjectOptions();
 }
 
 function fillAlertRuleForm(rule) {
     alertRuleIdInput.value = String(rule.id);
+    alertRuleRuleKeyInput.value = rule.rule_key || "";
+    alertRuleDisplayNameInput.value = rule.display_name || "";
     alertRuleScopeTypeSelect.value = rule.scope_type;
     alertRuleStateTypeSelect.value = rule.state_type;
     alertRuleObjectTypeInput.value = rule.object_type || "";
@@ -2960,8 +2995,9 @@ function fillAlertRuleForm(rule) {
     alertRuleCriticalThresholdInput.value = rule.critical_threshold ?? "";
     alertRuleDescriptionInput.value = rule.description || "";
     alertRuleEnabledInput.checked = Boolean(rule.is_enabled);
-    alertRuleFormTitle.textContent = `Alert Rule 수정 #${rule.id}`;
-    alertRuleFormMode.textContent = "edit";
+    alertRuleFormTitle.textContent = `Alert Rule ${rule.is_editable ? "수정" : "보기"} #${rule.id}`;
+    alertRuleFormMode.textContent = rule.status || "edit";
+    setAlertRuleFormEditableState(Boolean(rule.is_editable));
     toggleAlertRuleScopeFields();
 }
 
@@ -2980,14 +3016,18 @@ function renderAlertRules(items) {
                 <article class="admin-item ${rule.is_enabled ? "" : "is-disabled"}">
                     <div class="section-header">
                         <div>
-                            <h3>${escapeHtml(rule.metric_key)}</h3>
+                            <h3>${escapeHtml(rule.display_name || rule.metric_key)}</h3>
+                            <p class="admin-meta">${escapeHtml(rule.rule_key || "-")}</p>
                             <p class="admin-meta">${escapeHtml(rule.scope_type)} | ${escapeHtml(rule.state_type)} | ${escapeHtml(rule.comparison)}</p>
                         </div>
                         <div class="toolbar-inline">
+                            <span class="meta-pill">${escapeHtml(rule.status || "-")}</span>
                             <span class="meta-pill">${rule.is_enabled ? "enabled" : "disabled"}</span>
                             <button class="button ghost small preview-alert-rule-button" type="button" data-rule-id="${escapeHtml(rule.id)}">미리보기</button>
                             <button class="button ghost small toggle-alert-rule-button" type="button" data-rule-id="${escapeHtml(rule.id)}" data-enabled="${rule.is_enabled ? "true" : "false"}">${rule.is_enabled ? "비활성화" : "활성화"}</button>
                             <button class="button ghost small edit-alert-rule-button" type="button" data-rule-id="${escapeHtml(rule.id)}">수정</button>
+                            ${rule.status === "draft" ? `<button class="button ghost small publish-alert-rule-button" type="button" data-rule-id="${escapeHtml(rule.id)}">Publish</button>` : ""}
+                            <button class="button ghost small clone-alert-rule-button" type="button" data-rule-id="${escapeHtml(rule.id)}">Clone</button>
                         </div>
                     </div>
                     <p class="admin-meta">warning=${escapeHtml(rule.warning_threshold ?? "-")} | critical=${escapeHtml(rule.critical_threshold ?? "-")}</p>
@@ -3008,8 +3048,10 @@ function renderAlertRulePreviewPanel() {
     const { rule, summary, items } = selectedAlertRulePreview;
     const header = `
         <div class="section-header">
-            <h3>${escapeHtml(rule.metric_key)}</h3>
+            <h3>${escapeHtml(rule.display_name || rule.metric_key)}</h3>
             <div class="toolbar-inline">
+                <span class="meta-pill">${escapeHtml(rule.rule_key || "-")}</span>
+                <span class="meta-pill">${escapeHtml(rule.status || "-")}</span>
                 <span class="meta-pill">${escapeHtml(rule.scope_type)}</span>
                 <span class="meta-pill">${escapeHtml(rule.state_type)}</span>
                 <span class="meta-pill">${rule.is_enabled ? "enabled" : "disabled"}</span>
@@ -3856,6 +3898,8 @@ async function saveAlertRule(event) {
 
     const ruleId = alertRuleIdInput.value ? Number(alertRuleIdInput.value) : null;
     const payload = {
+        rule_key: alertRuleRuleKeyInput.value.trim() || null,
+        display_name: alertRuleDisplayNameInput.value.trim() || null,
         scope_type: alertRuleScopeTypeSelect.value,
         state_type: alertRuleStateTypeSelect.value,
         object_type: alertRuleObjectTypeInput.value.trim() || null,
@@ -3888,6 +3932,20 @@ async function saveAlertRule(event) {
     } catch (error) {
         showBanner(error.message, "error");
     }
+}
+
+async function publishAlertRule(ruleId) {
+    const payload = await apiFetch(`/api/admin/alert-rules/${ruleId}/publish`, {
+        method: "POST",
+    });
+    return payload;
+}
+
+async function cloneAlertRule(ruleId) {
+    const payload = await apiFetch(`/api/admin/alert-rules/${ruleId}/clone`, {
+        method: "POST",
+    });
+    return payload;
 }
 
 async function updateAlertAcknowledgement(alertId, acknowledged, currentNote) {
@@ -4411,6 +4469,34 @@ alertRulesList?.addEventListener("click", (event) => {
     if (previewButton) {
         const ruleId = Number(previewButton.dataset.ruleId);
         loadAlertRulePreview(ruleId).catch((error) => showBanner(error.message, "error"));
+        return;
+    }
+
+    const publishButton = event.target instanceof HTMLElement ? event.target.closest(".publish-alert-rule-button") : null;
+    if (publishButton) {
+        const ruleId = Number(publishButton.dataset.ruleId);
+        publishAlertRule(ruleId)
+            .then(async (payload) => {
+                await Promise.all([loadAlertRules(), loadSummary()]);
+                const warningCount = payload?.validation?.warnings?.length || 0;
+                showBanner(`alert rule을 publish했습니다.${warningCount ? ` warning ${warningCount}건` : ""}`, "success");
+            })
+            .catch((error) => showBanner(error.message, "error"));
+        return;
+    }
+
+    const cloneButton = event.target instanceof HTMLElement ? event.target.closest(".clone-alert-rule-button") : null;
+    if (cloneButton) {
+        const ruleId = Number(cloneButton.dataset.ruleId);
+        cloneAlertRule(ruleId)
+            .then(async (payload) => {
+                await Promise.all([loadAlertRules(), loadSummary()]);
+                if (payload?.rule) {
+                    fillAlertRuleForm(payload.rule);
+                }
+                showBanner("alert rule을 draft로 복제했습니다.", "success");
+            })
+            .catch((error) => showBanner(error.message, "error"));
         return;
     }
 

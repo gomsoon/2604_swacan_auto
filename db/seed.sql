@@ -1003,6 +1003,9 @@ INSERT INTO node_bindings (
 
 INSERT INTO alert_rules (
     id,
+    rule_key,
+    display_name,
+    status,
     scope_type,
     object_type,
     monitored_object_id,
@@ -1018,6 +1021,9 @@ INSERT INTO alert_rules (
 ) VALUES
 (
     1501,
+    'threshold.process.cpu_usage.process-cpu-high',
+    'Process CPU High',
+    'published',
     'object_type',
     'SoftwareProcess',
     NULL,
@@ -1033,6 +1039,9 @@ INSERT INTO alert_rules (
 ),
 (
     1502,
+    'threshold.agent.outbox_queue_depth.agent-queue-high',
+    'Agent Queue High',
+    'published',
     'object_type',
     'MonitoringAgent',
     NULL,
@@ -1048,6 +1057,9 @@ INSERT INTO alert_rules (
 ),
 (
     1503,
+    'threshold.host.memory_used_ratio.host-memory-high',
+    'Host Memory High',
+    'published',
     'object_type',
     'HostSnapshot',
     NULL,

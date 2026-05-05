@@ -611,6 +611,16 @@
                 <input id="alert-rule-id" type="hidden" value="">
                 <div class="field-grid">
                     <label class="field compact-field">
+                        <span>Rule Key</span>
+                        <input id="alert-rule-rule-key" type="text" placeholder="예: threshold.process.cpu_usage.process-cpu-high">
+                    </label>
+                    <label class="field compact-field">
+                        <span>Display Name</span>
+                        <input id="alert-rule-display-name" type="text" placeholder="예: Process CPU High">
+                    </label>
+                </div>
+                <div class="field-grid">
+                    <label class="field compact-field">
                         <span>Scope</span>
                         <select id="alert-rule-scope-type">
                             <option value="object_type">object_type</option>

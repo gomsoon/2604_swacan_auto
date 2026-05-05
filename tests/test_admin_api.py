@@ -1071,6 +1071,8 @@ def test_admin_alert_rules_lists_seeded_rules(seeded_client) -> None:
         "outbox_queue_depth",
         "memory_used_ratio",
     }
+    assert {item["status"] for item in payload["items"]} == {"published"}
+    assert all(item["is_editable"] is False for item in payload["items"])
 
 
 def test_admin_alert_rules_support_filters(seeded_client) -> None:
@@ -1283,12 +1285,16 @@ def test_admin_create_alert_rule_accepts_valid_object_type_rule(seeded_client) -
 
     assert response.status_code == 201
     payload = response.get_json()["rule"]
+    assert payload["status"] == "draft"
+    assert payload["is_editable"] is True
+    assert payload["rule_key"].startswith("threshold.process.memory_rss.")
     assert payload["scope_type"] == "object_type"
     assert payload["warning_threshold"] == 1024
     assert payload["critical_threshold"] == 2048
+    assert payload["display_name"] is not None
 
 
-def test_admin_update_alert_rule_accepts_existing_integer_enabled_value(seeded_client) -> None:
+def test_admin_update_alert_rule_rejects_semantic_edit_for_published_rule(seeded_client) -> None:
     login(seeded_client)
 
     response = seeded_client.patch(
@@ -1299,11 +1305,87 @@ def test_admin_update_alert_rule_accepts_existing_integer_enabled_value(seeded_c
         },
     )
 
+    assert response.status_code == 400
+    assert response.get_json()["error"]["message"] == "published rule conditions cannot be edited; clone the rule to create a new draft"
+
+
+def test_admin_update_alert_rule_allows_enabled_toggle_for_published_rule(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.patch("/api/admin/alert-rules/1501", json={"is_enabled": False})
+
     assert response.status_code == 200
     payload = response.get_json()["rule"]
     assert payload["id"] == 1501
-    assert payload["critical_threshold"] == 96
-    assert payload["is_enabled"] is True
+    assert payload["status"] == "published"
+    assert payload["is_enabled"] is False
+
+
+def test_admin_clone_alert_rule_creates_disabled_draft_copy(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post("/api/admin/alert-rules/1501/clone")
+
+    assert response.status_code == 201
+    payload = response.get_json()["rule"]
+    assert payload["status"] == "draft"
+    assert payload["is_editable"] is True
+    assert payload["is_enabled"] is False
+    assert payload["rule_key"] == "threshold.process.cpu_usage.process-cpu-high-2"
+    assert payload["display_name"] == "Process CPU High (Copy)"
+
+
+def test_admin_publish_alert_rule_accepts_warnings_but_publishes_draft(seeded_client) -> None:
+    login(seeded_client)
+
+    create_response = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "rss_mb",
+            "comparison": "gte",
+            "warning_threshold": 1024,
+            "critical_threshold": None,
+            "display_name": "RSS High (Copy)",
+            "rule_key": "threshold.process.rss_mb.rss-high-copy",
+            "is_enabled": True,
+        },
+    )
+    assert create_response.status_code == 201
+    rule_id = create_response.get_json()["rule"]["id"]
+
+    publish_response = seeded_client.post(f"/api/admin/alert-rules/{rule_id}/publish")
+
+    assert publish_response.status_code == 200
+    payload = publish_response.get_json()
+    assert payload["rule"]["status"] == "published"
+    assert payload["validation"]["errors"] == []
+    assert len(payload["validation"]["warnings"]) == 2
+
+
+def test_admin_alert_rule_rejects_duplicate_rule_key(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "rss_mb",
+            "comparison": "gte",
+            "warning_threshold": 1024,
+            "critical_threshold": 2048,
+            "display_name": "RSS High",
+            "rule_key": "threshold.process.cpu_usage.process-cpu-high",
+            "is_enabled": True,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["message"] == "rule_key must be unique across all alert rules"
 
 
 def test_admin_alert_rule_rejects_missing_thresholds(seeded_client) -> None:

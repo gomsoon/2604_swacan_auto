@@ -33,6 +33,11 @@
 - 총 branch coverage: `85%`
 - 리포트: [coverage.xml](C:/2604_swacan_auto/test_artifacts/coverage.xml)
 
+coverage 기준 메모:
+
+- 장기 목표 기준은 `branch coverage 80% 이상`
+- 현재 sign-off 기준에서는 coverage 측정과 report 생성 자체를 우선 필수로 보고, `fail-under 80` 하드 게이트는 이후 안정화 단계에서 적용한다.
+
 ## 4. 실제 Linux 검증 결과
 
 실제 Linux agent 서버 기반 검증은 다음 문서에 정리되어 있다.

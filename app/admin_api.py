@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from typing import Any
 
@@ -9,7 +10,13 @@ from flask import Blueprint, current_app, g, request
 from .alert_archive import insert_alert_history_archive, serialize_alert_archive_row
 from .alert_history import record_alert_history
 from .auth import admin_required, error_response
-from .db import get_db
+from .db import (
+    RULE_KEY_ALLOWED_PATTERN,
+    get_db,
+    slugify_rule_key_part,
+    suggest_alert_rule_display_name,
+    suggest_threshold_rule_key,
+)
 from .runtime_state import derive_latest_state
 
 bp = Blueprint("admin_api", __name__, url_prefix="/api/admin")
@@ -22,9 +29,47 @@ ALLOWED_STATE_TYPES = {"agent", "host", "process"}
 ALLOWED_STATE_STATUSES = {"up", "warning", "down"}
 ALLOWED_ALERT_SCOPE_TYPES = {"object_type", "monitored_object"}
 ALLOWED_ALERT_COMPARISONS = {"gte", "lte"}
+ALLOWED_ALERT_RULE_STATUSES = {"draft", "published", "deprecated"}
 ALERT_INSTANCE_STATUSES = {"open", "in_progress", "suppressed", "resolved"}
 ALERT_ACTIVE_STATUSES = {"open", "in_progress", "suppressed"}
 ALERT_ARCHIVE_FINAL_STATUSES = {"resolved", "closed_with_exception"}
+ALERT_RULE_DRAFT_ONLY_FIELDS = {
+    "rule_key",
+    "display_name",
+    "scope_type",
+    "object_type",
+    "monitored_object_id",
+    "state_type",
+    "metric_key",
+    "comparison",
+    "warning_threshold",
+    "critical_threshold",
+    "description",
+}
+
+ALERT_RULE_SELECT_SQL = """
+    SELECT
+        rules.id,
+        rules.rule_key,
+        rules.display_name,
+        rules.status,
+        rules.scope_type,
+        rules.object_type,
+        rules.monitored_object_id,
+        rules.state_type,
+        rules.metric_key,
+        rules.comparison,
+        rules.warning_threshold,
+        rules.critical_threshold,
+        rules.is_enabled,
+        rules.description,
+        rules.created_at,
+        rules.updated_at,
+        mo.display_name AS target_display_name,
+        mo.runtime_binding_key AS target_runtime_binding_key
+    FROM alert_rules AS rules
+    LEFT JOIN monitored_objects AS mo ON mo.id = rules.monitored_object_id
+"""
 
 
 def now_iso() -> str:
@@ -392,6 +437,10 @@ def resolve_alert_instance(
 def serialize_alert_rule(row) -> dict[str, Any]:
     return {
         "id": row["id"],
+        "rule_key": row["rule_key"],
+        "display_name": row["display_name"],
+        "status": row["status"],
+        "is_editable": row["status"] == "draft",
         "scope_type": row["scope_type"],
         "object_type": row["object_type"],
         "monitored_object_id": row["monitored_object_id"],
@@ -407,6 +456,77 @@ def serialize_alert_rule(row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+
+
+def fetch_alert_rule_row(rule_id: int):
+    return get_db().execute(f"{ALERT_RULE_SELECT_SQL} WHERE rules.id = ?", (rule_id,)).fetchone()
+
+
+def validate_rule_key_value(rule_key: str) -> str | None:
+    if not RULE_KEY_ALLOWED_PATTERN.fullmatch(rule_key):
+        return "rule_key can use only lowercase letters, digits, '.', '-', and '_'"
+    if rule_key[0] in "._-" or rule_key[-1] in "._-":
+        return "rule_key cannot start or end with a separator"
+    if any(not segment for segment in rule_key.split(".")):
+        return "rule_key cannot contain an empty segment between '.' separators"
+    return None
+
+
+def ensure_alert_rule_key_unique(rule_key: str, *, exclude_rule_id: int | None = None) -> Any | None:
+    params: list[Any] = [rule_key]
+    sql = "SELECT id FROM alert_rules WHERE rule_key = ?"
+    if exclude_rule_id is not None:
+        sql += " AND id != ?"
+        params.append(exclude_rule_id)
+    row = get_db().execute(sql, tuple(params)).fetchone()
+    if row is not None:
+        return error_response("validation_error", "rule_key must be unique across all alert rules", 400)
+    return None
+
+
+def suggest_next_rule_key(base_rule_key: str) -> str:
+    match = re.match(r"^(.*?)-(\d+)$", base_rule_key)
+    if match:
+        stem = match.group(1)
+        next_suffix = int(match.group(2)) + 1
+    else:
+        stem = base_rule_key
+        next_suffix = 2
+
+    candidate = f"{stem}-{next_suffix}"
+    while get_db().execute("SELECT id FROM alert_rules WHERE rule_key = ?", (candidate,)).fetchone() is not None:
+        next_suffix += 1
+        candidate = f"{stem}-{next_suffix}"
+    return candidate
+
+
+def suggest_clone_display_name(display_name: str) -> str:
+    normalized = display_name.strip() or "Untitled Rule"
+    if normalized.endswith("(Copy)"):
+        return f"{normalized} 2"
+    return f"{normalized} (Copy)"
+
+
+def build_default_alert_rule_display_name(payload: dict[str, Any]) -> str:
+    return suggest_alert_rule_display_name(
+        payload.get("description"),
+        payload["state_type"],
+        payload["metric_key"],
+    )
+
+
+def build_default_alert_rule_key(payload: dict[str, Any]) -> str:
+    display_name = payload.get("display_name") or build_default_alert_rule_display_name(payload)
+    return suggest_threshold_rule_key(payload["state_type"], payload["metric_key"], display_name)
+
+
+def build_alert_rule_publish_warnings(rule: dict[str, Any]) -> list[dict[str, Any]]:
+    warnings: list[dict[str, Any]] = []
+    if rule.get("warning_threshold") is None or rule.get("critical_threshold") is None:
+        warnings.append({"message": "This rule only emits a single severity level."})
+    if isinstance(rule.get("display_name"), str) and "(Copy)" in rule["display_name"]:
+        warnings.append({"message": "display_name still contains the '(Copy)' suffix."})
+    return warnings
 
 
 def serialize_monitored_object(row) -> dict[str, Any]:
@@ -513,6 +633,33 @@ def parse_alert_status_filter(value: str | None) -> tuple[str, Any | None]:
 def validate_alert_rule_payload(data: dict[str, Any], *, partial: bool = False) -> tuple[dict[str, Any] | None, Any | None]:
     payload = dict(data)
 
+    if "status" in payload:
+        status = payload.get("status")
+        if status not in ALLOWED_ALERT_RULE_STATUSES:
+            return None, error_response("validation_error", "status is invalid", 400)
+
+    if not partial or "display_name" in payload:
+        display_name = payload.get("display_name")
+        if display_name in (None, ""):
+            payload["display_name"] = None
+        elif not isinstance(display_name, str) or not display_name.strip():
+            return None, error_response("validation_error", "display_name is required", 400)
+        else:
+            payload["display_name"] = display_name.strip()
+
+    if not partial or "rule_key" in payload:
+        rule_key = payload.get("rule_key")
+        if rule_key in (None, ""):
+            payload["rule_key"] = None
+        elif not isinstance(rule_key, str) or not rule_key.strip():
+            return None, error_response("validation_error", "rule_key is required", 400)
+        else:
+            normalized_rule_key = rule_key.strip().lower()
+            validation_message = validate_rule_key_value(normalized_rule_key)
+            if validation_message:
+                return None, error_response("validation_error", validation_message, 400)
+            payload["rule_key"] = normalized_rule_key
+
     if not partial or "scope_type" in payload:
         scope_type = payload.get("scope_type")
         if scope_type not in ALLOWED_ALERT_SCOPE_TYPES:
@@ -581,6 +728,11 @@ def validate_alert_rule_payload(data: dict[str, Any], *, partial: bool = False) 
             return None, error_response("validation_error", "critical_threshold must be greater than or equal to warning_threshold", 400)
         if comparison == "lte" and critical_threshold > warning_threshold:
             return None, error_response("validation_error", "critical_threshold must be less than or equal to warning_threshold", 400)
+
+    if payload.get("display_name") is None:
+        payload["display_name"] = build_default_alert_rule_display_name(payload)
+    if payload.get("rule_key") is None:
+        payload["rule_key"] = build_default_alert_rule_key(payload)
 
     return payload, None
 
@@ -1268,15 +1420,20 @@ def list_alert_rules():
         params.append(int(is_enabled))
 
     sql = """
-        SELECT rules.id, rules.scope_type, rules.object_type, rules.monitored_object_id, rules.state_type, rules.metric_key, rules.comparison,
-               rules.warning_threshold, rules.critical_threshold, rules.is_enabled, rules.description, rules.created_at, rules.updated_at,
-               mo.display_name AS target_display_name, mo.runtime_binding_key AS target_runtime_binding_key
-        FROM alert_rules AS rules
-        LEFT JOIN monitored_objects AS mo ON mo.id = rules.monitored_object_id
-    """
+    """ + ALERT_RULE_SELECT_SQL
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY rules.is_enabled DESC, rules.state_type ASC, rules.id ASC"
+    sql += """
+        ORDER BY
+            CASE rules.status
+                WHEN 'draft' THEN 0
+                WHEN 'published' THEN 1
+                ELSE 2
+            END ASC,
+            rules.is_enabled DESC,
+            rules.state_type ASC,
+            rules.id ASC
+    """
 
     rows = get_db().execute(sql, tuple(params)).fetchall()
     return {"items": [serialize_alert_rule(row) for row in rows]}
@@ -1348,17 +1505,7 @@ def get_alert_rule_targets_preview(rule_id: int):
     if error:
         return error
 
-    row = get_db().execute(
-        """
-        SELECT rules.id, rules.scope_type, rules.object_type, rules.monitored_object_id, rules.state_type, rules.metric_key, rules.comparison,
-               rules.warning_threshold, rules.critical_threshold, rules.is_enabled, rules.description, rules.created_at, rules.updated_at,
-               mo.display_name AS target_display_name, mo.runtime_binding_key AS target_runtime_binding_key
-        FROM alert_rules AS rules
-        LEFT JOIN monitored_objects AS mo ON mo.id = rules.monitored_object_id
-        WHERE rules.id = ?
-        """,
-        (rule_id,),
-    ).fetchone()
+    row = fetch_alert_rule_row(rule_id)
     if row is None:
         return error_response("not_found", "alert rule not found", 404)
 
@@ -1516,17 +1663,23 @@ def create_alert_rule():
     payload, error = validate_alert_rule_payload(data, partial=False)
     if error:
         return error
+    uniqueness_error = ensure_alert_rule_key_unique(payload["rule_key"])
+    if uniqueness_error:
+        return uniqueness_error
 
     timestamp = now_iso()
     db_conn = get_db()
     cursor = db_conn.execute(
         """
         INSERT INTO alert_rules (
-            scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
+            rule_key, display_name, status, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
             warning_threshold, critical_threshold, is_enabled, description, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
+            payload["rule_key"],
+            payload["display_name"],
+            "draft",
             payload["scope_type"],
             payload.get("object_type"),
             payload.get("monitored_object_id"),
@@ -1542,17 +1695,7 @@ def create_alert_rule():
         ),
     )
     db_conn.commit()
-    row = db_conn.execute(
-        """
-        SELECT rules.id, rules.scope_type, rules.object_type, rules.monitored_object_id, rules.state_type, rules.metric_key, rules.comparison,
-               rules.warning_threshold, rules.critical_threshold, rules.is_enabled, rules.description, rules.created_at, rules.updated_at,
-               mo.display_name AS target_display_name, mo.runtime_binding_key AS target_runtime_binding_key
-        FROM alert_rules AS rules
-        LEFT JOIN monitored_objects AS mo ON mo.id = rules.monitored_object_id
-        WHERE rules.id = ?
-        """,
-        (cursor.lastrowid,),
-    ).fetchone()
+    row = fetch_alert_rule_row(cursor.lastrowid)
     return {"rule": serialize_alert_rule(row)}, 201
 
 
@@ -1560,37 +1703,45 @@ def create_alert_rule():
 @admin_required
 def update_alert_rule(rule_id: int):
     db_conn = get_db()
-    existing = db_conn.execute(
-        """
-        SELECT rules.id, rules.scope_type, rules.object_type, rules.monitored_object_id, rules.state_type, rules.metric_key, rules.comparison,
-               rules.warning_threshold, rules.critical_threshold, rules.is_enabled, rules.description, rules.created_at, rules.updated_at,
-               mo.display_name AS target_display_name, mo.runtime_binding_key AS target_runtime_binding_key
-        FROM alert_rules AS rules
-        LEFT JOIN monitored_objects AS mo ON mo.id = rules.monitored_object_id
-        WHERE rules.id = ?
-        """,
-        (rule_id,),
-    ).fetchone()
+    existing = fetch_alert_rule_row(rule_id)
     if existing is None:
         return error_response("not_found", "alert rule not found", 404)
 
     data = request.get_json(silent=True) or {}
+    if existing["status"] != "draft":
+        attempted_draft_only_fields = sorted(ALERT_RULE_DRAFT_ONLY_FIELDS.intersection(data.keys()))
+        if attempted_draft_only_fields:
+            if "rule_key" in attempted_draft_only_fields:
+                return error_response("validation_error", "rule_key can be edited only while the rule is in draft", 400)
+            if "display_name" in attempted_draft_only_fields:
+                return error_response("validation_error", "display_name can be edited only while the rule is in draft", 400)
+            return error_response(
+                "validation_error",
+                "published rule conditions cannot be edited; clone the rule to create a new draft",
+                400,
+            )
+
     merged = dict(existing)
     merged.update(data)
     payload, error = validate_alert_rule_payload(merged, partial=False)
     if error:
         return error
+    uniqueness_error = ensure_alert_rule_key_unique(payload["rule_key"], exclude_rule_id=rule_id)
+    if uniqueness_error:
+        return uniqueness_error
 
     timestamp = now_iso()
     db_conn.execute(
         """
         UPDATE alert_rules
-        SET scope_type = ?, object_type = ?, monitored_object_id = ?, state_type = ?, metric_key = ?,
+        SET rule_key = ?, display_name = ?, scope_type = ?, object_type = ?, monitored_object_id = ?, state_type = ?, metric_key = ?,
             comparison = ?, warning_threshold = ?, critical_threshold = ?, is_enabled = ?,
             description = ?, updated_at = ?
         WHERE id = ?
         """,
         (
+            payload["rule_key"],
+            payload["display_name"],
             payload["scope_type"],
             payload.get("object_type"),
             payload.get("monitored_object_id"),
@@ -1606,15 +1757,80 @@ def update_alert_rule(rule_id: int):
         ),
     )
     db_conn.commit()
-    row = db_conn.execute(
-        """
-        SELECT rules.id, rules.scope_type, rules.object_type, rules.monitored_object_id, rules.state_type, rules.metric_key, rules.comparison,
-               rules.warning_threshold, rules.critical_threshold, rules.is_enabled, rules.description, rules.created_at, rules.updated_at,
-               mo.display_name AS target_display_name, mo.runtime_binding_key AS target_runtime_binding_key
-        FROM alert_rules AS rules
-        LEFT JOIN monitored_objects AS mo ON mo.id = rules.monitored_object_id
-        WHERE rules.id = ?
-        """,
-        (rule_id,),
-    ).fetchone()
+    row = fetch_alert_rule_row(rule_id)
     return {"rule": serialize_alert_rule(row)}
+
+
+@bp.post("/alert-rules/<int:rule_id>/publish")
+@admin_required
+def publish_alert_rule(rule_id: int):
+    db_conn = get_db()
+    existing = fetch_alert_rule_row(rule_id)
+    if existing is None:
+        return error_response("not_found", "alert rule not found", 404)
+    if existing["status"] != "draft":
+        return error_response("validation_error", "only draft rules can be published", 400)
+
+    payload, error = validate_alert_rule_payload(dict(existing), partial=False)
+    if error:
+        return error
+    uniqueness_error = ensure_alert_rule_key_unique(payload["rule_key"], exclude_rule_id=rule_id)
+    if uniqueness_error:
+        return uniqueness_error
+
+    warnings = build_alert_rule_publish_warnings(payload)
+    timestamp = now_iso()
+    db_conn.execute(
+        "UPDATE alert_rules SET status = 'published', updated_at = ? WHERE id = ?",
+        (timestamp, rule_id),
+    )
+    db_conn.commit()
+    row = fetch_alert_rule_row(rule_id)
+    return {
+        "rule": serialize_alert_rule(row),
+        "validation": {
+            "errors": [],
+            "warnings": warnings,
+        },
+    }
+
+
+@bp.post("/alert-rules/<int:rule_id>/clone")
+@admin_required
+def clone_alert_rule(rule_id: int):
+    db_conn = get_db()
+    existing = fetch_alert_rule_row(rule_id)
+    if existing is None:
+        return error_response("not_found", "alert rule not found", 404)
+
+    cloned_rule_key = suggest_next_rule_key(existing["rule_key"])
+    cloned_display_name = suggest_clone_display_name(existing["display_name"])
+    timestamp = now_iso()
+    cursor = db_conn.execute(
+        """
+        INSERT INTO alert_rules (
+            rule_key, display_name, status, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
+            warning_threshold, critical_threshold, is_enabled, description, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            cloned_rule_key,
+            cloned_display_name,
+            "draft",
+            existing["scope_type"],
+            existing["object_type"],
+            existing["monitored_object_id"],
+            existing["state_type"],
+            existing["metric_key"],
+            existing["comparison"],
+            existing["warning_threshold"],
+            existing["critical_threshold"],
+            0,
+            existing["description"],
+            timestamp,
+            timestamp,
+        ),
+    )
+    db_conn.commit()
+    row = fetch_alert_rule_row(cursor.lastrowid)
+    return {"rule": serialize_alert_rule(row)}, 201

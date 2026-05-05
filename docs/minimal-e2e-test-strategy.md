@@ -158,7 +158,8 @@
 - [필수] `Playwright` 최소 세트 전부 통과
 - [필수] Linux 실제 통합 테스트 또는 동등한 수동 통합 테스트가 1회 이상 성공해야 한다.
 - [필수] backend 와 agent 의 branch coverage report 가 `app` 기준으로 생성되어야 한다.
-- [필수] 초기 단계에서는 coverage 수치 자체를 강한 합격 기준으로 두기보다, 측정과 추적 자체를 필수 게이트로 본다.
+- [필수] branch coverage 는 장기적으로 `80%` 이상을 목표 기준으로 삼는다.
+- [필수] 현재 단계에서는 coverage 측정과 report 축적을 우선 필수 게이트로 보고, `80%` 하드 fail-under 게이트는 안정화 이후 적용한다.
 - [필수] Linux 실제 통합 테스트를 자동화하는 경우, SSH 접속부터 agent 종료까지의 전 과정이 실패 시에도 cleanup 되도록 보장해야 한다.
 
 ## 8. 후속 확장
@@ -173,7 +174,7 @@
 - 최소 E2E 테스트 전략의 기본 조합은 `pytest + Playwright` 다.
 - `pytest` 는 내부 로직 검증, agent-backend 계약 검증, 내구성 검증을 담당하고 `Playwright` 는 사용자 흐름 검증을 담당한다.
 - agent 는 `단위 -> 계약 -> Linux 실제 통합`의 세 층 테스트를 가지며, 서로 다른 실패 원인을 분리할 수 있어야 한다.
-- backend 와 agent 는 초기부터 branch coverage 측정과 report 축적을 시작하고, 이후 단계에서 coverage 게이트를 점진적으로 강화한다.
+- backend 와 agent 는 초기부터 branch coverage 측정과 report 축적을 시작하고, 이후 단계에서 `branch coverage 80%`를 실제 합격 게이트로 점진적으로 강화한다.
 - Playwright 는 coverage 수치 계산 대상이 아니라 최소 E2E 사용자 흐름의 pass/fail 과 실행 증적을 담당한다.
 - 최소 E2E 게이트는 두 계층 테스트가 함께 통과할 때만 완료로 본다.
 - Linux 실제 통합 테스트는 SSH 기반 별도 stage 로 운영하는 것이 가장 안정적이며, 기본 로컬 테스트와 분리해야 한다.

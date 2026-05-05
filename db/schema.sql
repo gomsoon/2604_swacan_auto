@@ -419,6 +419,9 @@ CREATE TABLE IF NOT EXISTS alert_history_archive (
 
 CREATE TABLE IF NOT EXISTS alert_rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_key TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'deprecated')),
     scope_type TEXT NOT NULL CHECK (scope_type IN ('object_type', 'monitored_object')),
     object_type TEXT,
     monitored_object_id INTEGER,
