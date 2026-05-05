@@ -1,12 +1,16 @@
 ﻿from __future__ import annotations
 
+import os
 import socket
+import tempfile
 import threading
 from contextlib import closing, contextmanager
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+import _pytest.pathlib
+import _pytest.tmpdir
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 from werkzeug.serving import make_server
 
@@ -21,6 +25,71 @@ from linux_agent_ssh_support import (
 
 ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "test_artifacts"
 ARTIFACTS_DIR.mkdir(exist_ok=True)
+
+
+_original_cleanup_dead_symlinks = _pytest.tmpdir.cleanup_dead_symlinks
+_original_make_numbered_dir = _pytest.pathlib.make_numbered_dir
+_original_getbasetemp = _pytest.tmpdir.TempPathFactory.getbasetemp
+
+
+def _safe_make_numbered_dir(root, prefix, mode):
+    if os.name == "nt":
+        mode = 0o777
+    return _original_make_numbered_dir(root, prefix, mode)
+
+
+def _safe_getbasetemp(self):
+    if os.name != "nt":
+        return _original_getbasetemp(self)
+
+    if self._basetemp is not None:
+        return self._basetemp
+
+    if self._given_basetemp is not None:
+        basetemp = self._given_basetemp
+        if basetemp.exists():
+            _pytest.tmpdir.rm_rf(basetemp)
+        basetemp.mkdir(mode=0o777)
+        basetemp = basetemp.resolve()
+    else:
+        from_env = os.environ.get("PYTEST_DEBUG_TEMPROOT")
+        temproot = Path(from_env or tempfile.gettempdir()).resolve()
+        user = _pytest.tmpdir.get_user() or "unknown"
+        rootdir = temproot.joinpath(f"pytest-of-{user}")
+        try:
+            rootdir.mkdir(mode=0o777, exist_ok=True)
+        except OSError:
+            rootdir = temproot.joinpath("pytest-of-unknown")
+            rootdir.mkdir(mode=0o777, exist_ok=True)
+        keep = self._retention_count
+        if self._retention_policy == "none":
+            keep = 0
+        basetemp = _pytest.pathlib.make_numbered_dir_with_cleanup(
+            prefix="pytest-",
+            root=rootdir,
+            keep=keep,
+            lock_timeout=_pytest.tmpdir.LOCK_TIMEOUT,
+            mode=0o777,
+        )
+
+    self._basetemp = basetemp
+    self._trace("new basetemp", basetemp)
+    return basetemp
+
+
+def _safe_cleanup_dead_symlinks(path) -> None:
+    try:
+        _original_cleanup_dead_symlinks(path)
+    except PermissionError:
+        # Windows temp cleanup can fail in this environment even after a
+        # successful test session; keep the temp tree for manual cleanup.
+        return
+
+
+_pytest.pathlib.make_numbered_dir = _safe_make_numbered_dir
+_pytest.tmpdir.make_numbered_dir = _safe_make_numbered_dir
+_pytest.tmpdir.TempPathFactory.getbasetemp = _safe_getbasetemp
+_pytest.tmpdir.cleanup_dead_symlinks = _safe_cleanup_dead_symlinks
 
 
 class LiveServerThread(threading.Thread):
