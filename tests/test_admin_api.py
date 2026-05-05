@@ -1073,6 +1073,7 @@ def test_admin_alert_rules_lists_seeded_rules(seeded_client) -> None:
     }
     assert {item["status"] for item in payload["items"]} == {"published"}
     assert all(item["is_editable"] is False for item in payload["items"])
+    assert all(item["publish_warnings"] == [] for item in payload["items"])
 
 
 def test_admin_alert_rules_support_filters(seeded_client) -> None:
@@ -1319,6 +1320,7 @@ def test_admin_update_alert_rule_allows_enabled_toggle_for_published_rule(seeded
     assert payload["id"] == 1501
     assert payload["status"] == "published"
     assert payload["is_enabled"] is False
+    assert payload["publish_warnings"] == []
 
 
 def test_admin_clone_alert_rule_creates_disabled_draft_copy(seeded_client) -> None:
@@ -1333,6 +1335,7 @@ def test_admin_clone_alert_rule_creates_disabled_draft_copy(seeded_client) -> No
     assert payload["is_enabled"] is False
     assert payload["rule_key"] == "threshold.process.cpu_usage.process-cpu-high-2"
     assert payload["display_name"] == "Process CPU High (Copy)"
+    assert payload["publish_warnings"] == [{"message": "display_name still contains the '(Copy)' suffix."}]
 
 
 def test_admin_publish_alert_rule_accepts_warnings_but_publishes_draft(seeded_client) -> None:

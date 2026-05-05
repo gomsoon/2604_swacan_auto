@@ -186,7 +186,7 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     page.get_by_role("button", name="선택 항목 저장").click()
     expect(page.locator('#node-dynamic-properties [data-property-input-code="service_tier"]')).to_have_value("gold")
 
-    page.locator('g.diagram-node[data-node-type="SoftwareProcess"] .node-shape').first.click(force=True)
+    page.locator('#editor-outline-tree .outline-item-name', has_text="Software Process").first.click()
     page.locator("#runtime-binding-query").fill("App Process")
     expect(page.locator("#runtime-binding-results .runtime-binding-item", has_text="App Process")).to_have_count(1)
     page.locator("#runtime-binding-results .runtime-binding-item", has_text="App Process").click()
@@ -536,6 +536,20 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     expect(page.locator("#admin-summary-cards")).to_contain_text("사용자")
     expect(page.locator("#admin-metamodel-versions-list")).to_contain_text("seed-v1")
     expect(page.locator("#admin-alert-rules-list")).to_contain_text("cpu_usage")
+
+    publishedAlertRule = page.locator("#admin-alert-rules-list .admin-item", has_text="Process CPU High").first
+    publishedAlertRule.get_by_role("button", name="수정").click()
+    expect(page.locator("#alert-rule-editor-status")).to_contain_text("published")
+    expect(page.locator("#alert-rule-editor-status")).to_contain_text("읽기 전용")
+    expect(page.locator("#save-alert-rule-button")).to_contain_text("활성 상태 저장")
+    expect(page.locator("#clone-current-alert-rule-button")).to_be_visible()
+    page.locator("#clone-current-alert-rule-button").click()
+    expect(page.locator("#alert-rule-form-mode")).to_contain_text("draft")
+    expect(page.locator("#alert-rule-display-name")).to_have_value("Process CPU High (Copy)")
+    expect(page.locator("#alert-rule-editor-status")).to_contain_text("(Copy)")
+    expect(page.locator("#publish-current-alert-rule-button")).to_be_visible()
+    page.locator("#alert-rule-form-reset").click()
+
     page.locator(".admin-item", has_text="core / seed-v1").first.get_by_role("button", name="새 Draft").click()
     derivedDraftVersion = page.locator(".admin-item", has_text=re.compile(r"seed-v1-draft-\d{12}")).first
     expect(derivedDraftVersion).to_contain_text("draft")
@@ -820,14 +834,18 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     createdVersion.locator(".publish-metamodel-button").click()
 
     expect(createdVersion).to_contain_text("published")
+    page.locator("#alert-rule-display-name").fill("File Descriptor High")
     page.locator("#alert-rule-object-type").fill("SoftwareProcess")
     page.locator("#alert-rule-metric-key").fill("fd_count")
+    expect(page.locator("#alert-rule-key-suggestion")).to_contain_text("threshold.process.fd_count.file-descriptor-high")
+    page.get_by_role("button", name="추천 key 적용").click()
+    expect(page.locator("#alert-rule-rule-key")).to_have_value("threshold.process.fd_count.file-descriptor-high")
     page.locator("#alert-rule-warning-threshold").fill("50")
     page.locator("#alert-rule-critical-threshold").fill("100")
     page.locator("#alert-rule-description").fill("Playwright rule")
     page.locator("#save-alert-rule-button").click()
 
-    createdRule = page.locator(".admin-item", has_text="fd_count").first
+    createdRule = page.locator(".admin-item", has_text="threshold.process.fd_count.file-descriptor-high").first
     expect(createdRule).to_contain_text("warning=50")
     expect(createdRule).to_contain_text("critical=100")
 
@@ -835,21 +853,21 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     page.locator("#alert-rule-critical-threshold").fill("120")
     page.locator("#save-alert-rule-button").click()
 
-    expect(page.locator(".admin-item", has_text="fd_count").first).to_contain_text("critical=120")
-    createdRule = page.locator(".admin-item", has_text="fd_count").first
+    expect(page.locator(".admin-item", has_text="threshold.process.fd_count.file-descriptor-high").first).to_contain_text("critical=120")
+    createdRule = page.locator(".admin-item", has_text="threshold.process.fd_count.file-descriptor-high").first
     createdRule.get_by_role("button", name="미리보기").click()
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("App Process")
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("active alert 0")
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("current metric fd_count")
 
     createdRule.get_by_role("button", name="비활성화").click()
-    expect(page.locator(".admin-item", has_text="fd_count").first).to_contain_text("disabled")
+    expect(page.locator(".admin-item", has_text="threshold.process.fd_count.file-descriptor-high").first).to_contain_text("disabled")
 
     page.locator("#alert-rule-enabled-filter").select_option("false")
-    expect(page.locator("#admin-alert-rules-list")).to_contain_text("fd_count")
+    expect(page.locator("#admin-alert-rules-list")).to_contain_text("threshold.process.fd_count.file-descriptor-high")
 
     page.locator("#alert-rule-enabled-filter").select_option("true")
-    expect(page.locator("#admin-alert-rules-list")).not_to_contain_text("fd_count")
+    expect(page.locator("#admin-alert-rules-list")).not_to_contain_text("threshold.process.fd_count.file-descriptor-high")
     page.locator("#alert-rule-enabled-filter").select_option("")
 
     alertCard = page.locator("#admin-alerts-list .admin-item", has_text="agent.warning").first

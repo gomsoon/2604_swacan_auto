@@ -1412,6 +1412,47 @@ a {
     box-shadow: 0 0 0 3px rgba(10, 91, 145, 0.12);
 }
 
+.alert-rule-editor-panel {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+}
+
+.alert-rule-editor-panel h4,
+.alert-rule-editor-panel p,
+.alert-rule-editor-warning-list ul {
+    margin: 0;
+}
+
+.alert-rule-editor-pills {
+    flex-wrap: wrap;
+}
+
+.alert-rule-editor-warning-list {
+    display: grid;
+    gap: 6px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(141, 100, 0, 0.18);
+    background: var(--warning-soft);
+    color: var(--warning);
+}
+
+.alert-rule-editor-warning-list h4 {
+    font-size: 0.95rem;
+}
+
+.alert-rule-key-helper {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
 .admin-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

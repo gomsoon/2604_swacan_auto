@@ -435,7 +435,7 @@ def resolve_alert_instance(
 
 
 def serialize_alert_rule(row) -> dict[str, Any]:
-    return {
+    payload = {
         "id": row["id"],
         "rule_key": row["rule_key"],
         "display_name": row["display_name"],
@@ -456,6 +456,8 @@ def serialize_alert_rule(row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+    payload["publish_warnings"] = build_alert_rule_publish_warnings(payload)
+    return payload
 
 
 def fetch_alert_rule_row(rule_id: int):
