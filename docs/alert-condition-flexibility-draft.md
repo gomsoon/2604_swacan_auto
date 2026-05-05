@@ -225,6 +225,7 @@ threshold rule이 복잡해질수록, 운영자는 조건식 자체보다 “이
 - preview, alert list, admin UI에서는 `display_name`을 우선 보여준다.
 - `reason`은 판정 설명에 집중하고, rule 이름은 상위 문맥이나 catalog에서 보여주는 편이 적절하다.
 - `display_name`을 `reason` 문자열 안에 직접 박아 넣기보다, 응답에서는 분리하고 표시 단계에서 조합하는 편이 적절하다.
+- `display_name`은 표현 개선을 위해 수정할 수 있지만, rule의 의미 자체가 달라지는 경우는 rename보다 clone/new rule이 더 적절하다.
 
 즉 시스템은 `rule_key`로 기억하고, 운영자는 `display_name`으로 기억하는 구조가 가장 좋다.
 
@@ -240,6 +241,7 @@ threshold rule이 복잡해질수록, 운영자는 조건식 자체보다 “이
 - uniqueness는 전역 기준
 - 사용자가 직접 입력할 수 있어야 한다
 - 다만 UI는 `display_name`, `state_type`, `metric_key`를 바탕으로 자동 제안을 함께 제공하는 편이 좋다
+- deprecated 포함 전체 rule 집합에서 재사용하지 않는 것이 적절하다
 
 권장 포맷:
 
@@ -267,6 +269,19 @@ threshold rule이 복잡해질수록, 운영자는 조건식 자체보다 “이
 - `published` 이후에는 freeze하는 편이 적절하다
 - `display_name`은 운영 필요에 따라 rename 가능하되, `rule_key`는 장기 참조 키로 유지한다
 - 운영에 쓰이기 시작한 뒤 `rule_key`를 바꿔야 할 정도면, 기존 rule을 유지하고 새 rule을 clone/create 하는 흐름이 더 안전하다
+
+`display_name` rename 권장 기준:
+- 허용:
+  - 오탈자 수정
+  - 표현 개선
+  - 더 이해하기 쉬운 이름으로 변경
+- clone/new rule 권장:
+  - threshold 의미 변경
+  - selector 범위 변경
+  - `state_type` / `metric_key` 변경
+  - 운영 의도가 달라지는 경우
+
+즉 `display_name`은 바꿀 수 있지만, 의미 변경 수준이면 새 rule로 다루는 것이 적절하다.
 
 즉 `rule_key`는 “읽을 수 있는 immutable slug key”, `display_name`은 “운영자가 보는 이름”으로 분리하는 것이 적절하다.
 

@@ -33,6 +33,7 @@
 - `rule_key / display_name` 분리와 naming 정책 정리
 - `rule_key` format과 draft/published 이후 변경 정책 고정
 - `rule_key` 직접 입력 + 자동 제안 + 운영 이후 clone 흐름 정책 정리
+- `display_name` rename 허용 기준과 `rule_key` 전역 unique / 재사용 금지 정책 정리
 - `selector / signal / condition / aggregation / lifecycle policy` 모델 검토
 - 단순 metric threshold 외에 event, stale, no-data rule을 어떻게 단계적으로 도입할지 정리
 - rule preview / dry-run / validation 방향 정리

@@ -106,6 +106,8 @@
 - 하지만 archive/history는 당시 운영자가 보던 rule 이름을 유지하는 편이 자연스럽다.
 - 따라서 `source_rule_display_name_snapshot` 같은 snapshot 필드를 함께 보관할 가치가 있다.
 - 저장 시에도 `resolution_reason`이나 alert 설명 본문 안에 rule 이름을 매번 중복 삽입하기보다, 이름 snapshot과 판정/종료 사유를 분리해 보관하는 편이 더 적절하다.
+- `source_rule_key`는 전역 unique / 재사용 금지 전제를 유지하는 편이 좋다.
+- `display_name`이 이후 rename되더라도 archive는 당시 snapshot 이름을 유지하는 편이 적절하다.
 
 ### 3.3 `alert_action_log` (선택)
 
