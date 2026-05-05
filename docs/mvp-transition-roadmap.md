@@ -32,6 +32,8 @@
 중점 항목:
 - threshold rule의 한계 정리
 - `rule_key / display_name` 기반 rule identity / naming 정책 정리
+- 읽을 수 있는 `rule_key` format과 freeze 정책 고정
+- `rule_key` 직접 입력 + 자동 제안 + 운영 이후 clone 정책 정리
 - `selector / signal / condition / aggregation / lifecycle policy` 모델 검토
 - MVP에 포함할 rule 타입 범위 고정
 - validation / preview / dry-run 방향 정리

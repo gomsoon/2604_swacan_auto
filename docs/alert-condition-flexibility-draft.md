@@ -228,6 +228,48 @@ threshold rule이 복잡해질수록, 운영자는 조건식 자체보다 “이
 
 즉 시스템은 `rule_key`로 기억하고, 운영자는 `display_name`으로 기억하는 구조가 가장 좋다.
 
+#### 권장 `rule_key` format
+
+`rule_key`는 사람이 어느 정도 읽을 수 있으면서도, 시스템 기준으로 안정적으로 참조 가능한 키가 적절하다.
+
+권장 원칙:
+- 소문자 ASCII 사용
+- 공백 없음
+- 구분자는 `.` 또는 `-`
+- 생성 후에는 가능하면 고정
+- uniqueness는 전역 기준
+- 사용자가 직접 입력할 수 있어야 한다
+- 다만 UI는 `display_name`, `state_type`, `metric_key`를 바탕으로 자동 제안을 함께 제공하는 편이 좋다
+
+권장 포맷:
+
+- `threshold.<state_type>.<metric_key>.<slug>`
+
+예:
+- `threshold.process.cpu_usage.process-cpu-high`
+- `threshold.agent.outbox_queue_depth.agent-queue-high`
+- `threshold.host.memory_used_ratio.host-memory-high`
+
+이 포맷의 장점:
+- rule family가 드러난다
+- `state_type`과 `metric_key` 축이 드러난다
+- 마지막 slug에 운영 의미를 담을 수 있다
+- 이후 `event`, `stale`, `no-data` rule로 확장할 때도 일관성이 유지된다
+
+확장 예시:
+- `event.process.process_stopped.process-stop-burst`
+- `stale.agent.heartbeat.agent-heartbeat-missing`
+
+권장 정책:
+- `rule_key`는 생성 시 사용자가 직접 입력 가능
+- UI는 자동 제안을 제공하되, 최종 결정은 사용자가 한다
+- `rule_key`는 `draft` 상태에서만 수정 가능
+- `published` 이후에는 freeze하는 편이 적절하다
+- `display_name`은 운영 필요에 따라 rename 가능하되, `rule_key`는 장기 참조 키로 유지한다
+- 운영에 쓰이기 시작한 뒤 `rule_key`를 바꿔야 할 정도면, 기존 rule을 유지하고 새 rule을 clone/create 하는 흐름이 더 안전하다
+
+즉 `rule_key`는 “읽을 수 있는 immutable slug key”, `display_name`은 “운영자가 보는 이름”으로 분리하는 것이 적절하다.
+
 ### 4.2 현재 구조에서 이미 되는 것
 
 - 특정 object type 전체에 대한 metric threshold rule
