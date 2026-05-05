@@ -200,6 +200,33 @@ alert를 어떻게 유지/상향/해소할지 정한다.
 | `is_enabled` | rule metadata | rule 활성/비활성 | 개념 모델 핵심은 아니지만 계속 필요 |
 | `description` | rule metadata | 운영 설명 | 계속 필요 |
 
+### 4.1.1 Rule identity / naming 방향
+
+threshold rule이 복잡해질수록, 운영자는 조건식 자체보다 “이 rule이 무엇을 의미하는지”를 이름으로 기억하는 편이 더 자연스럽다.
+
+따라서 rule에는 다음 두 층의 식별자가 함께 있는 것이 적절하다.
+
+- 시스템 중심 식별자
+  - `rule_id`
+    - PK
+  - `rule_key`
+    - 안정적인 고유 키
+    - DB unique
+    - preview / history / archive / API ref에서 장기 참조용
+- 사용자 중심 식별자
+  - `display_name`
+    - 운영자가 UI와 메시지에서 읽는 이름
+  - `description`
+    - rule 의도 설명
+
+권장 원칙:
+- uniqueness는 `display_name`이 아니라 `rule_key`가 맡는다.
+- `display_name`은 rename 가능성이 있으므로 내부 안정 키로 쓰지 않는다.
+- preview, alert list, admin UI에서는 `display_name`을 우선 보여준다.
+- `reason`은 판정 설명에 집중하고, rule 이름은 상위 문맥이나 catalog에서 보여주는 편이 적절하다.
+
+즉 시스템은 `rule_key`로 기억하고, 운영자는 `display_name`으로 기억하는 구조가 가장 좋다.
+
 ### 4.2 현재 구조에서 이미 되는 것
 
 - 특정 object type 전체에 대한 metric threshold rule
@@ -741,6 +768,7 @@ preview 평가에 참여하는 candidate rule 목록을 top-level catalog로 제
   - `preview`
   - `existing`
 - `rule_id`
+- `display_name`
 - `scope_type`
 - `scope_target_label`
 - `state_type`
@@ -750,6 +778,16 @@ preview 평가에 참여하는 candidate rule 목록을 top-level catalog로 제
 - `critical_threshold`
 
 `rule_key`는 sample에서 rule을 참조하는 안정 키 역할을 한다.
+
+`display_name`은 운영자가 candidate rule을 이름으로 식별하도록 돕는다.
+
+권장 해석:
+- `rule_key`
+  - 시스템 중심 안정 키
+- `display_name`
+  - UI / preview / 메시지 중심 이름
+
+즉 catalog에서는 `rule_key`와 `display_name`을 함께 제공하는 것이 적절하다.
 
 MVP에서는 `state_type`, `metric_key`, `comparison` 같은 family 공통 필드를 catalog item마다 반복해서 넣는 것이 적절하다.
 
@@ -1077,6 +1115,7 @@ MVP에서는 `options.sample_limit` 정도만 두어도 충분하다.
       "rule_key": "preview",
       "kind": "preview",
       "rule_id": null,
+      "display_name": "Process CPU High Preview",
       "scope_type": "object_type",
       "scope_target_label": "SoftwareProcess",
       "state_type": "process",
@@ -1089,6 +1128,7 @@ MVP에서는 `options.sample_limit` 정도만 두어도 충분하다.
       "rule_key": "rule:17",
       "kind": "existing",
       "rule_id": 17,
+      "display_name": "Process CPU High",
       "scope_type": "monitored_object",
       "scope_target_label": "proc-a",
       "state_type": "process",
@@ -1436,6 +1476,8 @@ MVP에서 의도적으로 제외하는 범위:
 예시 방향:
 - 기존 필드 유지
 - 추가 필드:
+  - `rule_key`
+  - `display_name`
   - `selector_type`
   - `selector_json`
   - `signal_type`
@@ -1448,6 +1490,16 @@ MVP에서 의도적으로 제외하는 범위:
 초기에는:
 - 기존 필드를 우선 사용
 - 새 필드는 optional
+
+권장 역할:
+- `rule_key`
+  - unique
+  - 시스템 중심 안정 식별자
+- `display_name`
+  - 사용자 중심 이름
+  - alert UI / preview / 운영 메시지에서 우선 사용
+
+즉 `alert_rules` 확장 방향에서도 “고유 키”와 “운영자용 이름”을 분리하는 것이 적절하다.
 
 ### 9.2 또는 `alert_rules_v2` 분리
 
@@ -1472,6 +1524,7 @@ MVP에서 의도적으로 제외하는 범위:
 - validation
 - “이 rule이 현재 어떤 monitored object에 걸리는가” 설명
 - “현재 어떤 객체가 warning/critical이 되는가” dry-run 결과
+- 운영자가 rule을 이름으로 기억하고 추적할 수 있는 naming 체계
 
 즉 구현 순서는:
 

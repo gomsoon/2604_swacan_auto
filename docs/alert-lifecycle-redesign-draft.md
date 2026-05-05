@@ -87,6 +87,8 @@
 - `monitored_object_id`
 - `alert_code`
 - `source_rule_id`
+- `source_rule_key`
+- `source_rule_display_name_snapshot`
 - `opened_at`
 - `resolved_at`
 - `first_severity`
@@ -98,6 +100,11 @@
 - `resolution_reason`
 - `resolved_by_user_id`
 - `metadata_json`
+
+추가 고려:
+- current alert는 현재 rule row를 join해서 최신 `display_name`을 읽어도 된다.
+- 하지만 archive/history는 당시 운영자가 보던 rule 이름을 유지하는 편이 자연스럽다.
+- 따라서 `source_rule_display_name_snapshot` 같은 snapshot 필드를 함께 보관할 가치가 있다.
 
 ### 3.3 `alert_action_log` (선택)
 
@@ -128,6 +135,8 @@
 - `metric_value`
 - `message`
 - `source_rule_id`
+- `source_rule_key`
+- `source_rule_display_name_snapshot`
 
 이 테이블은 MVP 필수는 아니다.
 현재 MVP에서는 `alert_instances.repeat_count`와 `last_occurred_at`로도 운영 화면 목적을 충분히 달성할 수 있다.

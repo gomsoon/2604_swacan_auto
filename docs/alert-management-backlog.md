@@ -30,6 +30,7 @@
 - `monitored_object > object_type` 우선순위 / suppression 정책 정리
 - 단방향 scalar threshold 이후 `compound threshold(and/or + 양방향 범위)` 확장 검토
 - compound threshold는 저장 모델보다 `preview shape + evaluator + validation` 정규화부터 우선 검토
+- `rule_key / display_name` 분리와 naming 정책 정리
 - `selector / signal / condition / aggregation / lifecycle policy` 모델 검토
 - 단순 metric threshold 외에 event, stale, no-data rule을 어떻게 단계적으로 도입할지 정리
 - rule preview / dry-run / validation 방향 정리
@@ -44,6 +45,7 @@
 - `resolution_source / resolution_reason` 정교화
 - manual resolve / auto recovery / policy timeout / cleanup 기반 종료 구분
 - 필요 시 `alert_action_log` 검토
+- archive/history에서 `source_rule_display_name_snapshot` 유지 여부 검토
 - product 단계에서 `alert occurrence ledger` 분리 검토
   - 현재는 `repeat_count` 기반 한 줄 집계가 실용적
   - 이후 occurrence 통계 / noise 분석 / burst 분석 요구가 생기면 재검토
