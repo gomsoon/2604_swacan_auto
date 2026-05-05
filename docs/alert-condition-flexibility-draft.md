@@ -526,6 +526,29 @@ MVP에서 먼저 닫아야 하는 테스트는 이 정도가 적절하다.
 - selector / threshold payload validation 통과
 - threshold preview / preview API 수준의 semantic validation 통과
 
+`publish` 시 validation 결과 해석 권장:
+- `errors`
+  - publish 차단
+- `warnings`
+  - publish는 허용
+  - 응답과 UI에 그대로 노출하여 운영자가 확인 가능하게 함
+
+즉 MVP에서는 “위험한 rule은 막고, 다소 거친 rule은 알리고 진행”하는 균형이 적절하다.
+
+대표 예시:
+- `error`
+  - `rule_key` duplicate
+  - `rule_key` 형식 오류
+  - `display_name` empty
+  - threshold shape invalid
+  - compound condition unsatisfiable
+  - `critical_condition`이 `warning_condition`의 부분집합이 아님
+- `warning`
+  - single-severity rule
+  - redundant clause
+  - 더 단순한 조건으로 축약 가능한 compound threshold
+  - clone 직후 `display_name`에 ` (Copy)`가 남아 있음
+
 publish 후 정책:
 - `status = 'published'`
 - `rule_key` freeze
@@ -563,6 +586,21 @@ publish 후 정책:
 - `rule_key can be edited only while the rule is in draft`
 - `display_name can be edited only while the rule is in draft`
 - `published rule conditions cannot be edited; clone the rule to create a new draft`
+
+##### Publish response 방향
+
+`publish` 응답은 단순 status 전환 결과만이 아니라, 최종 validation 결과도 함께 포함하는 편이 적절하다.
+
+권장 shape:
+- `rule`
+- `validation.errors`
+- `validation.warnings`
+
+이렇게 하면 UI는
+- `errors`가 있으면 publish 차단
+- `warnings`만 있으면 publish 성공 + 경고 노출
+
+로 단순하게 해석할 수 있다.
 
 이 단계에서는 `leading_separator`, `trailing_separator`, `double_dot`처럼 지나치게 잘게 쪼갠 error code보다, 사용자가 바로 수정할 수 있는 수준의 설명형 message가 더 실용적이다.
 
