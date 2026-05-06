@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from app.db import get_db
+import sqlite3
+
+from app.db import (
+    ensure_alert_rule_lifecycle_schema,
+    get_db,
+    slugify_rule_key_part,
+    suggest_alert_rule_display_name,
+    suggest_threshold_rule_key,
+)
 
 
 def test_health_endpoint(client) -> None:
@@ -131,3 +139,92 @@ def test_init_db_cli_command(runner, app) -> None:
     assert counts["node_bindings_count"] >= 3
     assert counts["nodes_count"] >= 3
     assert counts["edges_count"] >= 1
+
+
+def test_rule_key_helpers_normalize_values() -> None:
+    assert slugify_rule_key_part(" Process CPU High ") == "process-cpu-high"
+    assert slugify_rule_key_part("CPU__High!!!") == "cpu-high"
+    assert suggest_threshold_rule_key("process", "cpu_usage", "Process CPU High") == (
+        "threshold.process.cpu_usage.process-cpu-high"
+    )
+    assert suggest_threshold_rule_key("process", "cpu_usage", "", rule_id=7) == (
+        "threshold.process.cpu_usage.legacy-7"
+    )
+    assert suggest_alert_rule_display_name(" Explicit Name ", "process", "cpu_usage") == "Explicit Name"
+    assert suggest_alert_rule_display_name(None, "process_group", "cpu_usage", rule_id=7) == (
+        "Legacy Process Group Cpu Usage Threshold 7"
+    )
+
+
+def test_ensure_alert_rule_lifecycle_schema_returns_when_table_is_missing() -> None:
+    db_conn = sqlite3.connect(":memory:")
+
+    ensure_alert_rule_lifecycle_schema(db_conn)
+
+    row = db_conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_alert_rules_rule_key'"
+    ).fetchone()
+    assert row is None
+
+
+def test_ensure_alert_rule_lifecycle_schema_adds_columns_and_backfills_existing_rows() -> None:
+    db_conn = sqlite3.connect(":memory:")
+    db_conn.row_factory = sqlite3.Row
+    db_conn.execute(
+        """
+        CREATE TABLE alert_rules (
+            id INTEGER PRIMARY KEY,
+            state_type TEXT NOT NULL,
+            metric_key TEXT NOT NULL,
+            description TEXT
+        )
+        """
+    )
+    db_conn.execute(
+        """
+        INSERT INTO alert_rules (id, state_type, metric_key, description)
+        VALUES (1, 'process', 'cpu_usage', 'Process CPU High')
+        """
+    )
+
+    ensure_alert_rule_lifecycle_schema(db_conn)
+
+    columns = {row["name"] for row in db_conn.execute("PRAGMA table_info(alert_rules)").fetchall()}
+    row = db_conn.execute("SELECT rule_key, display_name, status FROM alert_rules WHERE id = 1").fetchone()
+
+    assert {"rule_key", "display_name", "status"} <= columns
+    assert row["rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
+    assert row["display_name"] == "Process CPU High"
+    assert row["status"] == "published"
+
+
+def test_ensure_alert_rule_lifecycle_schema_rewrites_invalid_rule_key_to_legacy_key() -> None:
+    db_conn = sqlite3.connect(":memory:")
+    db_conn.row_factory = sqlite3.Row
+    db_conn.execute(
+        """
+        CREATE TABLE alert_rules (
+            id INTEGER PRIMARY KEY,
+            state_type TEXT NOT NULL,
+            metric_key TEXT NOT NULL,
+            description TEXT,
+            rule_key TEXT,
+            display_name TEXT,
+            status TEXT
+        )
+        """
+    )
+    db_conn.execute(
+        """
+        INSERT INTO alert_rules (id, state_type, metric_key, description, rule_key, display_name, status)
+        VALUES (2, 'agent', 'outbox_queue_depth', NULL, 'INVALID KEY', NULL, NULL)
+        """
+    )
+
+    ensure_alert_rule_lifecycle_schema(db_conn)
+
+    row = db_conn.execute("SELECT rule_key, display_name, status FROM alert_rules WHERE id = 2").fetchone()
+
+    assert row["rule_key"] == "threshold.agent.outbox_queue_depth.legacy-2"
+    assert row["display_name"] == "Legacy Agent Outbox Queue Depth Threshold 2"
+    assert row["status"] == "published"

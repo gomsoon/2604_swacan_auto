@@ -176,3 +176,53 @@ line coverage도 같은 방식으로 관리한다.
 - 작은 agent 계층만 보강해도 branch coverage가 꾸준히 올라간다.
 - 다만 전체 branch `80%`까지 가려면 다음 sprint부터는 큰 API 파일에 decision-table 기반 테스트를 붙여야 한다.
 - 다음 우선순위는 [view_version_editor_api.py](C:/2604_swacan_auto/app/view_version_editor_api.py), [views_api.py](C:/2604_swacan_auto/app/views_api.py), [editor_api.py](C:/2604_swacan_auto/app/editor_api.py) 순서가 적절하다.
+
+## 11. Sprint #2 결과
+
+두 번째 작은 coverage sprint에서는 helper 성격이 강한 app 모듈을 우선 보강했다.
+
+- [alert_archive.py](C:/2604_swacan_auto/app/alert_archive.py)
+- [metamodel_audit.py](C:/2604_swacan_auto/app/metamodel_audit.py)
+
+보강한 테스트 축:
+
+- invalid enum / invalid action branch
+- archive insert happy path
+- metadata JSON valid / invalid serialization
+- audit actor resolution (`g.user`)
+- `details_json` 유무에 따른 serialization branch
+
+결과:
+
+- 전체 회귀: `305 passed, 4 skipped`
+- line coverage: `87.51%` (`+0.11%p`)
+- branch coverage: `68.01%` (`+0.22%p`)
+
+관찰:
+
+- 작은 helper 모듈은 절대 상승폭은 크지 않지만, 저비용으로 branch를 꾸준히 올리는 데 유리하다.
+- 직접 API를 치기 전에 공통 helper와 serializer를 먼저 닫아두면 이후 대형 API 테스트의 부담이 줄어든다.
+
+## 12. Sprint #3 결과
+
+세 번째 작은 coverage sprint에서는 schema / naming helper 성격의 DB 유틸리티를 보강했다.
+
+- [db.py](C:/2604_swacan_auto/app/db.py)
+
+보강한 테스트 축:
+
+- `rule_key` / `display_name` helper normalization
+- `alert_rules` 테이블 부재 branch
+- lifecycle schema backfill branch
+- invalid legacy `rule_key` fallback branch
+
+결과:
+
+- 전체 회귀: `309 passed, 4 skipped`
+- line coverage: `87.67%` (`+0.16%p`)
+- branch coverage: `68.28%` (`+0.27%p`)
+
+관찰:
+
+- 작은 helper / schema 계층은 무리 없이 조금씩 coverage를 올리는 데 적합하다.
+- 이제부터 branch `80%`를 향해 의미 있게 올라가려면, 남은 큰 gap은 결국 [view_version_editor_api.py](C:/2604_swacan_auto/app/view_version_editor_api.py), [views_api.py](C:/2604_swacan_auto/app/views_api.py), [editor_api.py](C:/2604_swacan_auto/app/editor_api.py) 같은 큰 API 계층에서 메워야 한다.
