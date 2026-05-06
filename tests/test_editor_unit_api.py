@@ -1,4 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
+
+from werkzeug.security import generate_password_hash
+
+from app.db import get_db
 
 
 def login(client, username: str = "admin", password: str = "admin123!"):
@@ -10,6 +14,25 @@ def login(client, username: str = "admin", password: str = "admin123!"):
 
 def get_view_detail(client, view_id: int = 1):
     return client.get(f"/api/views/{view_id}").get_json()
+
+
+def seed_regular_user(app) -> None:
+    with app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO users (id, username, password_hash, role, metamodel_permission, is_active, created_at, updated_at)
+            VALUES (?, ?, ?, 'user', 'view', 1, ?, ?)
+            """,
+            (
+                2,
+                "viewer",
+                generate_password_hash("viewer123!"),
+                "2026-05-06T09:00:00.000+09:00",
+                "2026-05-06T09:00:00.000+09:00",
+            ),
+        )
+        db_conn.commit()
 
 
 def test_create_node_returns_backend_generated_id_and_revision(seeded_client) -> None:
@@ -44,6 +67,49 @@ def test_create_node_returns_backend_generated_id_and_revision(seeded_client) ->
     created = next(node for node in detail["nodes"] if node["id"] == payload["node"]["id"])
     assert created["display_name"] == "Worker Process"
     assert detail["view"]["revision"] == 2
+
+
+def test_create_node_returns_not_found_for_missing_view(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/views/999/nodes",
+        json={
+            "revision": 1,
+            "node_type": "SoftwareProcess",
+            "parent_node_id": 101,
+            "display_name": "Worker Process",
+            "x": 90,
+            "y": 170,
+            "width": 160,
+            "height": 56,
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.get_json()["error"]["code"] == "not_found"
+
+
+def test_create_node_returns_forbidden_for_foreign_view(seeded_app, seeded_client) -> None:
+    seed_regular_user(seeded_app)
+    login(seeded_client, username="viewer", password="viewer123!")
+
+    response = seeded_client.post(
+        "/api/views/1/nodes",
+        json={
+            "revision": 1,
+            "node_type": "SoftwareProcess",
+            "parent_node_id": 101,
+            "display_name": "Worker Process",
+            "x": 90,
+            "y": 170,
+            "width": 160,
+            "height": 56,
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.get_json()["error"]["code"] == "forbidden"
 
 
 def test_create_node_rejects_invalid_containment(seeded_client) -> None:
@@ -111,6 +177,21 @@ def test_update_node_updates_layout_and_revision(seeded_client) -> None:
     assert payload["revision"] == 2
 
 
+def test_update_node_rejects_unknown_field(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.patch(
+        "/api/views/1/nodes/102",
+        json={
+            "revision": 1,
+            "unexpected": True,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["message"] == "unknown fields: unexpected"
+
+
 def test_delete_node_removes_node_and_increments_revision(seeded_client) -> None:
     login(seeded_client)
 
@@ -127,6 +208,18 @@ def test_delete_node_removes_node_and_increments_revision(seeded_client) -> None
 
     detail = get_view_detail(seeded_client)
     assert all(node["id"] != 103 for node in detail["nodes"])
+
+
+def test_delete_node_returns_not_found_for_missing_node(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.delete(
+        "/api/views/1/nodes/999999",
+        json={"revision": 1},
+    )
+
+    assert response.status_code == 404
+    assert response.get_json()["error"]["code"] == "not_found"
 
 
 def test_create_edge_returns_backend_generated_id(seeded_client) -> None:
@@ -194,6 +287,21 @@ def test_update_edge_updates_label_and_control_points(seeded_client) -> None:
     assert payload["revision"] == 2
 
 
+def test_update_edge_rejects_unknown_field(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.patch(
+        "/api/views/1/edges/201",
+        json={
+            "revision": 1,
+            "unexpected": True,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["message"] == "unknown fields: unexpected"
+
+
 def test_delete_edge_removes_edge_and_increments_revision(seeded_client) -> None:
     login(seeded_client)
 
@@ -210,3 +318,15 @@ def test_delete_edge_removes_edge_and_increments_revision(seeded_client) -> None
 
     detail = get_view_detail(seeded_client)
     assert detail["edges"] == []
+
+
+def test_delete_edge_returns_not_found_for_missing_edge(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.delete(
+        "/api/views/1/edges/999999",
+        json={"revision": 1},
+    )
+
+    assert response.status_code == 404
+    assert response.get_json()["error"]["code"] == "not_found"

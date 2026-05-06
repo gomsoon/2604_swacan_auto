@@ -281,3 +281,32 @@ Observations:
 
 - [view_version_editor_api.py](C:/2604_swacan_auto/app/view_version_editor_api.py) improved to `84%` total coverage in the report.
 - The next natural target remains [editor_api.py](C:/2604_swacan_auto/app/editor_api.py), especially helper, permission, and validation matrix branches.
+
+## 15. Sprint #6 Result
+
+This sprint focused on [editor_api.py](C:/2604_swacan_auto/app/editor_api.py) using the same low-risk coverage style as the previous API sprints.
+
+Added tests in:
+
+- [test_editor_unit_api.py](C:/2604_swacan_auto/tests/test_editor_unit_api.py)
+- [test_editor_api_unit.py](C:/2604_swacan_auto/tests/test_editor_api_unit.py)
+
+Main branch targets:
+
+- view ownership `not_found` / `forbidden` route branches
+- update unknown-field branches for node and edge patch endpoints
+- delete not-found branches for node and edge delete endpoints
+- serializer optional payload branches
+- `next_layer_order`, `resolve_layer_order`, `require_revision` helper branches
+- `validate_nodes` and `validate_edges` decision-table branches
+
+Results:
+
+- full regression: `340 passed, 4 skipped`
+- line coverage: `90.65%`
+- branch coverage: `74.43%`
+
+Observations:
+
+- [editor_api.py](C:/2604_swacan_auto/app/editor_api.py) improved from `76%` to `89%` total coverage in the report.
+- The next high-value coverage target is likely [admin_api.py](C:/2604_swacan_auto/app/admin_api.py) or a focused slice of [agent_api.py](C:/2604_swacan_auto/app/agent_api.py), depending on whether we prefer API branch gain or smaller-module cleanup next.
