@@ -1,11 +1,34 @@
 from __future__ import annotations
 
+from werkzeug.security import generate_password_hash
+
+from app.db import get_db
+
 
 def login(client, username: str = "admin", password: str = "admin123!"):
     return client.post(
         "/api/auth/login",
         json={"username": username, "password": password},
     )
+
+
+def seed_regular_user(app) -> None:
+    with app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO users (id, username, password_hash, role, metamodel_permission, is_active, created_at, updated_at)
+            VALUES (?, ?, ?, 'user', 'view', 1, ?, ?)
+            """,
+            (
+                2,
+                "viewer",
+                generate_password_hash("viewer123!"),
+                "2026-05-06T09:00:00.000+09:00",
+                "2026-05-06T09:00:00.000+09:00",
+            ),
+        )
+        db_conn.commit()
 
 
 def test_login_success_returns_user(seeded_client) -> None:
@@ -80,6 +103,25 @@ def test_get_view_detail_returns_seed_nodes_and_edges(seeded_client) -> None:
     assert payload["edges"][0]["layer_order"] == 10
 
 
+def test_get_view_detail_returns_not_found_for_missing_view(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.get("/api/views/999")
+
+    assert response.status_code == 404
+    assert response.get_json()["error"]["code"] == "not_found"
+
+
+def test_get_view_detail_returns_forbidden_for_foreign_owned_view(seeded_app, seeded_client) -> None:
+    seed_regular_user(seeded_app)
+    login(seeded_client, username="viewer", password="viewer123!")
+
+    response = seeded_client.get("/api/views/1")
+
+    assert response.status_code == 403
+    assert response.get_json()["error"]["code"] == "forbidden"
+
+
 def test_create_view_creates_owned_view(seeded_client) -> None:
     login(seeded_client)
 
@@ -99,6 +141,18 @@ def test_create_view_creates_owned_view(seeded_client) -> None:
     list_response = seeded_client.get("/api/views")
     items = list_response.get_json()["items"]
     assert len(items) == 2
+
+
+def test_create_view_requires_name(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/views",
+        json={"description": "missing name"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
 
 
 def test_update_view_updates_revision_and_layout(seeded_client) -> None:
@@ -149,3 +203,42 @@ def test_update_view_rejects_revision_mismatch(seeded_client) -> None:
 
     assert response.status_code == 409
     assert response.get_json()["error"]["code"] == "revision_mismatch"
+
+
+def test_update_view_requires_revision_nodes_and_edges(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.put(
+        "/api/views/1",
+        json={"revision": 1, "nodes": []},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+
+
+def test_update_view_rejects_invalid_node_or_edge_shape(seeded_client) -> None:
+    login(seeded_client)
+    detail = seeded_client.get("/api/views/1").get_json()
+
+    bad_nodes_response = seeded_client.put(
+        "/api/views/1",
+        json={
+            "revision": detail["view"]["revision"],
+            "nodes": "bad",
+            "edges": detail["edges"],
+        },
+    )
+    bad_edges_response = seeded_client.put(
+        "/api/views/1",
+        json={
+            "revision": detail["view"]["revision"],
+            "nodes": detail["nodes"],
+            "edges": "bad",
+        },
+    )
+
+    assert bad_nodes_response.status_code == 400
+    assert bad_nodes_response.get_json()["error"]["message"] == "nodes must be a list"
+    assert bad_edges_response.status_code == 400
+    assert bad_edges_response.get_json()["error"]["message"] == "edges must be a list"

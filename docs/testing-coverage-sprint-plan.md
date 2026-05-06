@@ -226,3 +226,29 @@ line coverage도 같은 방식으로 관리한다.
 
 - 작은 helper / schema 계층은 무리 없이 조금씩 coverage를 올리는 데 적합하다.
 - 이제부터 branch `80%`를 향해 의미 있게 올라가려면, 남은 큰 gap은 결국 [view_version_editor_api.py](C:/2604_swacan_auto/app/view_version_editor_api.py), [views_api.py](C:/2604_swacan_auto/app/views_api.py), [editor_api.py](C:/2604_swacan_auto/app/editor_api.py) 같은 큰 API 계층에서 메워야 한다.
+
+## 13. Sprint #4 결과
+
+네 번째 coverage sprint에서는 큰 API 파일 중 [views_api.py](C:/2604_swacan_auto/app/views_api.py)를 집중적으로 보강했다.
+
+보강한 테스트 축:
+
+- view ownership / not-found permission branch
+- create / update endpoint validation branch
+- serializer optional field branch
+- `get_monitor_target_rows` fallback branch
+- `detect_view_runtime_changes` initial / unchanged branch
+- `validate_nodes` / `validate_edges` decision-table branch
+- SSE payload formatting helper
+
+결과:
+
+- 전체 회귀: `321 passed, 4 skipped`
+- line coverage: `88.47%` (`+0.80%p`)
+- branch coverage: `70.40%` (`+2.12%p`)
+
+관찰:
+
+- 이번 sprint로 branch `70%+` 1차 목표를 넘겼다.
+- 큰 API를 직접 공략하더라도, endpoint happy path보다 helper / validator / permission matrix를 decision-table로 메우는 방식이 훨씬 효율적이었다.
+- 다음 우선순위는 [view_version_editor_api.py](C:/2604_swacan_auto/app/view_version_editor_api.py), 그 다음 [editor_api.py](C:/2604_swacan_auto/app/editor_api.py)가 자연스럽다.
