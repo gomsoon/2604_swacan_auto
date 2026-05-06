@@ -197,6 +197,8 @@ let alertRules = [];
 let monitoredObjects = [];
 let selectedAlertRuleId = null;
 let selectedAlertRulePreview = null;
+let selectedAlertRuleSnapshot = null;
+let alertRuleDraftDirty = false;
 let groupedEvents = [];
 let selectedGroupedEventId = null;
 let selectedGroupedEvent = null;
@@ -2994,6 +2996,12 @@ function renderAlertRuleKeySuggestion() {
     alertRuleKeySuggestion.textContent = `추천 rule_key: ${suggested}`;
 }
 
+function handleAlertRuleFormInputChange() {
+    renderAlertRuleKeySuggestion();
+    refreshAlertRuleDraftDirtyState();
+    syncAlertRuleDirtyUiState();
+}
+
 function renderAlertRuleEditorStatus(rule = null) {
     if (!alertRuleEditorStatus) {
         return;
@@ -3030,6 +3038,15 @@ function renderAlertRuleEditorStatus(rule = null) {
                 </div>
             `
             : '<p class="section-copy">현재 publish 전 확인할 warning이 없습니다.</p>';
+    const dirtyBlock =
+        rule.status === "draft" && alertRuleDraftDirty
+            ? `
+                <div class="alert-rule-editor-warning-list">
+                    <h4>Unsaved draft changes</h4>
+                    <p class="section-copy">현재 form에 저장되지 않은 변경이 있습니다. 저장 후 publish 하세요.</p>
+                </div>
+            `
+            : "";
 
     alertRuleEditorStatus.innerHTML = `
         <p class="section-copy">${escapeHtml(statusMessage)}</p>
@@ -3037,8 +3054,10 @@ function renderAlertRuleEditorStatus(rule = null) {
             <span class="meta-pill">${escapeHtml(rule.status || "-")}</span>
             <span class="meta-pill">${rule.is_editable ? "editable" : "read-only"}</span>
             <span class="meta-pill">${rule.is_enabled ? "enabled" : "disabled"}</span>
+            ${rule.status === "draft" && alertRuleDraftDirty ? '<span class="meta-pill">unsaved changes</span>' : ""}
         </div>
         <p class="section-copy">${escapeHtml(toggleMessage)}</p>
+        ${dirtyBlock}
         ${warningBlock}
     `;
 }
@@ -3049,7 +3068,7 @@ function setAlertRuleActionButtonState(rule = null) {
     }
     if (publishCurrentAlertRuleButton) {
         publishCurrentAlertRuleButton.hidden = !rule || rule.status !== "draft";
-        publishCurrentAlertRuleButton.disabled = !rule || rule.status !== "draft";
+        publishCurrentAlertRuleButton.disabled = !rule || rule.status !== "draft" || alertRuleDraftDirty;
     }
     if (cloneCurrentAlertRuleButton) {
         cloneCurrentAlertRuleButton.hidden = !rule;
@@ -3091,6 +3110,68 @@ function setAlertRuleFormEditableState(rule = null) {
     toggleAlertRuleScopeFields();
 }
 
+function buildAlertRuleSnapshotFromRule(rule) {
+    return {
+        rule_key: rule?.rule_key || null,
+        display_name: rule?.display_name || null,
+        scope_type: rule?.scope_type || "object_type",
+        state_type: rule?.state_type || "process",
+        object_type: rule?.object_type || null,
+        monitored_object_id: rule?.monitored_object_id ?? null,
+        metric_key: rule?.metric_key || null,
+        comparison: rule?.comparison || "gte",
+        warning_threshold: rule?.warning_threshold ?? null,
+        critical_threshold: rule?.critical_threshold ?? null,
+        description: rule?.description || null,
+        is_enabled: Boolean(rule?.is_enabled),
+    };
+}
+
+function buildAlertRuleSnapshotFromForm() {
+    return {
+        rule_key: alertRuleRuleKeyInput.value.trim() || null,
+        display_name: alertRuleDisplayNameInput.value.trim() || null,
+        scope_type: alertRuleScopeTypeSelect.value,
+        state_type: alertRuleStateTypeSelect.value,
+        object_type: alertRuleObjectTypeInput.value.trim() || null,
+        monitored_object_id: toOptionalNumberValue(alertRuleMonitoredObjectIdInput.value),
+        metric_key: alertRuleMetricKeyInput.value.trim() || null,
+        comparison: alertRuleComparisonSelect.value,
+        warning_threshold: toOptionalNumberValue(alertRuleWarningThresholdInput.value),
+        critical_threshold: toOptionalNumberValue(alertRuleCriticalThresholdInput.value),
+        description: alertRuleDescriptionInput.value.trim() || null,
+        is_enabled: alertRuleEnabledInput.checked,
+    };
+}
+
+function normalizeAlertRuleSnapshot(snapshot) {
+    return JSON.stringify(snapshot || {});
+}
+
+function syncAlertRuleDirtyUiState() {
+    const ruleId = alertRuleIdInput.value ? Number(alertRuleIdInput.value) : null;
+    if (!ruleId) {
+        return;
+    }
+    const currentRule = alertRules.find((item) => Number(item.id) === Number(ruleId));
+    if (!currentRule) {
+        return;
+    }
+    setAlertRuleActionButtonState(currentRule);
+    renderAlertRuleEditorStatus(currentRule);
+}
+
+function refreshAlertRuleDraftDirtyState() {
+    const ruleId = alertRuleIdInput.value ? Number(alertRuleIdInput.value) : null;
+    const currentStatus = alertRuleForm?.dataset.ruleStatus || "draft";
+    if (!ruleId || currentStatus !== "draft" || !selectedAlertRuleSnapshot) {
+        alertRuleDraftDirty = false;
+        return;
+    }
+    alertRuleDraftDirty =
+        normalizeAlertRuleSnapshot(buildAlertRuleSnapshotFromForm()) !== normalizeAlertRuleSnapshot(selectedAlertRuleSnapshot);
+}
+
 function resetAlertRuleForm() {
     alertRuleForm.reset();
     alertRuleIdInput.value = "";
@@ -3104,6 +3185,8 @@ function resetAlertRuleForm() {
     alertRuleFormMode.textContent = "create";
     selectedAlertRuleId = null;
     selectedAlertRulePreview = null;
+    selectedAlertRuleSnapshot = null;
+    alertRuleDraftDirty = false;
     setAlertRuleFormEditableState(null);
     setAlertRuleActionButtonState(null);
     renderMonitoredObjectOptions();
@@ -3128,6 +3211,8 @@ function fillAlertRuleForm(rule) {
     alertRuleEnabledInput.checked = Boolean(rule.is_enabled);
     alertRuleFormTitle.textContent = `Alert Rule ${rule.is_editable ? "수정" : "보기"} #${rule.id}`;
     alertRuleFormMode.textContent = rule.status || "edit";
+    selectedAlertRuleSnapshot = buildAlertRuleSnapshotFromRule(rule);
+    alertRuleDraftDirty = false;
     setAlertRuleFormEditableState(rule);
     setAlertRuleActionButtonState(rule);
     renderAlertRuleEditorStatus(rule);
@@ -4200,6 +4285,10 @@ async function publishSelectedAlertRule() {
     if (!alertRuleIdInput.value) {
         return;
     }
+    if (alertRuleDraftDirty) {
+        showBanner("저장되지 않은 draft 변경이 있습니다. 먼저 저장한 뒤 publish 하세요.", "error");
+        return;
+    }
     const payload = await publishAlertRule(Number(alertRuleIdInput.value));
     await Promise.all([loadAlertRules(), loadSummary()]);
     if (payload?.rule) {
@@ -4338,18 +4427,24 @@ alertRuleScopeFilter?.addEventListener("change", loadAlertRules);
 alertRuleStateFilter?.addEventListener("change", loadAlertRules);
 alertRuleEnabledFilter?.addEventListener("change", loadAlertRules);
 alertRuleObjectTypeFilter?.addEventListener("change", loadAlertRules);
-alertRuleDisplayNameInput?.addEventListener("input", renderAlertRuleKeySuggestion);
-alertRuleRuleKeyInput?.addEventListener("input", renderAlertRuleKeySuggestion);
-alertRuleMetricKeyInput?.addEventListener("input", renderAlertRuleKeySuggestion);
-alertRuleStateTypeSelect?.addEventListener("change", renderAlertRuleKeySuggestion);
-alertRuleDescriptionInput?.addEventListener("input", renderAlertRuleKeySuggestion);
+alertRuleDisplayNameInput?.addEventListener("input", handleAlertRuleFormInputChange);
+alertRuleRuleKeyInput?.addEventListener("input", handleAlertRuleFormInputChange);
+alertRuleMetricKeyInput?.addEventListener("input", handleAlertRuleFormInputChange);
+alertRuleStateTypeSelect?.addEventListener("change", handleAlertRuleFormInputChange);
+alertRuleDescriptionInput?.addEventListener("input", handleAlertRuleFormInputChange);
+alertRuleWarningThresholdInput?.addEventListener("input", handleAlertRuleFormInputChange);
+alertRuleCriticalThresholdInput?.addEventListener("input", handleAlertRuleFormInputChange);
+alertRuleComparisonSelect?.addEventListener("change", handleAlertRuleFormInputChange);
+alertRuleObjectTypeInput?.addEventListener("input", handleAlertRuleFormInputChange);
+alertRuleMonitoredObjectIdInput?.addEventListener("change", handleAlertRuleFormInputChange);
+alertRuleEnabledInput?.addEventListener("change", handleAlertRuleFormInputChange);
 alertRuleApplySuggestionButton?.addEventListener("click", () => {
     const suggested = suggestAlertRuleKeyFromForm();
     if (!suggested) {
         return;
     }
     alertRuleRuleKeyInput.value = suggested;
-    renderAlertRuleKeySuggestion();
+    handleAlertRuleFormInputChange();
 });
 alertStatusFilter?.addEventListener("change", loadAlerts);
 alertAckFilter?.addEventListener("change", loadAlerts);
@@ -4517,7 +4612,10 @@ previewCurrentAlertRuleButton?.addEventListener("click", () => {
 cloneCurrentAlertRuleButton?.addEventListener("click", () => {
     cloneSelectedAlertRule().catch((error) => showBanner(error.message, "error"));
 });
-alertRuleScopeTypeSelect?.addEventListener("change", toggleAlertRuleScopeFields);
+alertRuleScopeTypeSelect?.addEventListener("change", () => {
+    toggleAlertRuleScopeFields();
+    handleAlertRuleFormInputChange();
+});
 metamodelVersionsList?.addEventListener("click", async (event) => {
     const validateButton = event.target instanceof HTMLElement ? event.target.closest(".validate-metamodel-button") : null;
     if (validateButton) {

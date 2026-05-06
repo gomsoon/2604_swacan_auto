@@ -855,8 +855,12 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     expect(createdRule).to_contain_text("critical=100")
 
     createdRule.get_by_role("button", name="수정").click()
+    expect(page.locator("#publish-current-alert-rule-button")).to_be_visible()
     page.locator("#alert-rule-critical-threshold").fill("120")
+    expect(page.locator("#alert-rule-editor-status")).to_contain_text("unsaved changes")
+    expect(page.locator("#publish-current-alert-rule-button")).to_be_disabled()
     page.locator("#save-alert-rule-button").click()
+    expect(page.locator("#publish-current-alert-rule-button")).not_to_be_disabled()
 
     expect(page.locator(".admin-item", has_text="threshold.process.fd_count.file-descriptor-high").first).to_contain_text("critical=120")
     createdRule = page.locator(".admin-item", has_text="threshold.process.fd_count.file-descriptor-high").first
