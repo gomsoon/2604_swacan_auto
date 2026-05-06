@@ -775,12 +775,8 @@ def build_alert_rule_target_preview(rule: dict[str, Any], *, limit: int) -> tupl
         if not isinstance(state, dict):
             state = {}
         current_metric_value = preview_metric_value(state, rule["metric_key"])
-        threshold_level = preview_threshold_level(
-            current_metric_value,
-            rule["comparison"],
-            rule["warning_threshold"],
-            rule["critical_threshold"],
-        )
+        threshold_evaluation = preview_threshold_evaluation(current_metric_value, rule)
+        threshold_level = threshold_evaluation["threshold_level"]
         if current_metric_value is not None:
             metric_available_count += 1
         if threshold_level == "critical":
@@ -805,6 +801,7 @@ def build_alert_rule_target_preview(rule: dict[str, Any], *, limit: int) -> tupl
                 "latest_received_at": preview_row["latest_received_at"],
                 "current_metric_value": current_metric_value,
                 "threshold_level": threshold_level,
+                "winning_condition_trace": threshold_evaluation["winning_condition_trace"],
             }
         )
 
@@ -878,25 +875,122 @@ def preview_metric_value(state: dict[str, Any], metric_key: str) -> float | None
         return None
 
 
+def preview_threshold_clause_matches(metric_value: float, clause: dict[str, Any]) -> bool:
+    comparison = clause["comparison"]
+    threshold = float(clause["value"])
+    if comparison == "gt":
+        return metric_value > threshold
+    if comparison == "gte":
+        return metric_value >= threshold
+    if comparison == "lt":
+        return metric_value < threshold
+    return metric_value <= threshold
+
+
+def evaluate_preview_condition_group(
+    metric_value: float | None,
+    *,
+    condition_mode: str,
+    condition_group: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if metric_value is None or not isinstance(condition_group, dict):
+        return None
+
+    raw_clauses = condition_group.get("clauses")
+    if not isinstance(raw_clauses, list) or not raw_clauses:
+        return None
+
+    clauses = [normalize_alert_rule_condition_clause(raw_clause) for raw_clause in raw_clauses]
+    clauses = [clause for clause in clauses if clause is not None]
+    if not clauses:
+        return None
+
+    logical_operator = condition_group.get("logical_operator") if len(clauses) > 1 else None
+    matched_clause_indexes = [
+        index
+        for index, clause in enumerate(clauses)
+        if preview_threshold_clause_matches(metric_value, clause)
+    ]
+
+    if logical_operator == "and":
+        if len(matched_clause_indexes) != len(clauses):
+            return None
+    elif logical_operator == "or":
+        if not matched_clause_indexes:
+            return None
+    else:
+        if not matched_clause_indexes:
+            return None
+        matched_clause_indexes = [matched_clause_indexes[0]]
+        logical_operator = None
+
+    return {
+        "condition_mode": condition_mode,
+        "logical_operator": logical_operator,
+        "matched_clause_indexes": matched_clause_indexes,
+    }
+
+
+def preview_threshold_evaluation(metric_value: float | None, rule: dict[str, Any]) -> dict[str, Any]:
+    if metric_value is None:
+        return {"threshold_level": "unknown", "winning_condition_trace": None}
+
+    condition_mode = rule.get("condition_mode") or "scalar"
+    critical_trace = evaluate_preview_condition_group(
+        metric_value,
+        condition_mode=condition_mode,
+        condition_group=rule.get("critical_condition"),
+    )
+    if critical_trace is not None:
+        return {
+            "threshold_level": "critical",
+            "winning_condition_trace": {
+                "severity": "critical",
+                **critical_trace,
+            },
+        }
+
+    warning_trace = evaluate_preview_condition_group(
+        metric_value,
+        condition_mode=condition_mode,
+        condition_group=rule.get("warning_condition"),
+    )
+    if warning_trace is not None:
+        return {
+            "threshold_level": "warning",
+            "winning_condition_trace": {
+                "severity": "warning",
+                **warning_trace,
+            },
+        }
+
+    return {"threshold_level": "normal", "winning_condition_trace": None}
+
+
 def preview_threshold_level(
     metric_value: float | None,
     comparison: str,
     warning_threshold: float | None,
     critical_threshold: float | None,
 ) -> str:
-    if metric_value is None:
-        return "unknown"
-
-    def matches(value: float, threshold: float | None) -> bool:
-        if threshold is None:
-            return False
-        return value >= threshold if comparison == "gte" else value <= threshold
-
-    if matches(metric_value, critical_threshold):
-        return "critical"
-    if matches(metric_value, warning_threshold):
-        return "warning"
-    return "normal"
+    return preview_threshold_evaluation(
+        metric_value,
+        {
+            "condition_mode": "scalar",
+            "warning_condition": normalize_alert_rule_condition_group(
+                None,
+                condition_mode="scalar",
+                fallback_comparison=comparison,
+                fallback_threshold=warning_threshold,
+            ),
+            "critical_condition": normalize_alert_rule_condition_group(
+                None,
+                condition_mode="scalar",
+                fallback_comparison=comparison,
+                fallback_threshold=critical_threshold,
+            ),
+        },
+    )["threshold_level"]
 
 
 def parse_optional_float(value) -> float | None:

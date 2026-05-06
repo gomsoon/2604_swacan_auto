@@ -3379,6 +3379,27 @@ function getAlertRuleThresholdLevelLabel(level) {
     return "metric 없음";
 }
 
+function formatAlertRuleWinningConditionTrace(trace) {
+    if (!trace) {
+        return null;
+    }
+    const severity = String(trace.severity || "-");
+    const operatorLabel = trace.logical_operator ? String(trace.logical_operator).toUpperCase() : "scalar";
+    const clauseIndexes = Array.isArray(trace.matched_clause_indexes)
+        ? trace.matched_clause_indexes
+              .map((value) => Number(value))
+              .filter((value) => Number.isFinite(value))
+              .map((value) => value + 1)
+        : [];
+    const clauseLabel =
+        clauseIndexes.length === 0
+            ? "matched"
+            : clauseIndexes.length === 1
+              ? `clause ${clauseIndexes[0]} matched`
+              : `clauses ${clauseIndexes.join(", ")} matched`;
+    return `${severity} / ${operatorLabel} / ${clauseLabel}`;
+}
+
 function buildAlertRulePublishNotice(validation = null) {
     const warningCount = Array.isArray(validation?.warnings) ? validation.warnings.length : 0;
     return warningCount
@@ -3691,6 +3712,11 @@ function renderAlertRulePreviewPanel() {
                             <p class="admin-meta">active view ${escapeHtml(item.active_view_count)} | active node ${escapeHtml(item.active_node_count)}</p>
                             <p class="admin-meta">latest state ${escapeHtml(item.latest_state_status || "-")} | latest severity ${escapeHtml(item.latest_state_severity || "-")} | 수신 ${escapeHtml(formatTimestamp(item.latest_received_at))}</p>
                             <p class="admin-meta">현재 metric ${escapeHtml(rule.metric_key)}=${escapeHtml(item.current_metric_value ?? "-")}</p>
+                            ${
+                                formatAlertRuleWinningConditionTrace(item.winning_condition_trace)
+                                    ? `<p class="admin-meta">판정 trace ${escapeHtml(formatAlertRuleWinningConditionTrace(item.winning_condition_trace))}</p>`
+                                    : ""
+                            }
                         </article>
                     `
                 )

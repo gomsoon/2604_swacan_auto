@@ -1148,6 +1148,7 @@ def test_admin_alert_rule_targets_preview_returns_matching_objects(seeded_client
     assert payload["items"][0]["active_node_count"] == 1
     assert payload["items"][0]["current_metric_value"] is None
     assert payload["items"][0]["threshold_level"] == "unknown"
+    assert payload["items"][0]["winning_condition_trace"] is None
 
 
 def test_admin_alert_rule_targets_preview_includes_current_alert_impact(seeded_app, seeded_client) -> None:
@@ -1208,6 +1209,12 @@ def test_admin_alert_rule_targets_preview_includes_current_alert_impact(seeded_a
     assert payload["summary"]["critical_match_count"] == 0
     assert payload["items"][0]["current_metric_value"] == 88.0
     assert payload["items"][0]["threshold_level"] == "warning"
+    assert payload["items"][0]["winning_condition_trace"] == {
+        "severity": "warning",
+        "condition_mode": "scalar",
+        "logical_operator": None,
+        "matched_clause_indexes": [0],
+    }
     assert payload["items"][0]["source_rule_open_alert_count"] == 1
 
 
@@ -1329,6 +1336,146 @@ def test_admin_alert_rule_preview_normalizes_compound_condition_shape(seeded_cli
         ],
     }
     assert payload["summary"]["matched_object_count"] == 1
+
+
+def test_admin_alert_rule_preview_returns_compound_or_winning_trace(seeded_app, seeded_client) -> None:
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO latest_states (
+                view_node_id, monitored_object_id, target_id, state_type, status, severity,
+                state_json, occurred_at, received_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                102,
+                1302,
+                "app_main",
+                "process",
+                "critical",
+                "critical",
+                json.dumps({"cpu_usage": 97.0}),
+                "2026-04-12T11:15:00.000+09:00",
+                "2026-04-12T11:15:00.100+09:00",
+                "2026-04-12T11:15:00.100+09:00",
+            ),
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/alert-rules/preview?limit=20",
+        json={
+            "status": "draft",
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "cpu_usage",
+            "comparison": "gte",
+            "warning_threshold": 80,
+            "critical_threshold": 95,
+            "display_name": "Preview CPU Band",
+            "rule_key": "threshold.process.cpu_usage.preview-cpu-band",
+            "is_enabled": True,
+            "condition_mode": "compound",
+            "warning_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "lte", "value": 20},
+                    {"comparison": "gte", "value": 80},
+                ],
+            },
+            "critical_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "lte", "value": 10},
+                    {"comparison": "gte", "value": 90},
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["validation"]["errors"] == []
+    assert payload["summary"]["warning_match_count"] == 1
+    assert payload["summary"]["critical_match_count"] == 1
+    assert payload["items"][0]["current_metric_value"] == 97.0
+    assert payload["items"][0]["threshold_level"] == "critical"
+    assert payload["items"][0]["winning_condition_trace"] == {
+        "severity": "critical",
+        "condition_mode": "compound",
+        "logical_operator": "or",
+        "matched_clause_indexes": [1],
+    }
+
+
+def test_admin_alert_rule_preview_returns_compound_and_winning_trace(seeded_app, seeded_client) -> None:
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO latest_states (
+                view_node_id, monitored_object_id, target_id, state_type, status, severity,
+                state_json, occurred_at, received_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                102,
+                1302,
+                "app_main",
+                "process",
+                "warning",
+                "warning",
+                json.dumps({"cpu_usage": 52.0}),
+                "2026-04-12T11:16:00.000+09:00",
+                "2026-04-12T11:16:00.100+09:00",
+                "2026-04-12T11:16:00.100+09:00",
+            ),
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/alert-rules/preview?limit=20",
+        json={
+            "status": "draft",
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "cpu_usage",
+            "comparison": "gte",
+            "warning_threshold": 40,
+            "critical_threshold": None,
+            "display_name": "Preview CPU Window",
+            "rule_key": "threshold.process.cpu_usage.preview-cpu-window",
+            "is_enabled": True,
+            "condition_mode": "compound",
+            "warning_condition": {
+                "logical_operator": "and",
+                "clauses": [
+                    {"comparison": "gte", "value": 40},
+                    {"comparison": "lte", "value": 60},
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["validation"]["errors"] == []
+    assert {"message": "This rule only emits a single severity level."} in payload["validation"]["warnings"]
+    assert payload["summary"]["warning_match_count"] == 1
+    assert payload["summary"]["critical_match_count"] == 0
+    assert payload["items"][0]["current_metric_value"] == 52.0
+    assert payload["items"][0]["threshold_level"] == "warning"
+    assert payload["items"][0]["winning_condition_trace"] == {
+        "severity": "warning",
+        "condition_mode": "compound",
+        "logical_operator": "and",
+        "matched_clause_indexes": [0, 1],
+    }
 
 
 def test_admin_alert_rule_preview_rejects_invalid_compound_shape_without_failing_request(seeded_client) -> None:
