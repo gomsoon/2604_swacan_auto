@@ -1458,6 +1458,32 @@ a {
     gap: 10px;
 }
 
+.alert-rule-preview-notice {
+    display: grid;
+    gap: 6px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: var(--panel-strong);
+}
+
+.alert-rule-preview-notice h4,
+.alert-rule-preview-notice p {
+    margin: 0;
+}
+
+.alert-rule-preview-notice.is-warning {
+    border-color: rgba(141, 100, 0, 0.18);
+    background: var(--warning-soft);
+    color: var(--warning);
+}
+
+.alert-rule-preview-notice.is-success {
+    border-color: rgba(28, 112, 67, 0.18);
+    background: rgba(236, 248, 241, 0.92);
+    color: #1c7043;
+}
+
 .alert-rule-preview-validation-group {
     display: grid;
     gap: 6px;

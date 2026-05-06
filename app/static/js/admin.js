@@ -197,6 +197,7 @@ let alertRules = [];
 let monitoredObjects = [];
 let selectedAlertRuleId = null;
 let selectedAlertRulePreview = null;
+let selectedAlertRulePreviewNotice = null;
 let selectedAlertRuleSnapshot = null;
 let alertRuleDraftDirty = false;
 let groupedEvents = [];
@@ -3012,7 +3013,7 @@ function renderAlertRuleEditorStatus(rule = null) {
             <p class="section-copy">새 draft rule을 생성하는 모드입니다. rule_key와 display_name은 비워둘 수 있고, 저장 시 기본값이 자동 제안됩니다.</p>
             <div class="toolbar-inline">
                 <span class="meta-pill">draft</span>
-                <span class="meta-pill">editable</span>
+                <span class="meta-pill">편집 가능</span>
             </div>
         `;
         return;
@@ -3031,7 +3032,7 @@ function renderAlertRuleEditorStatus(rule = null) {
         warnings.length > 0
             ? `
                 <div class="alert-rule-editor-warning-list">
-                    <h4>Publish warning</h4>
+                    <h4>Publish 경고</h4>
                     <ul>
                         ${warnings.map((item) => `<li>${escapeHtml(item.message)}</li>`).join("")}
                     </ul>
@@ -3042,7 +3043,7 @@ function renderAlertRuleEditorStatus(rule = null) {
         rule.status === "draft" && alertRuleDraftDirty
             ? `
                 <div class="alert-rule-editor-warning-list">
-                    <h4>Unsaved draft changes</h4>
+                    <h4>미저장 draft 변경</h4>
                     <p class="section-copy">현재 form에 저장되지 않은 변경이 있습니다. 저장 후 publish 하세요.</p>
                 </div>
             `
@@ -3052,9 +3053,9 @@ function renderAlertRuleEditorStatus(rule = null) {
         <p class="section-copy">${escapeHtml(statusMessage)}</p>
         <div class="toolbar-inline alert-rule-editor-pills">
             <span class="meta-pill">${escapeHtml(rule.status || "-")}</span>
-            <span class="meta-pill">${rule.is_editable ? "editable" : "read-only"}</span>
-            <span class="meta-pill">${rule.is_enabled ? "enabled" : "disabled"}</span>
-            ${rule.status === "draft" && alertRuleDraftDirty ? '<span class="meta-pill">unsaved changes</span>' : ""}
+            <span class="meta-pill">${rule.is_editable ? "편집 가능" : "읽기 전용"}</span>
+            <span class="meta-pill">${rule.is_enabled ? "활성" : "비활성"}</span>
+            ${rule.status === "draft" && alertRuleDraftDirty ? '<span class="meta-pill">미저장 변경</span>' : ""}
         </div>
         <p class="section-copy">${escapeHtml(toggleMessage)}</p>
         ${dirtyBlock}
@@ -3185,6 +3186,7 @@ function resetAlertRuleForm() {
     alertRuleFormMode.textContent = "create";
     selectedAlertRuleId = null;
     selectedAlertRulePreview = null;
+    selectedAlertRulePreviewNotice = null;
     selectedAlertRuleSnapshot = null;
     alertRuleDraftDirty = false;
     setAlertRuleFormEditableState(null);
@@ -3240,10 +3242,10 @@ function renderAlertRules(items) {
                         </div>
                         <div class="toolbar-inline">
                             <span class="meta-pill">${escapeHtml(rule.status || "-")}</span>
-                            <span class="meta-pill">${rule.is_enabled ? "enabled" : "disabled"}</span>
+                            <span class="meta-pill">${rule.is_enabled ? "활성" : "비활성"}</span>
                             ${
                                 Array.isArray(rule.publish_warnings) && rule.publish_warnings.length
-                                    ? `<span class="meta-pill">${escapeHtml(`warning ${rule.publish_warnings.length}건`)}</span>`
+                                    ? `<span class="meta-pill">${escapeHtml(`경고 ${rule.publish_warnings.length}건`)}</span>`
                                     : ""
                             }
                             <button class="button ghost small preview-alert-rule-button" type="button" data-rule-id="${escapeHtml(rule.id)}">미리보기</button>
@@ -3260,6 +3262,45 @@ function renderAlertRules(items) {
             `
         )
         .join("");
+}
+
+function getAlertRulePreviewSourceLabel(source) {
+    return source === "draft_preview" ? "현재 입력 기준" : "저장된 rule 기준";
+}
+
+function getAlertRuleThresholdLevelLabel(level) {
+    if (level === "critical") {
+        return "critical";
+    }
+    if (level === "warning") {
+        return "warning";
+    }
+    if (level === "normal") {
+        return "normal";
+    }
+    return "metric 없음";
+}
+
+function buildAlertRulePublishNotice(validation = null) {
+    const warningCount = Array.isArray(validation?.warnings) ? validation.warnings.length : 0;
+    return warningCount
+        ? {
+              tone: "warning",
+              title: "Publish 완료",
+              message: `rule을 publish했고, 확인할 경고가 ${warningCount}건 남아 있습니다.`,
+          }
+        : {
+              tone: "success",
+              title: "Publish 완료",
+              message: "rule을 publish했습니다. 현재 상태와 적용 대상을 바로 확인할 수 있습니다.",
+          };
+}
+
+function buildAlertRulePublishBannerMessage(validation = null) {
+    const warningCount = Array.isArray(validation?.warnings) ? validation.warnings.length : 0;
+    return warningCount
+        ? `alert rule을 publish했습니다. 경고 ${warningCount}건을 함께 확인하세요.`
+        : "alert rule을 publish했습니다.";
 }
 
 function buildAlertRulePreviewRequestBody() {
@@ -3287,16 +3328,16 @@ function renderAlertRuleValidationBlock(validation) {
 
     const emptyMessage =
         errors.length === 0 && warnings.length === 0
-            ? '<p class="section-copy">현재 preview 기준 validation error/warning이 없습니다.</p>'
+            ? '<p class="section-copy">현재 기준으로 검증 오류나 publish 경고가 없습니다.</p>'
             : "";
 
     return `
         <section class="alert-rule-preview-validation">
             <div class="section-header">
-                <h4>Validation</h4>
+                <h4>검증 결과</h4>
                 <div class="toolbar-inline">
-                    <span class="meta-pill">error ${escapeHtml(errors.length)}</span>
-                    <span class="meta-pill">warning ${escapeHtml(warnings.length)}</span>
+                    <span class="meta-pill">오류 ${escapeHtml(errors.length)}건</span>
+                    <span class="meta-pill">경고 ${escapeHtml(warnings.length)}건</span>
                 </div>
             </div>
             ${emptyMessage}
@@ -3304,7 +3345,7 @@ function renderAlertRuleValidationBlock(validation) {
                 errors.length > 0
                     ? `
                         <div class="alert-rule-preview-validation-group is-error">
-                            <h5>Errors</h5>
+                            <h5>오류</h5>
                             <ul>
                                 ${errors.map((item) => `<li>${escapeHtml(item.message || item)}</li>`).join("")}
                             </ul>
@@ -3316,7 +3357,7 @@ function renderAlertRuleValidationBlock(validation) {
                 warnings.length > 0
                     ? `
                         <div class="alert-rule-preview-validation-group is-warning">
-                            <h5>Warnings</h5>
+                            <h5>경고</h5>
                             <ul>
                                 ${warnings.map((item) => `<li>${escapeHtml(item.message || item)}</li>`).join("")}
                             </ul>
@@ -3328,15 +3369,27 @@ function renderAlertRuleValidationBlock(validation) {
     `;
 }
 
+function renderAlertRulePreviewNoticeBlock() {
+    if (!selectedAlertRulePreviewNotice) {
+        return "";
+    }
+    return `
+        <section class="alert-rule-preview-notice ${selectedAlertRulePreviewNotice.tone === "warning" ? "is-warning" : "is-success"}">
+            <h4>${escapeHtml(selectedAlertRulePreviewNotice.title)}</h4>
+            <p>${escapeHtml(selectedAlertRulePreviewNotice.message)}</p>
+        </section>
+    `;
+}
+
 function renderAlertRulePreviewPanel() {
     if (!selectedAlertRulePreview) {
-        alertRulePreviewPanel.innerHTML = '<p class="section-copy">rule의 적용 대상을 확인하려면 미리보기를 선택하세요.</p>';
+        alertRulePreviewPanel.innerHTML = '<p class="section-copy">저장된 rule 또는 현재 form 입력값의 적용 대상과 검증 결과를 보려면 미리보기를 실행하세요.</p>';
         return;
     }
 
     const { rule, summary, items, validation, preview_source: previewSource } = selectedAlertRulePreview;
     const errors = Array.isArray(validation?.errors) ? validation.errors : [];
-    const previewSourceLabel = previewSource === "draft_preview" ? "draft preview" : "saved rule";
+    const previewSourceLabel = getAlertRulePreviewSourceLabel(previewSource);
     const header = `
         <div class="section-header">
             <h3>${escapeHtml(rule.display_name || rule.metric_key)}</h3>
@@ -3346,29 +3399,30 @@ function renderAlertRulePreviewPanel() {
                 <span class="meta-pill">${escapeHtml(rule.status || "-")}</span>
                 <span class="meta-pill">${escapeHtml(rule.scope_type)}</span>
                 <span class="meta-pill">${escapeHtml(rule.state_type)}</span>
-                <span class="meta-pill">${rule.is_enabled ? "enabled" : "disabled"}</span>
+                <span class="meta-pill">${rule.is_enabled ? "활성" : "비활성"}</span>
                 ${
                     Array.isArray(rule.publish_warnings) && rule.publish_warnings.length
-                        ? `<span class="meta-pill">${escapeHtml(`warning ${rule.publish_warnings.length}건`)}</span>`
+                        ? `<span class="meta-pill">${escapeHtml(`경고 ${rule.publish_warnings.length}건`)}</span>`
                         : ""
                 }
             </div>
         </div>
         <p class="admin-meta">warning=${escapeHtml(rule.warning_threshold ?? "-")} | critical=${escapeHtml(rule.critical_threshold ?? "-")} | comparison=${escapeHtml(rule.comparison)}</p>
     `;
+    const noticeBlock = renderAlertRulePreviewNoticeBlock();
     const validationBlock = renderAlertRuleValidationBlock(validation);
 
     const summaryBlock = `
         <div class="summary-metrics">
             ${renderMetaPills([
-                ["matched object", summary?.matched_object_count ?? 0],
+                ["매칭 객체", summary?.matched_object_count ?? 0],
                 ["active view", summary?.active_view_count ?? 0],
                 ["active node", summary?.active_node_count ?? 0],
-                ["active alert", summary?.open_alert_count ?? 0],
-                ["rule alert", summary?.source_rule_open_alert_count ?? 0],
-                ["metric available", summary?.metric_available_count ?? 0],
-                ["warning match", summary?.warning_match_count ?? 0],
-                ["critical match", summary?.critical_match_count ?? 0],
+                ["열린 alert", summary?.open_alert_count ?? 0],
+                ["이 rule alert", summary?.source_rule_open_alert_count ?? 0],
+                ["metric 확인 가능", summary?.metric_available_count ?? 0],
+                ["warning 매칭", summary?.warning_match_count ?? 0],
+                ["critical 매칭", summary?.critical_match_count ?? 0],
             ])}
         </div>
     `;
@@ -3376,8 +3430,9 @@ function renderAlertRulePreviewPanel() {
     if (errors.length > 0) {
         alertRulePreviewPanel.innerHTML = `
             ${header}
+            ${noticeBlock}
             ${validationBlock}
-            <p class="section-copy">validation error를 먼저 수정하면 적용 대상 preview를 계산할 수 있습니다.</p>
+            <p class="section-copy">오류를 먼저 수정하면 적용 대상 preview를 다시 계산할 수 있습니다.</p>
         `;
         return;
     }
@@ -3385,15 +3440,17 @@ function renderAlertRulePreviewPanel() {
     if (items.length === 0) {
         alertRulePreviewPanel.innerHTML = `
             ${header}
+            ${noticeBlock}
             ${validationBlock}
             ${summaryBlock}
-            <p class="section-copy">현재 이 rule에 매칭되는 monitored object가 없습니다.</p>
+            <p class="section-copy">현재 조건에 매칭되는 monitored object가 없습니다.</p>
         `;
         return;
     }
 
     alertRulePreviewPanel.innerHTML = `
         ${header}
+        ${noticeBlock}
         ${validationBlock}
         ${summaryBlock}
         <div class="admin-list compact-admin-list">
@@ -3404,16 +3461,16 @@ function renderAlertRulePreviewPanel() {
                             <div class="section-header">
                                 <h4>${escapeHtml(item.display_name)}</h4>
                                 <div class="toolbar-inline">
-                                    <span class="meta-pill">active alert ${escapeHtml(item.open_alert_count)}</span>
-                                    <span class="meta-pill">rule alert ${escapeHtml(item.source_rule_open_alert_count)}</span>
-                                    <span class="meta-pill">${escapeHtml(item.threshold_level)}</span>
+                                    <span class="meta-pill">열린 alert ${escapeHtml(item.open_alert_count)}</span>
+                                    <span class="meta-pill">이 rule alert ${escapeHtml(item.source_rule_open_alert_count)}</span>
+                                    <span class="meta-pill">${escapeHtml(getAlertRuleThresholdLevelLabel(item.threshold_level))}</span>
                                 </div>
                             </div>
                             <p class="admin-meta">object=${escapeHtml(item.monitored_object_id)} | type=${escapeHtml(item.object_type)}</p>
                             <p class="admin-meta">binding=${escapeHtml(item.runtime_binding_key || "-")}</p>
                             <p class="admin-meta">active view ${escapeHtml(item.active_view_count)} | active node ${escapeHtml(item.active_node_count)}</p>
-                            <p class="admin-meta">latest state ${escapeHtml(item.latest_state_status || "-")} | latest severity ${escapeHtml(item.latest_state_severity || "-")} | received ${escapeHtml(formatTimestamp(item.latest_received_at))}</p>
-                            <p class="admin-meta">current metric ${escapeHtml(rule.metric_key)}=${escapeHtml(item.current_metric_value ?? "-")}</p>
+                            <p class="admin-meta">latest state ${escapeHtml(item.latest_state_status || "-")} | latest severity ${escapeHtml(item.latest_state_severity || "-")} | 수신 ${escapeHtml(formatTimestamp(item.latest_received_at))}</p>
+                            <p class="admin-meta">현재 metric ${escapeHtml(rule.metric_key)}=${escapeHtml(item.current_metric_value ?? "-")}</p>
                         </article>
                     `
                 )
@@ -3634,6 +3691,7 @@ async function loadAlertRulePreview(ruleId) {
     const payload = await apiFetch(`/api/admin/alert-rules/${ruleId}/targets-preview?limit=20`);
     selectedAlertRuleId = ruleId;
     selectedAlertRulePreview = payload;
+    selectedAlertRulePreviewNotice = null;
     renderAlertRulePreviewPanel();
 }
 
@@ -3644,6 +3702,7 @@ async function previewCurrentAlertRule() {
     });
     selectedAlertRuleId = payload?.rule?.id ?? null;
     selectedAlertRulePreview = payload;
+    selectedAlertRulePreviewNotice = null;
     renderAlertRulePreviewPanel();
 }
 
@@ -4293,9 +4352,11 @@ async function publishSelectedAlertRule() {
     await Promise.all([loadAlertRules(), loadSummary()]);
     if (payload?.rule) {
         fillAlertRuleForm(payload.rule);
+        await loadAlertRulePreview(payload.rule.id);
     }
-    const warningCount = payload?.validation?.warnings?.length || 0;
-    showBanner(`alert rule을 publish했습니다.${warningCount ? ` warning ${warningCount}건` : ""}`, "success");
+    selectedAlertRulePreviewNotice = buildAlertRulePublishNotice(payload?.validation);
+    renderAlertRulePreviewPanel();
+    showBanner(buildAlertRulePublishBannerMessage(payload?.validation), "success");
 }
 
 async function cloneSelectedAlertRule() {
@@ -4878,8 +4939,9 @@ alertRulesList?.addEventListener("click", (event) => {
                     selectedAlertRuleId = payload.rule.id;
                     await loadAlertRulePreview(payload.rule.id);
                 }
-                const warningCount = payload?.validation?.warnings?.length || 0;
-                showBanner(`alert rule을 publish했습니다.${warningCount ? ` warning ${warningCount}건` : ""}`, "success");
+                selectedAlertRulePreviewNotice = buildAlertRulePublishNotice(payload?.validation);
+                renderAlertRulePreviewPanel();
+                showBanner(buildAlertRulePublishBannerMessage(payload?.validation), "success");
             })
             .catch((error) => showBanner(error.message, "error"));
         return;
