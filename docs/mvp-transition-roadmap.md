@@ -1,5 +1,12 @@
 # Software Architecture Runtime Monitoring System
 
+## Agent Addendum
+
+- See [agent-current-state-backlog.md](C:/2604_swacan_auto/docs/agent-current-state-backlog.md).
+- Agent is currently treated as a stable MVP baseline with a follow-up backlog.
+- The current roadmap should not pull the main implementation focus back to Agent before Alert condition and lifecycle design are clarified.
+- Agent follow-up work should be framed as productization, operational hardening, and data-model expansion.
+
 ## MVP 전환 로드맵
 
 버전: Draft 0.3  

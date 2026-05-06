@@ -1,5 +1,12 @@
 # Current Implementation Priorities
 
+## Agent Addendum
+
+- See [agent-current-state-backlog.md](C:/2604_swacan_auto/docs/agent-current-state-backlog.md).
+- Agent is currently a usable Linux baseline rather than the main architectural gap.
+- The existing baseline already includes selector-driven discovery, snapshot collection, SQLite outbox transport, backend ingest integration, and Monitoring View verification.
+- Agent should remain on a measured follow-up backlog while the main implementation focus returns to Alert condition flexibility and Alert lifecycle design.
+
 버전: Draft 0.4  
 작성일: 2026-04-18
 
