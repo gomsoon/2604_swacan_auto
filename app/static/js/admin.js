@@ -3379,6 +3379,19 @@ function getAlertRuleThresholdLevelLabel(level) {
     return "metric 없음";
 }
 
+function getAlertRuleThresholdTone(level) {
+    if (level === "critical") {
+        return "critical";
+    }
+    if (level === "warning") {
+        return "warning";
+    }
+    if (level === "normal") {
+        return "normal";
+    }
+    return "unknown";
+}
+
 function formatAlertRuleWinningConditionTrace(trace) {
     if (!trace) {
         return null;
@@ -3398,6 +3411,110 @@ function formatAlertRuleWinningConditionTrace(trace) {
               ? `clause ${clauseIndexes[0]} matched`
               : `clauses ${clauseIndexes.join(", ")} matched`;
     return `${severity} / ${operatorLabel} / ${clauseLabel}`;
+}
+
+function buildAlertRulePreviewSummaryNarrative(summary, rule) {
+    const matchedObjectCount = Number(summary?.matched_object_count || 0);
+    const warningMatchCount = Number(summary?.warning_match_count || 0);
+    const criticalMatchCount = Number(summary?.critical_match_count || 0);
+    const metricAvailableCount = Number(summary?.metric_available_count || 0);
+    if (matchedObjectCount === 0) {
+        return "현재 selector 기준으로 매칭되는 monitored object가 없습니다.";
+    }
+    if (metricAvailableCount === 0) {
+        return `매칭 객체 ${matchedObjectCount}개는 확인됐지만, 현재 ${rule.metric_key} metric 값을 읽을 수 있는 객체는 없습니다.`;
+    }
+    if (criticalMatchCount > 0) {
+        return `현재 기준으로 critical ${criticalMatchCount}건, warning ${warningMatchCount - criticalMatchCount}건이 예상됩니다.`;
+    }
+    if (warningMatchCount > 0) {
+        return `현재 기준으로 warning ${warningMatchCount}건이 예상되고, critical 매칭은 없습니다.`;
+    }
+    return `metric 값을 읽을 수 있는 객체 ${metricAvailableCount}개 모두 현재 threshold 안에 있습니다.`;
+}
+
+function renderAlertRulePreviewSummaryBlock(summary, rule) {
+    return `
+        <section class="alert-rule-preview-summary-panel">
+            <div class="section-header">
+                <h4>판정 요약</h4>
+                <span class="meta-pill">${escapeHtml(rule.condition_mode || "scalar")}</span>
+            </div>
+            <p class="section-copy">${escapeHtml(buildAlertRulePreviewSummaryNarrative(summary, rule))}</p>
+            <div class="summary-metrics">
+                ${renderMetaPills([
+                    ["매칭 객체", summary?.matched_object_count ?? 0],
+                    ["active view", summary?.active_view_count ?? 0],
+                    ["active node", summary?.active_node_count ?? 0],
+                    ["열린 alert", summary?.open_alert_count ?? 0],
+                    ["이 rule alert", summary?.source_rule_open_alert_count ?? 0],
+                    ["metric 확인 가능", summary?.metric_available_count ?? 0],
+                    ["warning 매칭", summary?.warning_match_count ?? 0],
+                    ["critical 매칭", summary?.critical_match_count ?? 0],
+                ])}
+            </div>
+            ${
+                rule.condition_mode === "compound"
+                    ? '<p class="section-copy">compound trace의 clause 번호는 1부터 보이며, 각 item 카드에서 실제로 매칭된 절을 함께 확인할 수 있습니다.</p>'
+                    : ""
+            }
+        </section>
+    `;
+}
+
+function renderAlertRulePreviewItem(item, rule) {
+    const traceText = formatAlertRuleWinningConditionTrace(item.winning_condition_trace);
+    const tone = getAlertRuleThresholdTone(item.threshold_level);
+    const metricValueLabel =
+        item.current_metric_value === null || item.current_metric_value === undefined ? "-" : item.current_metric_value;
+    const resultMessage =
+        item.threshold_level === "unknown"
+            ? `${rule.metric_key} 값을 읽지 못해 threshold 판단을 아직 할 수 없습니다.`
+            : item.threshold_level === "normal"
+              ? `${rule.metric_key}=${metricValueLabel} 이 현재 threshold 안에 있습니다.`
+              : `${rule.metric_key}=${metricValueLabel} 이 ${item.threshold_level} 조건에 매칭됩니다.`;
+
+    return `
+        <article class="admin-item compact-admin-item alert-rule-preview-item">
+            <div class="section-header">
+                <div>
+                    <h4>${escapeHtml(item.display_name)}</h4>
+                    <p class="admin-meta">object=${escapeHtml(item.monitored_object_id)} | type=${escapeHtml(item.object_type)}</p>
+                </div>
+                <div class="toolbar-inline">
+                    <span class="meta-pill alert-rule-preview-level-pill is-${escapeHtml(tone)}">${escapeHtml(getAlertRuleThresholdLevelLabel(item.threshold_level))}</span>
+                    ${
+                        traceText
+                            ? `<span class="meta-pill alert-rule-preview-trace-pill">${escapeHtml(traceText)}</span>`
+                            : ""
+                    }
+                </div>
+            </div>
+            <div class="alert-rule-preview-item-grid">
+                <section class="alert-rule-preview-item-block">
+                    <h5>판정 결과</h5>
+                    <p class="section-copy">${escapeHtml(resultMessage)}</p>
+                    ${
+                        traceText
+                            ? `<p class="admin-meta">판정 trace ${escapeHtml(traceText)}</p>`
+                            : '<p class="admin-meta">판정 trace 없음</p>'
+                    }
+                </section>
+                <section class="alert-rule-preview-item-block">
+                    <h5>실시간 상태</h5>
+                    <p class="admin-meta">latest state ${escapeHtml(item.latest_state_status || "-")} | latest severity ${escapeHtml(item.latest_state_severity || "-")}</p>
+                    <p class="admin-meta">수신 ${escapeHtml(formatTimestamp(item.latest_received_at))}</p>
+                    <p class="admin-meta">현재 metric ${escapeHtml(rule.metric_key)}=${escapeHtml(metricValueLabel)}</p>
+                </section>
+                <section class="alert-rule-preview-item-block">
+                    <h5>운영 영향</h5>
+                    <p class="admin-meta">열린 alert ${escapeHtml(item.open_alert_count)} | 이 rule alert ${escapeHtml(item.source_rule_open_alert_count)}</p>
+                    <p class="admin-meta">active view ${escapeHtml(item.active_view_count)} | active node ${escapeHtml(item.active_node_count)}</p>
+                    <p class="admin-meta">binding=${escapeHtml(item.runtime_binding_key || "-")}</p>
+                </section>
+            </div>
+        </article>
+    `;
 }
 
 function buildAlertRulePublishNotice(validation = null) {
@@ -3650,20 +3767,7 @@ function renderAlertRulePreviewPanel() {
     const noticeBlock = renderAlertRulePreviewNoticeBlock();
     const validationBlock = renderAlertRuleValidationBlock(validation, rule);
 
-    const summaryBlock = `
-        <div class="summary-metrics">
-            ${renderMetaPills([
-                ["매칭 객체", summary?.matched_object_count ?? 0],
-                ["active view", summary?.active_view_count ?? 0],
-                ["active node", summary?.active_node_count ?? 0],
-                ["열린 alert", summary?.open_alert_count ?? 0],
-                ["이 rule alert", summary?.source_rule_open_alert_count ?? 0],
-                ["metric 확인 가능", summary?.metric_available_count ?? 0],
-                ["warning 매칭", summary?.warning_match_count ?? 0],
-                ["critical 매칭", summary?.critical_match_count ?? 0],
-            ])}
-        </div>
-    `;
+    const summaryBlock = renderAlertRulePreviewSummaryBlock(summary, rule);
 
     if (errors.length > 0) {
         alertRulePreviewPanel.innerHTML = `
@@ -3695,32 +3799,7 @@ function renderAlertRulePreviewPanel() {
         ${validationBlock}
         ${summaryBlock}
         <div class="admin-list compact-admin-list">
-            ${items
-                .map(
-                    (item) => `
-                        <article class="admin-item compact-admin-item">
-                            <div class="section-header">
-                                <h4>${escapeHtml(item.display_name)}</h4>
-                                <div class="toolbar-inline">
-                                    <span class="meta-pill">열린 alert ${escapeHtml(item.open_alert_count)}</span>
-                                    <span class="meta-pill">이 rule alert ${escapeHtml(item.source_rule_open_alert_count)}</span>
-                                    <span class="meta-pill">${escapeHtml(getAlertRuleThresholdLevelLabel(item.threshold_level))}</span>
-                                </div>
-                            </div>
-                            <p class="admin-meta">object=${escapeHtml(item.monitored_object_id)} | type=${escapeHtml(item.object_type)}</p>
-                            <p class="admin-meta">binding=${escapeHtml(item.runtime_binding_key || "-")}</p>
-                            <p class="admin-meta">active view ${escapeHtml(item.active_view_count)} | active node ${escapeHtml(item.active_node_count)}</p>
-                            <p class="admin-meta">latest state ${escapeHtml(item.latest_state_status || "-")} | latest severity ${escapeHtml(item.latest_state_severity || "-")} | 수신 ${escapeHtml(formatTimestamp(item.latest_received_at))}</p>
-                            <p class="admin-meta">현재 metric ${escapeHtml(rule.metric_key)}=${escapeHtml(item.current_metric_value ?? "-")}</p>
-                            ${
-                                formatAlertRuleWinningConditionTrace(item.winning_condition_trace)
-                                    ? `<p class="admin-meta">판정 trace ${escapeHtml(formatAlertRuleWinningConditionTrace(item.winning_condition_trace))}</p>`
-                                    : ""
-                            }
-                        </article>
-                    `
-                )
-                .join("")}
+            ${items.map((item) => renderAlertRulePreviewItem(item, rule)).join("")}
         </div>
     `;
 }
