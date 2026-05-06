@@ -310,3 +310,31 @@ Observations:
 
 - [editor_api.py](C:/2604_swacan_auto/app/editor_api.py) improved from `76%` to `89%` total coverage in the report.
 - The next high-value coverage target is likely [admin_api.py](C:/2604_swacan_auto/app/admin_api.py) or a focused slice of [agent_api.py](C:/2604_swacan_auto/app/agent_api.py), depending on whether we prefer API branch gain or smaller-module cleanup next.
+
+## 16. Sprint #7 Result
+
+This sprint focused on [admin_api.py](C:/2604_swacan_auto/app/admin_api.py) using a narrow helper-and-validator coverage approach.
+
+Added tests in:
+
+- [test_admin_api_unit.py](C:/2604_swacan_auto/tests/test_admin_api_unit.py)
+
+Main branch targets:
+
+- JSON/text payload parsing helpers
+- preview metric and threshold helper branches
+- optional parser helpers for float, bool, and string values
+- query filter helper branches
+- `rule_key` validation, uniqueness, clone naming, and publish warning helpers
+- `validate_alert_rule_payload` success and negative matrix branches
+
+Results:
+
+- full regression: `343 passed, 4 skipped`
+- line coverage: `91.19%`
+- branch coverage: `75.46%`
+
+Observations:
+
+- [admin_api.py](C:/2604_swacan_auto/app/admin_api.py) improved from `84%` to `88%` total coverage in the report.
+- This closes the current API coverage sprint sequence in a good place without overextending into the heavier remaining branches.
