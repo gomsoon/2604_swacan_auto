@@ -12,6 +12,7 @@
 - [monitoring-view-backlog.md](C:/2604_swacan_auto/docs/monitoring-view-backlog.md)
 - [alert-management-backlog.md](C:/2604_swacan_auto/docs/alert-management-backlog.md)
 - [alert-condition-flexibility-draft.md](C:/2604_swacan_auto/docs/alert-condition-flexibility-draft.md)
+- [testing-coverage-sprint-plan.md](C:/2604_swacan_auto/docs/testing-coverage-sprint-plan.md)
 
 ## 1. 현재 상태 요약
 

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import runpy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 import agent.main as agent_main
 from agent.config import AgentConfig, AgentIntervals, AgentStoragePolicy, AgentTarget
@@ -228,3 +231,171 @@ def test_agent_main_dump_config_includes_storage_policy(tmp_path, capsys) -> Non
     assert exit_code == 0
     assert "storage_path=" in output
     assert "keep_acked_rows=25" in output
+
+
+def test_build_runtime_services_initializes_storage(monkeypatch, tmp_path) -> None:
+    initialized_paths: list[Path] = []
+    received_runtime_config: list[AgentConfig] = []
+
+    class FakeStorage:
+        def __init__(self, storage_path: Path) -> None:
+            self.storage_path = storage_path
+
+        def initialize(self) -> None:
+            initialized_paths.append(self.storage_path)
+
+    class FakeRuntimeServices:
+        def __init__(self, config: AgentConfig, storage: FakeStorage) -> None:
+            received_runtime_config.append(config)
+            self.storage = storage
+
+    config = sample_config()
+    config = AgentConfig(
+        **{**config.__dict__, "storage_path": tmp_path / "agent.sqlite3"}
+    )
+
+    monkeypatch.setattr(agent_main, "AgentStorage", FakeStorage)
+    monkeypatch.setattr(agent_main, "AgentRuntimeServices", FakeRuntimeServices)
+
+    services = agent_main.build_runtime_services(config)
+
+    assert initialized_paths == [config.storage_path]
+    assert received_runtime_config == [config]
+    assert services.storage.storage_path == config.storage_path
+
+
+def test_print_service_summary_returns_without_output_when_last_cycle_is_missing(capsys) -> None:
+    services = SimpleNamespace(actions=None, last_cycle=None)
+
+    agent_main.print_service_summary(services)
+
+    assert capsys.readouterr().out == ""
+
+
+def test_print_service_summary_formats_last_cycle_fallback(capsys) -> None:
+    last_cycle = SimpleNamespace(
+        heartbeat_seq=10,
+        host_snapshot_seq=20,
+        process_snapshot_seqs=[100, 101],
+        process_event_seqs=[201],
+        flush_sent_count=3,
+        flush_ack_seq=88,
+        purged_acked_count=5,
+        flush_error=None,
+    )
+    services = SimpleNamespace(actions=None, last_cycle=last_cycle, backend_connection_status="ok")
+
+    agent_main.print_service_summary(services)
+    output = capsys.readouterr().out
+
+    assert "heartbeat_seq=10" in output
+    assert "process_snapshot_count=2" in output
+    assert "process_event_count=1" in output
+    assert "backend_status=ok" in output
+    assert "flush_error=-" in output
+
+
+def test_agent_main_cycles_runs_runner_forever(tmp_path) -> None:
+    config_path = tmp_path / "agent.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[agent]",
+                'agent_id = "agent_local"',
+                'token = "dev-agent-token"',
+                "",
+                "[backend]",
+                'endpoint = "https://backend.example.com/api/agents/ingest"',
+                "",
+                "[intervals]",
+                "heartbeat_seconds = 5",
+                "snapshot_seconds = 10",
+                "flush_seconds = 2",
+                "retry_backoff_seconds = 15",
+                "",
+                "[[targets]]",
+                'target_id = "app_main"',
+                'process_name = "python"',
+                "",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    called: dict[str, object] = {}
+
+    class FakeRunner:
+        def __init__(self, config: AgentConfig, services: object) -> None:
+            called["config"] = config
+            called["services"] = services
+
+        def run_cycle(self) -> None:
+            raise AssertionError("run_cycle should not be called when --cycles is used")
+
+        def run_forever(self, *, max_cycles: int) -> int:
+            called["max_cycles"] = max_cycles
+            return max_cycles
+
+    fake_services = SimpleNamespace(actions=[("flush", "2026-04-13T09:00:00+00:00")])
+
+    original_runner = agent_main.AgentRunner
+    agent_main.AgentRunner = FakeRunner
+    try:
+        exit_code = agent_main.main(
+            ["--config", str(config_path), "--cycles", "3"],
+            services_factory=lambda _config: fake_services,
+        )
+    finally:
+        agent_main.AgentRunner = original_runner
+
+    assert exit_code == 0
+    assert called["services"] is fake_services
+    assert called["max_cycles"] == 3
+
+
+def test_agent_main_exits_with_parser_error_on_invalid_config(tmp_path, capsys) -> None:
+    config_path = tmp_path / "agent.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[agent]",
+                'agent_id = "agent_local"',
+                'token = "dev-agent-token"',
+                "",
+                "[backend]",
+                'endpoint = "https://backend.example.com/api/agents/ingest"',
+                "",
+                "[intervals]",
+                "heartbeat_seconds = 0",
+                "snapshot_seconds = 10",
+                "flush_seconds = 2",
+                "retry_backoff_seconds = 15",
+                "",
+                "[[targets]]",
+                'target_id = "app_main"',
+                'process_name = "python"',
+                "",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        agent_main.main(["--config", str(config_path)])
+
+    assert excinfo.value.code == 2
+    assert "config error:" in capsys.readouterr().err
+
+
+def test_agent_dunder_main_delegates_to_main(monkeypatch) -> None:
+    def fake_main() -> int:
+        return 7
+
+    monkeypatch.setattr(agent_main, "main", fake_main)
+
+    with pytest.raises(SystemExit) as excinfo:
+        runpy.run_module("agent.__main__", run_name="__main__")
+
+    assert excinfo.value.code == 7
