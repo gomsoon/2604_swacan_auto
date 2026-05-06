@@ -1453,6 +1453,31 @@ a {
     flex-wrap: wrap;
 }
 
+.alert-rule-preview-config,
+.alert-rule-compound-group,
+.alert-rule-preview-conditions {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+}
+
+.alert-rule-preview-config h4,
+.alert-rule-preview-config h5,
+.alert-rule-compound-group h5,
+.alert-rule-preview-conditions h4,
+.alert-rule-preview-config p,
+.alert-rule-preview-conditions p {
+    margin: 0;
+}
+
+.alert-rule-compound-preview-fields {
+    display: grid;
+    gap: 12px;
+}
+
 .alert-rule-preview-validation {
     display: grid;
     gap: 10px;

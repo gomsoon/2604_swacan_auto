@@ -678,6 +678,108 @@
                         <input id="alert-rule-critical-threshold" type="number" step="0.001" placeholder="예: 95">
                     </label>
                 </div>
+                <section class="alert-rule-preview-config">
+                    <div class="section-header">
+                        <div>
+                            <h4>Compound Preview</h4>
+                            <p class="section-copy">저장과 publish는 현재 scalar threshold만 지원합니다. 아래 설정은 Preview에서만 사용됩니다.</p>
+                        </div>
+                        <span class="meta-pill">preview only</span>
+                    </div>
+                    <label class="field compact-field">
+                        <span>Preview Mode</span>
+                        <select id="alert-rule-preview-condition-mode">
+                            <option value="scalar">scalar</option>
+                            <option value="compound">compound</option>
+                        </select>
+                    </label>
+                    <div id="alert-rule-compound-preview-fields" class="alert-rule-compound-preview-fields" hidden>
+                        <section class="alert-rule-compound-group">
+                            <div class="section-header">
+                                <h5>Warning Condition</h5>
+                            </div>
+                            <label class="field compact-field">
+                                <span>Logical Operator</span>
+                                <select id="alert-rule-warning-condition-operator">
+                                    <option value="or">or</option>
+                                    <option value="and">and</option>
+                                </select>
+                            </label>
+                            <div class="field-grid">
+                                <label class="field compact-field">
+                                    <span>Clause 1 Comparison</span>
+                                    <select id="alert-rule-warning-clause1-comparison">
+                                        <option value="gte">gte</option>
+                                        <option value="gt">gt</option>
+                                        <option value="lte">lte</option>
+                                        <option value="lt">lt</option>
+                                    </select>
+                                </label>
+                                <label class="field compact-field">
+                                    <span>Clause 1 Value</span>
+                                    <input id="alert-rule-warning-clause1-value" type="number" step="0.001" placeholder="예: 80">
+                                </label>
+                            </div>
+                            <div class="field-grid">
+                                <label class="field compact-field">
+                                    <span>Clause 2 Comparison</span>
+                                    <select id="alert-rule-warning-clause2-comparison">
+                                        <option value="gte">gte</option>
+                                        <option value="gt">gt</option>
+                                        <option value="lte">lte</option>
+                                        <option value="lt">lt</option>
+                                    </select>
+                                </label>
+                                <label class="field compact-field">
+                                    <span>Clause 2 Value</span>
+                                    <input id="alert-rule-warning-clause2-value" type="number" step="0.001" placeholder="예: 20">
+                                </label>
+                            </div>
+                        </section>
+                        <section class="alert-rule-compound-group">
+                            <div class="section-header">
+                                <h5>Critical Condition</h5>
+                            </div>
+                            <label class="field compact-field">
+                                <span>Logical Operator</span>
+                                <select id="alert-rule-critical-condition-operator">
+                                    <option value="or">or</option>
+                                    <option value="and">and</option>
+                                </select>
+                            </label>
+                            <div class="field-grid">
+                                <label class="field compact-field">
+                                    <span>Clause 1 Comparison</span>
+                                    <select id="alert-rule-critical-clause1-comparison">
+                                        <option value="gte">gte</option>
+                                        <option value="gt">gt</option>
+                                        <option value="lte">lte</option>
+                                        <option value="lt">lt</option>
+                                    </select>
+                                </label>
+                                <label class="field compact-field">
+                                    <span>Clause 1 Value</span>
+                                    <input id="alert-rule-critical-clause1-value" type="number" step="0.001" placeholder="예: 95">
+                                </label>
+                            </div>
+                            <div class="field-grid">
+                                <label class="field compact-field">
+                                    <span>Clause 2 Comparison</span>
+                                    <select id="alert-rule-critical-clause2-comparison">
+                                        <option value="gte">gte</option>
+                                        <option value="gt">gt</option>
+                                        <option value="lte">lte</option>
+                                        <option value="lt">lt</option>
+                                    </select>
+                                </label>
+                                <label class="field compact-field">
+                                    <span>Clause 2 Value</span>
+                                    <input id="alert-rule-critical-clause2-value" type="number" step="0.001" placeholder="예: 10">
+                                </label>
+                            </div>
+                        </section>
+                    </div>
+                </section>
                 <label class="field">
                     <span>설명</span>
                     <textarea id="alert-rule-description" rows="3" placeholder="rule 설명"></textarea>

@@ -173,6 +173,18 @@ const alertRuleMetricKeyInput = document.getElementById("alert-rule-metric-key")
 const alertRuleComparisonSelect = document.getElementById("alert-rule-comparison");
 const alertRuleWarningThresholdInput = document.getElementById("alert-rule-warning-threshold");
 const alertRuleCriticalThresholdInput = document.getElementById("alert-rule-critical-threshold");
+const alertRulePreviewConditionModeSelect = document.getElementById("alert-rule-preview-condition-mode");
+const alertRuleCompoundPreviewFields = document.getElementById("alert-rule-compound-preview-fields");
+const alertRuleWarningConditionOperatorSelect = document.getElementById("alert-rule-warning-condition-operator");
+const alertRuleWarningClause1ComparisonSelect = document.getElementById("alert-rule-warning-clause1-comparison");
+const alertRuleWarningClause1ValueInput = document.getElementById("alert-rule-warning-clause1-value");
+const alertRuleWarningClause2ComparisonSelect = document.getElementById("alert-rule-warning-clause2-comparison");
+const alertRuleWarningClause2ValueInput = document.getElementById("alert-rule-warning-clause2-value");
+const alertRuleCriticalConditionOperatorSelect = document.getElementById("alert-rule-critical-condition-operator");
+const alertRuleCriticalClause1ComparisonSelect = document.getElementById("alert-rule-critical-clause1-comparison");
+const alertRuleCriticalClause1ValueInput = document.getElementById("alert-rule-critical-clause1-value");
+const alertRuleCriticalClause2ComparisonSelect = document.getElementById("alert-rule-critical-clause2-comparison");
+const alertRuleCriticalClause2ValueInput = document.getElementById("alert-rule-critical-clause2-value");
 const alertRuleDescriptionInput = document.getElementById("alert-rule-description");
 const alertRuleEnabledInput = document.getElementById("alert-rule-enabled");
 const saveAlertRuleButton = document.getElementById("save-alert-rule-button");
@@ -2948,6 +2960,83 @@ function toggleAlertRuleScopeFields() {
     alertRuleMonitoredObjectIdInput.disabled = !isEditable || isObjectType;
 }
 
+function toggleAlertRuleCompoundPreviewFields() {
+    if (!alertRulePreviewConditionModeSelect || !alertRuleCompoundPreviewFields) {
+        return;
+    }
+    alertRuleCompoundPreviewFields.hidden = alertRulePreviewConditionModeSelect.value !== "compound";
+}
+
+function buildAlertRuleConditionGroupFromInputs(prefix) {
+    const operatorSelect =
+        prefix === "warning" ? alertRuleWarningConditionOperatorSelect : alertRuleCriticalConditionOperatorSelect;
+    const clause1ComparisonSelect =
+        prefix === "warning" ? alertRuleWarningClause1ComparisonSelect : alertRuleCriticalClause1ComparisonSelect;
+    const clause1ValueInput = prefix === "warning" ? alertRuleWarningClause1ValueInput : alertRuleCriticalClause1ValueInput;
+    const clause2ComparisonSelect =
+        prefix === "warning" ? alertRuleWarningClause2ComparisonSelect : alertRuleCriticalClause2ComparisonSelect;
+    const clause2ValueInput = prefix === "warning" ? alertRuleWarningClause2ValueInput : alertRuleCriticalClause2ValueInput;
+
+    return {
+        logical_operator: operatorSelect?.value || "or",
+        clauses: [
+            {
+                comparison: clause1ComparisonSelect?.value || "gte",
+                value: toOptionalNumberValue(clause1ValueInput?.value),
+            },
+            {
+                comparison: clause2ComparisonSelect?.value || "gte",
+                value: toOptionalNumberValue(clause2ValueInput?.value),
+            },
+        ],
+    };
+}
+
+function populateAlertRuleConditionGroupInputs(prefix, condition) {
+    const operatorSelect =
+        prefix === "warning" ? alertRuleWarningConditionOperatorSelect : alertRuleCriticalConditionOperatorSelect;
+    const clause1ComparisonSelect =
+        prefix === "warning" ? alertRuleWarningClause1ComparisonSelect : alertRuleCriticalClause1ComparisonSelect;
+    const clause1ValueInput = prefix === "warning" ? alertRuleWarningClause1ValueInput : alertRuleCriticalClause1ValueInput;
+    const clause2ComparisonSelect =
+        prefix === "warning" ? alertRuleWarningClause2ComparisonSelect : alertRuleCriticalClause2ComparisonSelect;
+    const clause2ValueInput = prefix === "warning" ? alertRuleWarningClause2ValueInput : alertRuleCriticalClause2ValueInput;
+
+    const clauses = Array.isArray(condition?.clauses) ? condition.clauses : [];
+    operatorSelect.value = condition?.logical_operator || "or";
+    clause1ComparisonSelect.value = clauses[0]?.comparison || "gte";
+    clause1ValueInput.value = clauses[0]?.value ?? "";
+    clause2ComparisonSelect.value = clauses[1]?.comparison || "gte";
+    clause2ValueInput.value = clauses[1]?.value ?? "";
+}
+
+function resetAlertRuleCompoundPreviewInputs() {
+    if (alertRulePreviewConditionModeSelect) {
+        alertRulePreviewConditionModeSelect.value = "scalar";
+    }
+    populateAlertRuleConditionGroupInputs("warning", null);
+    populateAlertRuleConditionGroupInputs("critical", null);
+    toggleAlertRuleCompoundPreviewFields();
+}
+
+function formatAlertRuleConditionClause(clause) {
+    if (!clause) {
+        return "-";
+    }
+    return `${clause.comparison} ${clause.value}`;
+}
+
+function formatAlertRuleConditionGroup(condition) {
+    if (!condition || !Array.isArray(condition.clauses) || condition.clauses.length === 0) {
+        return "없음";
+    }
+    if (!condition.logical_operator || condition.clauses.length === 1) {
+        return formatAlertRuleConditionClause(condition.clauses[0]);
+    }
+    const joiner = ` ${String(condition.logical_operator).toUpperCase()} `;
+    return condition.clauses.map((clause) => formatAlertRuleConditionClause(clause)).join(joiner);
+}
+
 function slugifyAlertRuleKeyPart(value) {
     return String(value || "")
         .trim()
@@ -3189,6 +3278,7 @@ function resetAlertRuleForm() {
     selectedAlertRulePreviewNotice = null;
     selectedAlertRuleSnapshot = null;
     alertRuleDraftDirty = false;
+    resetAlertRuleCompoundPreviewInputs();
     setAlertRuleFormEditableState(null);
     setAlertRuleActionButtonState(null);
     renderMonitoredObjectOptions();
@@ -3211,6 +3301,14 @@ function fillAlertRuleForm(rule) {
     alertRuleCriticalThresholdInput.value = rule.critical_threshold ?? "";
     alertRuleDescriptionInput.value = rule.description || "";
     alertRuleEnabledInput.checked = Boolean(rule.is_enabled);
+    if (rule.condition_mode === "compound") {
+        alertRulePreviewConditionModeSelect.value = "compound";
+        populateAlertRuleConditionGroupInputs("warning", rule.warning_condition);
+        populateAlertRuleConditionGroupInputs("critical", rule.critical_condition);
+    } else {
+        resetAlertRuleCompoundPreviewInputs();
+    }
+    toggleAlertRuleCompoundPreviewFields();
     alertRuleFormTitle.textContent = `Alert Rule ${rule.is_editable ? "수정" : "보기"} #${rule.id}`;
     alertRuleFormMode.textContent = rule.status || "edit";
     selectedAlertRuleSnapshot = buildAlertRuleSnapshotFromRule(rule);
@@ -3304,7 +3402,8 @@ function buildAlertRulePublishBannerMessage(validation = null) {
 }
 
 function buildAlertRulePreviewRequestBody() {
-    return {
+    const conditionMode = alertRulePreviewConditionModeSelect?.value || "scalar";
+    const payload = {
         rule_id: alertRuleIdInput.value ? Number(alertRuleIdInput.value) : null,
         status: alertRuleForm?.dataset.ruleStatus || "draft",
         rule_key: alertRuleRuleKeyInput.value.trim() || null,
@@ -3320,6 +3419,12 @@ function buildAlertRulePreviewRequestBody() {
         description: alertRuleDescriptionInput.value.trim() || null,
         is_enabled: alertRuleEnabledInput.checked,
     };
+    payload.condition_mode = conditionMode;
+    if (conditionMode === "compound") {
+        payload.warning_condition = buildAlertRuleConditionGroupFromInputs("warning");
+        payload.critical_condition = buildAlertRuleConditionGroupFromInputs("critical");
+    }
+    return payload;
 }
 
 function renderAlertRuleValidationBlock(validation) {
@@ -3399,6 +3504,7 @@ function renderAlertRulePreviewPanel() {
                 <span class="meta-pill">${escapeHtml(rule.status || "-")}</span>
                 <span class="meta-pill">${escapeHtml(rule.scope_type)}</span>
                 <span class="meta-pill">${escapeHtml(rule.state_type)}</span>
+                <span class="meta-pill">${escapeHtml(rule.condition_mode || "scalar")}</span>
                 <span class="meta-pill">${rule.is_enabled ? "활성" : "비활성"}</span>
                 ${
                     Array.isArray(rule.publish_warnings) && rule.publish_warnings.length
@@ -3408,6 +3514,21 @@ function renderAlertRulePreviewPanel() {
             </div>
         </div>
         <p class="admin-meta">warning=${escapeHtml(rule.warning_threshold ?? "-")} | critical=${escapeHtml(rule.critical_threshold ?? "-")} | comparison=${escapeHtml(rule.comparison)}</p>
+    `;
+    const conditionBlock = `
+        <section class="alert-rule-preview-conditions">
+            <div class="section-header">
+                <h4>Threshold Shape</h4>
+                <span class="meta-pill">${escapeHtml(rule.condition_mode || "scalar")}</span>
+            </div>
+            <p class="admin-meta">warning condition: ${escapeHtml(formatAlertRuleConditionGroup(rule.warning_condition))}</p>
+            <p class="admin-meta">critical condition: ${escapeHtml(formatAlertRuleConditionGroup(rule.critical_condition))}</p>
+            ${
+                rule.condition_mode === "compound"
+                    ? '<p class="section-copy">compound threshold는 현재 preview/validation 전용입니다. 저장과 publish는 scalar rule을 유지합니다.</p>'
+                    : ""
+            }
+        </section>
     `;
     const noticeBlock = renderAlertRulePreviewNoticeBlock();
     const validationBlock = renderAlertRuleValidationBlock(validation);
@@ -3431,6 +3552,7 @@ function renderAlertRulePreviewPanel() {
         alertRulePreviewPanel.innerHTML = `
             ${header}
             ${noticeBlock}
+            ${conditionBlock}
             ${validationBlock}
             <p class="section-copy">오류를 먼저 수정하면 적용 대상 preview를 다시 계산할 수 있습니다.</p>
         `;
@@ -3441,6 +3563,7 @@ function renderAlertRulePreviewPanel() {
         alertRulePreviewPanel.innerHTML = `
             ${header}
             ${noticeBlock}
+            ${conditionBlock}
             ${validationBlock}
             ${summaryBlock}
             <p class="section-copy">현재 조건에 매칭되는 monitored object가 없습니다.</p>
@@ -3451,6 +3574,7 @@ function renderAlertRulePreviewPanel() {
     alertRulePreviewPanel.innerHTML = `
         ${header}
         ${noticeBlock}
+        ${conditionBlock}
         ${validationBlock}
         ${summaryBlock}
         <div class="admin-list compact-admin-list">
@@ -4496,6 +4620,30 @@ alertRuleDescriptionInput?.addEventListener("input", handleAlertRuleFormInputCha
 alertRuleWarningThresholdInput?.addEventListener("input", handleAlertRuleFormInputChange);
 alertRuleCriticalThresholdInput?.addEventListener("input", handleAlertRuleFormInputChange);
 alertRuleComparisonSelect?.addEventListener("change", handleAlertRuleFormInputChange);
+alertRulePreviewConditionModeSelect?.addEventListener("change", () => {
+    toggleAlertRuleCompoundPreviewFields();
+    handleAlertRuleFormInputChange();
+});
+[
+    alertRuleWarningConditionOperatorSelect,
+    alertRuleWarningClause1ComparisonSelect,
+    alertRuleWarningClause1ValueInput,
+    alertRuleWarningClause2ComparisonSelect,
+    alertRuleWarningClause2ValueInput,
+    alertRuleCriticalConditionOperatorSelect,
+    alertRuleCriticalClause1ComparisonSelect,
+    alertRuleCriticalClause1ValueInput,
+    alertRuleCriticalClause2ComparisonSelect,
+    alertRuleCriticalClause2ValueInput,
+].forEach((input) => input?.addEventListener("input", handleAlertRuleFormInputChange));
+[
+    alertRuleWarningConditionOperatorSelect,
+    alertRuleWarningClause1ComparisonSelect,
+    alertRuleWarningClause2ComparisonSelect,
+    alertRuleCriticalConditionOperatorSelect,
+    alertRuleCriticalClause1ComparisonSelect,
+    alertRuleCriticalClause2ComparisonSelect,
+].forEach((input) => input?.addEventListener("change", handleAlertRuleFormInputChange));
 alertRuleObjectTypeInput?.addEventListener("input", handleAlertRuleFormInputChange);
 alertRuleMonitoredObjectIdInput?.addEventListener("change", handleAlertRuleFormInputChange);
 alertRuleEnabledInput?.addEventListener("change", handleAlertRuleFormInputChange);
