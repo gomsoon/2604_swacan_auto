@@ -252,3 +252,32 @@ line coverage도 같은 방식으로 관리한다.
 - 이번 sprint로 branch `70%+` 1차 목표를 넘겼다.
 - 큰 API를 직접 공략하더라도, endpoint happy path보다 helper / validator / permission matrix를 decision-table로 메우는 방식이 훨씬 효율적이었다.
 - 다음 우선순위는 [view_version_editor_api.py](C:/2604_swacan_auto/app/view_version_editor_api.py), 그 다음 [editor_api.py](C:/2604_swacan_auto/app/editor_api.py)가 자연스럽다.
+
+## 14. Sprint #5 Result
+
+This sprint focused on [view_version_editor_api.py](C:/2604_swacan_auto/app/view_version_editor_api.py) with the same limited coverage style used in Sprint #4.
+
+Added tests in:
+
+- [test_view_version_editor_api.py](C:/2604_swacan_auto/tests/test_view_version_editor_api.py)
+- [test_view_version_editor_api_unit.py](C:/2604_swacan_auto/tests/test_view_version_editor_api_unit.py)
+
+Main branch targets:
+
+- monitored-object current-node ownership validation
+- edge update and delete branches
+- node delete not-found branch
+- replace-version negative branches
+- helper functions such as `slugify`, `make_element_key`, `parse_*`
+- node/edge validator decision-table paths
+
+Results:
+
+- full regression: `330 passed, 4 skipped`
+- line coverage: `90.10%`
+- branch coverage: `72.85%`
+
+Observations:
+
+- [view_version_editor_api.py](C:/2604_swacan_auto/app/view_version_editor_api.py) improved to `84%` total coverage in the report.
+- The next natural target remains [editor_api.py](C:/2604_swacan_auto/app/editor_api.py), especially helper, permission, and validation matrix branches.

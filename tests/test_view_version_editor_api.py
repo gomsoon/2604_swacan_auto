@@ -72,6 +72,19 @@ def test_view_version_monitored_objects_rejects_invalid_current_node_id(seeded_c
     assert response.get_json()["error"]["code"] == "validation_error"
 
 
+def test_view_version_monitored_objects_rejects_current_node_id_from_other_draft(seeded_client) -> None:
+    login(seeded_client)
+    first_draft = create_draft(seeded_client)
+
+    response = seeded_client.get(
+        f"/api/view-versions/{first_draft['version']['id']}/monitored-objects",
+        query_string={"current_node_id": 101},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["message"] == "current_node_id must belong to the selected draft version"
+
+
 def test_view_version_monitored_objects_returns_duplicate_and_latest_state_preview(seeded_app, seeded_client) -> None:
     login(seeded_client)
     draft_payload = create_draft(seeded_client)
@@ -576,6 +589,52 @@ def test_create_version_edge_allows_matching_association_code(seeded_client) -> 
     assert payload["edge"]["association_code"] == "monitors"
 
 
+def test_update_version_edge_updates_layout_and_revision(seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+    edge = draft_payload["edges"][0]
+
+    response = seeded_client.patch(
+        f"/api/view-versions/{version_id}/edges/{edge['id']}",
+        json={
+            "revision": draft_payload["version"]["revision"],
+            "label": "Updated Link",
+            "source_anchor": "right",
+            "target_anchor": "left",
+            "control_points": [{"x": 120, "y": 110}],
+            "style": {"stroke": "#0088ff"},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["revision"] == draft_payload["version"]["revision"] + 1
+    assert payload["edge"]["label"] == "Updated Link"
+    assert payload["edge"]["source_anchor"] == "right"
+    assert payload["edge"]["target_anchor"] == "left"
+    assert payload["edge"]["control_points"] == [{"x": 120, "y": 110}]
+    assert payload["edge"]["style"] == {"stroke": "#0088ff"}
+
+
+def test_update_version_edge_rejects_unknown_field(seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+    edge = draft_payload["edges"][0]
+
+    response = seeded_client.patch(
+        f"/api/view-versions/{version_id}/edges/{edge['id']}",
+        json={
+            "revision": draft_payload["version"]["revision"],
+            "unexpected": True,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["message"] == "unknown fields: unexpected"
+
+
 def test_replace_version_assigns_ids_for_missing_items_and_increments_revision(seeded_client) -> None:
     login(seeded_client)
     draft_payload = create_draft(seeded_client)
@@ -676,3 +735,95 @@ def test_replace_version_layout_syncs_primary_bindings(seeded_app, seeded_client
         ).fetchall()
 
     assert [row["monitored_object_id"] for row in binding_rows] == [1304]
+
+
+def test_delete_version_node_returns_not_found_for_missing_node(seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+
+    response = seeded_client.delete(
+        f"/api/view-versions/{version_id}/nodes/999999",
+        json={"revision": draft_payload["version"]["revision"]},
+    )
+
+    assert response.status_code == 404
+    assert response.get_json()["error"]["code"] == "not_found"
+
+
+def test_delete_version_edge_deletes_existing_edge_and_bumps_revision(seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+    edge = draft_payload["edges"][0]
+
+    response = seeded_client.delete(
+        f"/api/view-versions/{version_id}/edges/{edge['id']}",
+        json={"revision": draft_payload["version"]["revision"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["deleted_edge_id"] == edge["id"]
+    assert payload["revision"] == draft_payload["version"]["revision"] + 1
+
+    detail = seeded_client.get(f"/api/view-versions/{version_id}").get_json()
+    assert detail["edges"] == []
+
+
+def test_replace_version_rejects_non_object_node_item(seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+
+    response = seeded_client.put(
+        f"/api/view-versions/{version_id}",
+        json={
+            "revision": draft_payload["version"]["revision"],
+            "nodes": [1],
+            "edges": [],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["message"] == "each node must be an object"
+
+
+def test_replace_version_rejects_duplicate_edge_element_keys(seeded_client) -> None:
+    login(seeded_client)
+    draft_payload = create_draft(seeded_client)
+    version_id = draft_payload["version"]["id"]
+    process_node = next(node for node in draft_payload["nodes"] if node["node_type"] == "SoftwareProcess")
+    agent_node = next(node for node in draft_payload["nodes"] if node["node_type"] == "MonitoringAgent")
+
+    response = seeded_client.put(
+        f"/api/view-versions/{version_id}",
+        json={
+            "revision": draft_payload["version"]["revision"],
+            "nodes": draft_payload["nodes"],
+            "edges": [
+                {
+                    "id": 9001,
+                    "element_key": "dup_edge",
+                    "edge_type": "CommunicationLink",
+                    "semantic_type_code": "CommunicationLink",
+                    "notation_code": "communication.line",
+                    "source_node_id": process_node["id"],
+                    "target_node_id": agent_node["id"],
+                },
+                {
+                    "id": 9002,
+                    "element_key": "dup_edge",
+                    "edge_type": "CommunicationLink",
+                    "semantic_type_code": "CommunicationLink",
+                    "notation_code": "communication.line",
+                    "source_node_id": process_node["id"],
+                    "target_node_id": agent_node["id"],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["message"] == "duplicate edge element_key is not allowed"
