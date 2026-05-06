@@ -3427,9 +3427,88 @@ function buildAlertRulePreviewRequestBody() {
     return payload;
 }
 
-function renderAlertRuleValidationBlock(validation) {
+function getAlertRuleValidationEntryMessage(item) {
+    return String(item?.message || item || "");
+}
+
+function getAlertRuleValidationCategoryKey(item) {
+    const message = getAlertRuleValidationEntryMessage(item).toLowerCase();
+    if (
+        message.includes("logical_operator") ||
+        message.includes("must define exactly 2 clauses") ||
+        message.includes("must be an object") ||
+        message.includes("comparison is invalid") ||
+        message.includes("value must be a number") ||
+        message.includes("condition groups can be used only") ||
+        message.includes("requires at least one condition group")
+    ) {
+        return "shape";
+    }
+    if (message.includes("cannot be satisfied") || message.includes("redundant clause")) {
+        return "condition";
+    }
+    if (message.includes("subset of warning_condition")) {
+        return "severity";
+    }
+    return "general";
+}
+
+function getAlertRuleValidationCategoryLabel(key) {
+    if (key === "shape") {
+        return "입력 형태";
+    }
+    if (key === "condition") {
+        return "조건 해석";
+    }
+    if (key === "severity") {
+        return "Severity 관계";
+    }
+    return "일반";
+}
+
+function groupAlertRuleValidationEntries(items) {
+    const orderedKeys = ["shape", "condition", "severity", "general"];
+    const groups = new Map();
+    orderedKeys.forEach((key) => groups.set(key, []));
+    items.forEach((item) => {
+        const key = getAlertRuleValidationCategoryKey(item);
+        groups.get(key)?.push(item);
+    });
+    return orderedKeys
+        .map((key) => ({
+            key,
+            label: getAlertRuleValidationCategoryLabel(key),
+            items: groups.get(key) || [],
+        }))
+        .filter((group) => group.items.length > 0);
+}
+
+function renderStructuredAlertRuleValidationEntries(items) {
+    return `
+        <div class="alert-rule-validation-entry-groups">
+            ${groupAlertRuleValidationEntries(items)
+                .map(
+                    (group) => `
+                        <div class="alert-rule-validation-entry-group">
+                            <div class="section-header">
+                                <h6>${escapeHtml(group.label)}</h6>
+                                <span class="meta-pill">${escapeHtml(group.items.length)}건</span>
+                            </div>
+                            <ul>
+                                ${group.items.map((item) => `<li>${escapeHtml(getAlertRuleValidationEntryMessage(item))}</li>`).join("")}
+                            </ul>
+                        </div>
+                    `
+                )
+                .join("")}
+        </div>
+    `;
+}
+
+function renderAlertRuleValidationBlock(validation, rule = null) {
     const errors = Array.isArray(validation?.errors) ? validation.errors : [];
     const warnings = Array.isArray(validation?.warnings) ? validation.warnings : [];
+    const useStructuredSections = rule?.condition_mode === "compound";
 
     const emptyMessage =
         errors.length === 0 && warnings.length === 0
@@ -3445,15 +3524,26 @@ function renderAlertRuleValidationBlock(validation) {
                     <span class="meta-pill">경고 ${escapeHtml(warnings.length)}건</span>
                 </div>
             </div>
+            ${
+                useStructuredSections
+                    ? '<p class="section-copy">compound preview는 입력 형태, 조건 해석, severity 관계 순서로 확인하면 이해가 쉽습니다.</p>'
+                    : ""
+            }
             ${emptyMessage}
             ${
                 errors.length > 0
                     ? `
                         <div class="alert-rule-preview-validation-group is-error">
                             <h5>오류</h5>
-                            <ul>
-                                ${errors.map((item) => `<li>${escapeHtml(item.message || item)}</li>`).join("")}
-                            </ul>
+                            ${
+                                useStructuredSections
+                                    ? renderStructuredAlertRuleValidationEntries(errors)
+                                    : `
+                                        <ul>
+                                            ${errors.map((item) => `<li>${escapeHtml(getAlertRuleValidationEntryMessage(item))}</li>`).join("")}
+                                        </ul>
+                                    `
+                            }
                         </div>
                     `
                     : ""
@@ -3463,9 +3553,15 @@ function renderAlertRuleValidationBlock(validation) {
                     ? `
                         <div class="alert-rule-preview-validation-group is-warning">
                             <h5>경고</h5>
-                            <ul>
-                                ${warnings.map((item) => `<li>${escapeHtml(item.message || item)}</li>`).join("")}
-                            </ul>
+                            ${
+                                useStructuredSections
+                                    ? renderStructuredAlertRuleValidationEntries(warnings)
+                                    : `
+                                        <ul>
+                                            ${warnings.map((item) => `<li>${escapeHtml(getAlertRuleValidationEntryMessage(item))}</li>`).join("")}
+                                        </ul>
+                                    `
+                            }
                         </div>
                     `
                     : ""
@@ -3531,7 +3627,7 @@ function renderAlertRulePreviewPanel() {
         </section>
     `;
     const noticeBlock = renderAlertRulePreviewNoticeBlock();
-    const validationBlock = renderAlertRuleValidationBlock(validation);
+    const validationBlock = renderAlertRuleValidationBlock(validation, rule);
 
     const summaryBlock = `
         <div class="summary-metrics">

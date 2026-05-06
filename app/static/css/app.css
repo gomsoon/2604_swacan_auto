@@ -1523,6 +1523,26 @@ a {
     margin: 0;
 }
 
+.alert-rule-validation-entry-groups {
+    display: grid;
+    gap: 8px;
+}
+
+.alert-rule-validation-entry-group {
+    display: grid;
+    gap: 6px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid currentColor;
+    border-color: rgba(88, 99, 107, 0.18);
+    background: rgba(255, 255, 255, 0.42);
+}
+
+.alert-rule-validation-entry-group h6,
+.alert-rule-validation-entry-group ul {
+    margin: 0;
+}
+
 .alert-rule-preview-validation-group.is-warning {
     border-color: rgba(141, 100, 0, 0.18);
     background: var(--warning-soft);
