@@ -29,6 +29,7 @@ ALLOWED_STATE_TYPES = {"agent", "host", "process"}
 ALLOWED_STATE_STATUSES = {"up", "warning", "down"}
 ALLOWED_ALERT_SCOPE_TYPES = {"object_type", "monitored_object"}
 ALLOWED_ALERT_COMPARISONS = {"gte", "lte"}
+ALLOWED_ALERT_CONDITION_COMPARISONS = {"gt", "gte", "lt", "lte"}
 ALLOWED_ALERT_RULE_STATUSES = {"draft", "published", "deprecated"}
 ALERT_INSTANCE_STATUSES = {"open", "in_progress", "suppressed", "resolved"}
 ALERT_ACTIVE_STATUSES = {"open", "in_progress", "suppressed"}
@@ -456,6 +457,7 @@ def serialize_alert_rule(row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+    attach_normalized_alert_rule_conditions(payload, payload)
     payload["publish_warnings"] = build_alert_rule_publish_warnings(payload)
     return payload
 
@@ -531,6 +533,91 @@ def build_alert_rule_publish_warnings(rule: dict[str, Any]) -> list[dict[str, An
     return warnings
 
 
+def normalize_alert_rule_condition_mode(rule: dict[str, Any]) -> str:
+    return "compound" if rule.get("condition_mode") == "compound" else "scalar"
+
+
+def normalize_alert_rule_condition_clause(raw_clause: Any) -> dict[str, Any] | None:
+    if not isinstance(raw_clause, dict):
+        return None
+    comparison = raw_clause.get("comparison")
+    if comparison not in ALLOWED_ALERT_CONDITION_COMPARISONS:
+        return None
+    try:
+        value = parse_optional_float(raw_clause.get("value"))
+    except ValueError:
+        return None
+    if value is None:
+        return None
+    return {
+        "comparison": comparison,
+        "value": value,
+    }
+
+
+def normalize_alert_rule_condition_group(
+    raw_group: Any,
+    *,
+    condition_mode: str,
+    fallback_comparison: str,
+    fallback_threshold: float | None,
+) -> dict[str, Any] | None:
+    if condition_mode == "scalar":
+        if fallback_threshold is None:
+            return None
+        return {
+            "logical_operator": None,
+            "clauses": [
+                {
+                    "comparison": fallback_comparison,
+                    "value": fallback_threshold,
+                }
+            ],
+        }
+
+    if not isinstance(raw_group, dict):
+        return None
+
+    logical_operator = raw_group.get("logical_operator")
+    if logical_operator not in {"and", "or"}:
+        logical_operator = None
+
+    raw_clauses = raw_group.get("clauses")
+    if not isinstance(raw_clauses, list):
+        raw_clauses = []
+
+    clauses = []
+    for raw_clause in raw_clauses:
+        clause = normalize_alert_rule_condition_clause(raw_clause)
+        if clause is not None:
+            clauses.append(clause)
+
+    if not clauses:
+        return None
+
+    return {
+        "logical_operator": logical_operator,
+        "clauses": clauses,
+    }
+
+
+def attach_normalized_alert_rule_conditions(payload: dict[str, Any], source_rule: dict[str, Any]) -> None:
+    condition_mode = normalize_alert_rule_condition_mode(source_rule)
+    payload["condition_mode"] = condition_mode
+    payload["warning_condition"] = normalize_alert_rule_condition_group(
+        source_rule.get("warning_condition"),
+        condition_mode=condition_mode,
+        fallback_comparison=payload["comparison"],
+        fallback_threshold=payload.get("warning_threshold"),
+    )
+    payload["critical_condition"] = normalize_alert_rule_condition_group(
+        source_rule.get("critical_condition"),
+        condition_mode=condition_mode,
+        fallback_comparison=payload["comparison"],
+        fallback_threshold=payload.get("critical_threshold"),
+    )
+
+
 def coerce_optional_int(value: Any) -> int | None:
     if value in (None, ""):
         return None
@@ -594,6 +681,7 @@ def serialize_alert_rule_preview_input(
         "created_at": rule.get("created_at"),
         "updated_at": rule.get("updated_at"),
     }
+    attach_normalized_alert_rule_conditions(payload, rule)
     payload["publish_warnings"] = build_alert_rule_publish_warnings(payload)
     return payload
 

@@ -1121,6 +1121,15 @@ def test_admin_alert_rule_targets_preview_returns_matching_objects(seeded_client
     payload = response.get_json()
     assert payload["preview_source"] == "saved_rule"
     assert payload["rule"]["id"] == 1501
+    assert payload["rule"]["condition_mode"] == "scalar"
+    assert payload["rule"]["warning_condition"] == {
+        "logical_operator": None,
+        "clauses": [{"comparison": "gte", "value": 80.0}],
+    }
+    assert payload["rule"]["critical_condition"] == {
+        "logical_operator": None,
+        "clauses": [{"comparison": "gte", "value": 95.0}],
+    }
     assert payload["validation"] == {"errors": [], "warnings": []}
     assert payload["summary"] == {
         "matched_object_count": 1,
@@ -1253,9 +1262,73 @@ def test_admin_alert_rule_preview_accepts_unsaved_draft_payload(seeded_client) -
     assert payload["preview_source"] == "draft_preview"
     assert payload["rule"]["display_name"] == "Preview CPU High"
     assert payload["rule"]["status"] == "draft"
+    assert payload["rule"]["condition_mode"] == "scalar"
+    assert payload["rule"]["warning_condition"] == {
+        "logical_operator": None,
+        "clauses": [{"comparison": "gte", "value": 80.0}],
+    }
+    assert payload["rule"]["critical_condition"] == {
+        "logical_operator": None,
+        "clauses": [{"comparison": "gte", "value": 95.0}],
+    }
     assert payload["validation"] == {"errors": [], "warnings": []}
     assert payload["summary"]["matched_object_count"] == 1
     assert payload["items"][0]["display_name"] == "App Process"
+
+
+def test_admin_alert_rule_preview_normalizes_compound_condition_shape(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/alert-rules/preview?limit=20",
+        json={
+            "status": "draft",
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "cpu_usage",
+            "comparison": "gte",
+            "warning_threshold": 80,
+            "critical_threshold": 95,
+            "display_name": "Preview CPU Band",
+            "rule_key": "threshold.process.cpu_usage.preview-cpu-band",
+            "is_enabled": True,
+            "condition_mode": "compound",
+            "warning_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "lte", "value": 20},
+                    {"comparison": "gte", "value": 80},
+                ],
+            },
+            "critical_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "lte", "value": 10},
+                    {"comparison": "gte", "value": 90},
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["rule"]["condition_mode"] == "compound"
+    assert payload["rule"]["warning_condition"] == {
+        "logical_operator": "or",
+        "clauses": [
+            {"comparison": "lte", "value": 20.0},
+            {"comparison": "gte", "value": 80.0},
+        ],
+    }
+    assert payload["rule"]["critical_condition"] == {
+        "logical_operator": "or",
+        "clauses": [
+            {"comparison": "lte", "value": 10.0},
+            {"comparison": "gte", "value": 90.0},
+        ],
+    }
+    assert payload["summary"]["matched_object_count"] == 1
 
 
 def test_admin_alert_rule_preview_returns_validation_errors_without_failing_request(seeded_client) -> None:
