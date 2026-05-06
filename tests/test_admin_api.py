@@ -1331,6 +1331,137 @@ def test_admin_alert_rule_preview_normalizes_compound_condition_shape(seeded_cli
     assert payload["summary"]["matched_object_count"] == 1
 
 
+def test_admin_alert_rule_preview_rejects_invalid_compound_shape_without_failing_request(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/alert-rules/preview?limit=20",
+        json={
+            "status": "draft",
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "cpu_usage",
+            "comparison": "gte",
+            "warning_threshold": 80,
+            "critical_threshold": 95,
+            "display_name": "Broken Compound Preview",
+            "rule_key": "threshold.process.cpu_usage.broken-compound-preview",
+            "is_enabled": True,
+            "condition_mode": "compound",
+            "warning_condition": {
+                "logical_operator": None,
+                "clauses": [{"comparison": "gte", "value": 80}],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["validation"]["warnings"] == []
+    assert payload["validation"]["errors"] == [
+        {"message": "warning_condition logical_operator must be 'and' or 'or' in compound mode."},
+        {"message": "warning_condition must define exactly 2 clauses in compound mode."},
+    ]
+    assert payload["summary"] == {
+        "matched_object_count": 0,
+        "active_view_count": 0,
+        "active_node_count": 0,
+        "open_alert_count": 0,
+        "source_rule_open_alert_count": 0,
+        "metric_available_count": 0,
+        "warning_match_count": 0,
+        "critical_match_count": 0,
+    }
+    assert payload["items"] == []
+
+
+def test_admin_alert_rule_preview_rejects_compound_subset_violation(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/alert-rules/preview?limit=20",
+        json={
+            "status": "draft",
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "cpu_usage",
+            "comparison": "gte",
+            "warning_threshold": 80,
+            "critical_threshold": 95,
+            "display_name": "Subset Broken Preview",
+            "rule_key": "threshold.process.cpu_usage.subset-broken-preview",
+            "is_enabled": True,
+            "condition_mode": "compound",
+            "warning_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "gte", "value": 80},
+                    {"comparison": "gte", "value": 90},
+                ],
+            },
+            "critical_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "lte", "value": 10},
+                    {"comparison": "lte", "value": 5},
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert {"message": "warning_condition contains a redundant clause."} in payload["validation"]["warnings"]
+    assert {"message": "critical_condition contains a redundant clause."} in payload["validation"]["warnings"]
+    assert payload["validation"]["errors"] == [{"message": "critical_condition must be a subset of warning_condition."}]
+    assert payload["items"] == []
+
+
+def test_admin_alert_rule_preview_returns_compound_redundancy_warning(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/alert-rules/preview?limit=20",
+        json={
+            "status": "draft",
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "cpu_usage",
+            "comparison": "gte",
+            "warning_threshold": 80,
+            "critical_threshold": 95,
+            "display_name": "Redundant Compound Preview",
+            "rule_key": "threshold.process.cpu_usage.redundant-compound-preview",
+            "is_enabled": True,
+            "condition_mode": "compound",
+            "warning_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "gte", "value": 80},
+                    {"comparison": "gte", "value": 90},
+                ],
+            },
+            "critical_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "gte", "value": 95},
+                    {"comparison": "gte", "value": 98},
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["validation"]["errors"] == []
+    assert {"message": "warning_condition contains a redundant clause."} in payload["validation"]["warnings"]
+    assert {"message": "critical_condition contains a redundant clause."} in payload["validation"]["warnings"]
+    assert payload["summary"]["matched_object_count"] == 1
+
+
 def test_admin_alert_rule_preview_returns_validation_errors_without_failing_request(seeded_client) -> None:
     login(seeded_client)
 

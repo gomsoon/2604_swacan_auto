@@ -908,6 +908,261 @@ def parse_optional_float(value) -> float | None:
         raise ValueError("threshold must be a number") from None
 
 
+def build_threshold_clause_interval(clause: dict[str, Any]) -> dict[str, Any]:
+    comparison = clause["comparison"]
+    value = float(clause["value"])
+    if comparison == "gt":
+        return {"lower": value, "lower_inclusive": False, "upper": None, "upper_inclusive": False}
+    if comparison == "gte":
+        return {"lower": value, "lower_inclusive": True, "upper": None, "upper_inclusive": False}
+    if comparison == "lt":
+        return {"lower": None, "lower_inclusive": False, "upper": value, "upper_inclusive": False}
+    return {"lower": None, "lower_inclusive": False, "upper": value, "upper_inclusive": True}
+
+
+def is_interval_empty(interval: dict[str, Any]) -> bool:
+    lower = interval["lower"]
+    upper = interval["upper"]
+    if lower is None or upper is None:
+        return False
+    if lower > upper:
+        return True
+    if lower == upper and not (interval["lower_inclusive"] and interval["upper_inclusive"]):
+        return True
+    return False
+
+
+def intersect_intervals(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any] | None:
+    if left["lower"] is None:
+        lower = right["lower"]
+        lower_inclusive = right["lower_inclusive"]
+    elif right["lower"] is None:
+        lower = left["lower"]
+        lower_inclusive = left["lower_inclusive"]
+    elif left["lower"] > right["lower"]:
+        lower = left["lower"]
+        lower_inclusive = left["lower_inclusive"]
+    elif right["lower"] > left["lower"]:
+        lower = right["lower"]
+        lower_inclusive = right["lower_inclusive"]
+    else:
+        lower = left["lower"]
+        lower_inclusive = left["lower_inclusive"] and right["lower_inclusive"]
+
+    if left["upper"] is None:
+        upper = right["upper"]
+        upper_inclusive = right["upper_inclusive"]
+    elif right["upper"] is None:
+        upper = left["upper"]
+        upper_inclusive = left["upper_inclusive"]
+    elif left["upper"] < right["upper"]:
+        upper = left["upper"]
+        upper_inclusive = left["upper_inclusive"]
+    elif right["upper"] < left["upper"]:
+        upper = right["upper"]
+        upper_inclusive = right["upper_inclusive"]
+    else:
+        upper = left["upper"]
+        upper_inclusive = left["upper_inclusive"] and right["upper_inclusive"]
+
+    interval = {
+        "lower": lower,
+        "lower_inclusive": lower_inclusive,
+        "upper": upper,
+        "upper_inclusive": upper_inclusive,
+    }
+    return None if is_interval_empty(interval) else interval
+
+
+def interval_equals(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    return (
+        left["lower"] == right["lower"]
+        and left["lower_inclusive"] == right["lower_inclusive"]
+        and left["upper"] == right["upper"]
+        and left["upper_inclusive"] == right["upper_inclusive"]
+    )
+
+
+def can_merge_intervals(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    if left["upper"] is None or right["lower"] is None:
+        return True
+    if left["upper"] > right["lower"]:
+        return True
+    if left["upper"] == right["lower"] and (left["upper_inclusive"] or right["lower_inclusive"]):
+        return True
+    return False
+
+
+def merge_intervals(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    merged = {
+        "lower": left["lower"],
+        "lower_inclusive": left["lower_inclusive"],
+        "upper": left["upper"],
+        "upper_inclusive": left["upper_inclusive"],
+    }
+
+    if merged["upper"] is None or right["upper"] is None:
+        merged["upper"] = None
+        merged["upper_inclusive"] = False
+        return merged
+
+    if right["upper"] > merged["upper"]:
+        merged["upper"] = right["upper"]
+        merged["upper_inclusive"] = right["upper_inclusive"]
+    elif right["upper"] == merged["upper"]:
+        merged["upper_inclusive"] = merged["upper_inclusive"] or right["upper_inclusive"]
+    return merged
+
+
+def normalize_interval_set(intervals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sorted_intervals = sorted(
+        intervals,
+        key=lambda item: (
+            item["lower"] is not None,
+            item["lower"] if item["lower"] is not None else 0,
+            not item["lower_inclusive"],
+        ),
+    )
+    normalized: list[dict[str, Any]] = []
+    for interval in sorted_intervals:
+        if not normalized:
+            normalized.append(interval)
+            continue
+        if can_merge_intervals(normalized[-1], interval):
+            normalized[-1] = merge_intervals(normalized[-1], interval)
+            continue
+        normalized.append(interval)
+    return normalized
+
+
+def interval_contains(outer: dict[str, Any], inner: dict[str, Any]) -> bool:
+    outer_lower = outer["lower"]
+    inner_lower = inner["lower"]
+    if outer_lower is not None:
+        if inner_lower is None:
+            return False
+        if outer_lower > inner_lower:
+            return False
+        if outer_lower == inner_lower and not (outer["lower_inclusive"] or not inner["lower_inclusive"]):
+            return False
+
+    outer_upper = outer["upper"]
+    inner_upper = inner["upper"]
+    if outer_upper is not None:
+        if inner_upper is None:
+            return False
+        if outer_upper < inner_upper:
+            return False
+        if outer_upper == inner_upper and not (outer["upper_inclusive"] or not inner["upper_inclusive"]):
+            return False
+
+    return True
+
+
+def interval_set_is_subset(outer_intervals: list[dict[str, Any]], inner_intervals: list[dict[str, Any]]) -> bool:
+    for inner in inner_intervals:
+        if not any(interval_contains(outer, inner) for outer in outer_intervals):
+            return False
+    return True
+
+
+def validate_compound_condition_group(raw_group: Any, *, label: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]] | None]:
+    errors: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    if not isinstance(raw_group, dict):
+        errors.append({"message": f"{label} must be an object in compound mode."})
+        return errors, warnings, None
+
+    logical_operator = raw_group.get("logical_operator")
+    if logical_operator not in {"and", "or"}:
+        errors.append({"message": f"{label} logical_operator must be 'and' or 'or' in compound mode."})
+
+    raw_clauses = raw_group.get("clauses")
+    if not isinstance(raw_clauses, list) or len(raw_clauses) != 2:
+        errors.append({"message": f"{label} must define exactly 2 clauses in compound mode."})
+        return errors, warnings, None
+
+    clauses: list[dict[str, Any]] = []
+    for index, raw_clause in enumerate(raw_clauses, start=1):
+        if not isinstance(raw_clause, dict):
+            errors.append({"message": f"{label} clause {index} must be an object."})
+            continue
+        comparison = raw_clause.get("comparison")
+        if comparison not in ALLOWED_ALERT_CONDITION_COMPARISONS:
+            errors.append({"message": f"{label} clause {index} comparison is invalid."})
+            continue
+        try:
+            value = parse_optional_float(raw_clause.get("value"))
+        except ValueError:
+            errors.append({"message": f"{label} clause {index} value must be a number."})
+            continue
+        if value is None:
+            errors.append({"message": f"{label} clause {index} value must be a number."})
+            continue
+        clauses.append({"comparison": comparison, "value": value})
+
+    if errors:
+        return errors, warnings, None
+
+    intervals = [build_threshold_clause_interval(clause) for clause in clauses]
+    if logical_operator == "and":
+        intersection = intersect_intervals(intervals[0], intervals[1])
+        if intersection is None:
+            errors.append({"message": f"{label} condition cannot be satisfied."})
+            return errors, warnings, None
+        if interval_equals(intersection, intervals[0]) or interval_equals(intersection, intervals[1]):
+            warnings.append({"message": f"{label} contains a redundant clause."})
+        return errors, warnings, [intersection]
+
+    normalized_intervals = normalize_interval_set(intervals)
+    if len(normalized_intervals) == 1:
+        warnings.append({"message": f"{label} contains a redundant clause."})
+    return errors, warnings, normalized_intervals
+
+
+def validate_alert_rule_preview_conditions(
+    raw_rule: dict[str, Any],
+    normalized_rule: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    errors: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    condition_mode = normalized_rule.get("condition_mode") or "scalar"
+
+    if condition_mode == "scalar":
+        if raw_rule.get("warning_condition") is not None or raw_rule.get("critical_condition") is not None:
+            errors.append({"message": "condition groups can be used only when condition_mode is 'compound'."})
+        return errors, warnings
+
+    raw_warning = raw_rule.get("warning_condition")
+    raw_critical = raw_rule.get("critical_condition")
+    if raw_warning is None and raw_critical is None:
+        errors.append({"message": "compound preview requires at least one condition group."})
+        return errors, warnings
+
+    warning_intervals = None
+    critical_intervals = None
+    if raw_warning is not None:
+        group_errors, group_warnings, warning_intervals = validate_compound_condition_group(
+            raw_warning,
+            label="warning_condition",
+        )
+        errors.extend(group_errors)
+        warnings.extend(group_warnings)
+    if raw_critical is not None:
+        group_errors, group_warnings, critical_intervals = validate_compound_condition_group(
+            raw_critical,
+            label="critical_condition",
+        )
+        errors.extend(group_errors)
+        warnings.extend(group_warnings)
+
+    if not errors and warning_intervals and critical_intervals:
+        if not interval_set_is_subset(warning_intervals, critical_intervals):
+            errors.append({"message": "critical_condition must be a subset of warning_condition."})
+
+    return errors, warnings
+
+
 def parse_optional_bool(value) -> bool:
     if isinstance(value, bool):
         return value
@@ -1827,13 +2082,20 @@ def get_alert_rule_targets_preview(rule_id: int):
         return error_response("not_found", "alert rule not found", 404)
 
     rule_payload = serialize_alert_rule(row)
-    summary, items = build_alert_rule_target_preview(rule_payload, limit=limit)
+    compound_errors, compound_warnings = validate_alert_rule_preview_conditions(
+        {"condition_mode": rule_payload.get("condition_mode")},
+        rule_payload,
+    )
+    if compound_errors:
+        summary, items = build_empty_alert_rule_preview_summary(), []
+    else:
+        summary, items = build_alert_rule_target_preview(rule_payload, limit=limit)
     return {
         "preview_source": "saved_rule",
         "rule": rule_payload,
         "validation": {
-            "errors": [],
-            "warnings": rule_payload["publish_warnings"],
+            "errors": compound_errors,
+            "warnings": [*compound_warnings, *rule_payload["publish_warnings"]],
         },
         "summary": summary,
         "items": items,
@@ -1878,13 +2140,17 @@ def preview_alert_rule():
         }
 
     rule_payload = serialize_alert_rule_preview_input(payload, rule_id=rule_id, status=status)
-    summary, items = build_alert_rule_target_preview(rule_payload, limit=limit)
+    compound_errors, compound_warnings = validate_alert_rule_preview_conditions(data, rule_payload)
+    if compound_errors:
+        summary, items = build_empty_alert_rule_preview_summary(), []
+    else:
+        summary, items = build_alert_rule_target_preview(rule_payload, limit=limit)
     return {
         "preview_source": "draft_preview",
         "rule": rule_payload,
         "validation": {
-            "errors": [],
-            "warnings": rule_payload["publish_warnings"],
+            "errors": compound_errors,
+            "warnings": [*compound_warnings, *rule_payload["publish_warnings"]],
         },
         "summary": summary,
         "items": items,
