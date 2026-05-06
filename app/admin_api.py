@@ -699,7 +699,149 @@ def build_empty_alert_rule_preview_summary() -> dict[str, int]:
     }
 
 
-def build_alert_rule_target_preview(rule: dict[str, Any], *, limit: int) -> tuple[dict[str, int], list[dict[str, Any]]]:
+def build_empty_alert_rule_preview_decision_summary() -> dict[str, int]:
+    return {
+        "candidate_rule_count": 0,
+        "published_competing_rule_count": 0,
+        "items_with_suppression_count": 0,
+    }
+
+
+def alert_rule_preview_specificity_rank(rule: dict[str, Any]) -> int:
+    return 2 if rule.get("scope_type") == "monitored_object" else 1
+
+
+def alert_rule_preview_candidate_identity(rule: dict[str, Any]) -> str:
+    rule_key = rule.get("rule_key")
+    if isinstance(rule_key, str) and rule_key:
+        return rule_key
+    rule_id = rule.get("id")
+    if isinstance(rule_id, int):
+        return f"rule:{rule_id}"
+    display_name = rule.get("display_name")
+    if isinstance(display_name, str) and display_name:
+        return f"name:{display_name}"
+    return f"preview:{rule.get('scope_type')}:{rule.get('metric_key')}"
+
+
+def load_alert_rule_preview_competing_rules(
+    rule: dict[str, Any],
+    *,
+    monitored_object_id: int,
+    object_type: str,
+) -> list[dict[str, Any]]:
+    params: list[Any] = [
+        rule["state_type"],
+        rule["metric_key"],
+        rule["comparison"],
+        monitored_object_id,
+        object_type,
+    ]
+    exclude_clause = ""
+    if isinstance(rule.get("id"), int):
+        exclude_clause = "AND rules.id != ?"
+        params.append(rule["id"])
+
+    rows = get_db().execute(
+        f"""
+        {ALERT_RULE_SELECT_SQL}
+        WHERE rules.is_enabled = 1
+          AND rules.status = 'published'
+          AND rules.state_type = ?
+          AND rules.metric_key = ?
+          AND rules.comparison = ?
+          AND (
+                (rules.scope_type = 'monitored_object' AND rules.monitored_object_id = ?)
+             OR (rules.scope_type = 'object_type' AND rules.object_type = ?)
+          )
+          {exclude_clause}
+        ORDER BY
+            CASE WHEN rules.scope_type = 'monitored_object' THEN 0 ELSE 1 END,
+            rules.id ASC
+        """,
+        tuple(params),
+    ).fetchall()
+    return [{**serialize_alert_rule(row), "_origin": "published_rule"} for row in rows]
+
+
+def evaluate_alert_rule_preview_decision(
+    *,
+    current_rule: dict[str, Any],
+    current_threshold_evaluation: dict[str, Any],
+    metric_value: float | None,
+    competing_rules: list[dict[str, Any]],
+) -> dict[str, Any]:
+    decision = {
+        "candidate_rule_count": 1 + len(competing_rules),
+        "winner_rule_key": None,
+        "winner_display_name": None,
+        "winner_scope_type": None,
+        "winner_rule_origin": None,
+        "winner_threshold_level": None,
+        "suppressed_rule_count": 0,
+        "suppressed_rule_display_names": [],
+    }
+    if current_threshold_evaluation["threshold_level"] not in {"warning", "critical"}:
+        return decision
+
+    firing_rules: list[dict[str, Any]] = [
+        {
+            **current_rule,
+            "_origin": "current_preview",
+            "_threshold_level": current_threshold_evaluation["threshold_level"],
+        }
+    ]
+    for competing_rule in competing_rules:
+        threshold_evaluation = preview_threshold_evaluation(metric_value, competing_rule)
+        if threshold_evaluation["threshold_level"] not in {"warning", "critical"}:
+            continue
+        firing_rules.append(
+            {
+                **competing_rule,
+                "_threshold_level": threshold_evaluation["threshold_level"],
+            }
+        )
+
+    if not firing_rules:
+        return decision
+
+    severity_rank = {"critical": 2, "warning": 1}
+    firing_rules.sort(
+        key=lambda item: (
+            -severity_rank[item["_threshold_level"]],
+            -alert_rule_preview_specificity_rank(item),
+            0 if item.get("_origin") == "current_preview" else 1,
+            item.get("id") if isinstance(item.get("id"), int) else 10**12,
+            item.get("rule_key") or "",
+        )
+    )
+    winner = firing_rules[0]
+    winner_specificity_rank = alert_rule_preview_specificity_rank(winner)
+    suppressed_rules = [
+        item
+        for item in firing_rules[1:]
+        if alert_rule_preview_specificity_rank(item) < winner_specificity_rank
+    ]
+    decision.update(
+        {
+            "winner_rule_key": winner.get("rule_key"),
+            "winner_display_name": winner.get("display_name") or winner.get("rule_key"),
+            "winner_scope_type": winner.get("scope_type"),
+            "winner_rule_origin": winner.get("_origin"),
+            "winner_threshold_level": winner.get("_threshold_level"),
+            "suppressed_rule_count": len(suppressed_rules),
+            "suppressed_rule_display_names": [
+                item.get("display_name") or item.get("rule_key") or "unnamed rule"
+                for item in suppressed_rules
+            ],
+        }
+    )
+    return decision
+
+
+def build_alert_rule_target_preview(
+    rule: dict[str, Any], *, limit: int
+) -> tuple[dict[str, int], dict[str, int], list[dict[str, Any]]]:
     clauses: list[str] = []
     params: list[Any] = []
     if rule["scope_type"] == "monitored_object":
@@ -769,6 +911,9 @@ def build_alert_rule_target_preview(rule: dict[str, Any], *, limit: int) -> tupl
     warning_match_count = 0
     critical_match_count = 0
     metric_available_count = 0
+    unique_candidate_rule_ids: set[str] = set()
+    unique_published_competing_rule_ids: set[str] = set()
+    items_with_suppression_count = 0
 
     for preview_row in preview_rows:
         state = parse_json_or_text(preview_row["latest_state_json"])
@@ -777,6 +922,24 @@ def build_alert_rule_target_preview(rule: dict[str, Any], *, limit: int) -> tupl
         current_metric_value = preview_metric_value(state, rule["metric_key"])
         threshold_evaluation = preview_threshold_evaluation(current_metric_value, rule)
         threshold_level = threshold_evaluation["threshold_level"]
+        competing_rules = load_alert_rule_preview_competing_rules(
+            rule,
+            monitored_object_id=preview_row["monitored_object_id"],
+            object_type=preview_row["object_type"],
+        )
+        decision = evaluate_alert_rule_preview_decision(
+            current_rule=rule,
+            current_threshold_evaluation=threshold_evaluation,
+            metric_value=current_metric_value,
+            competing_rules=competing_rules,
+        )
+        unique_candidate_rule_ids.add(alert_rule_preview_candidate_identity(rule))
+        unique_candidate_rule_ids.update(alert_rule_preview_candidate_identity(item) for item in competing_rules)
+        unique_published_competing_rule_ids.update(
+            alert_rule_preview_candidate_identity(item) for item in competing_rules
+        )
+        if decision["suppressed_rule_count"] > 0:
+            items_with_suppression_count += 1
         if current_metric_value is not None:
             metric_available_count += 1
         if threshold_level == "critical":
@@ -802,6 +965,7 @@ def build_alert_rule_target_preview(rule: dict[str, Any], *, limit: int) -> tupl
                 "current_metric_value": current_metric_value,
                 "threshold_level": threshold_level,
                 "winning_condition_trace": threshold_evaluation["winning_condition_trace"],
+                **decision,
             }
         )
 
@@ -838,6 +1002,11 @@ def build_alert_rule_target_preview(rule: dict[str, Any], *, limit: int) -> tupl
             "metric_available_count": metric_available_count,
             "warning_match_count": warning_match_count,
             "critical_match_count": critical_match_count,
+        },
+        {
+            "candidate_rule_count": len(unique_candidate_rule_ids),
+            "published_competing_rule_count": len(unique_published_competing_rule_ids),
+            "items_with_suppression_count": items_with_suppression_count,
         },
         all_items[:limit],
     )
@@ -2183,7 +2352,7 @@ def get_alert_rule_targets_preview(rule_id: int):
     if compound_errors:
         summary, items = build_empty_alert_rule_preview_summary(), []
     else:
-        summary, items = build_alert_rule_target_preview(rule_payload, limit=limit)
+        summary, decision_summary, items = build_alert_rule_target_preview(rule_payload, limit=limit)
     return {
         "preview_source": "saved_rule",
         "rule": rule_payload,
@@ -2192,6 +2361,7 @@ def get_alert_rule_targets_preview(rule_id: int):
             "warnings": [*compound_warnings, *rule_payload["publish_warnings"]],
         },
         "summary": summary,
+        "decision_summary": decision_summary,
         "items": items,
     }
 
@@ -2217,6 +2387,7 @@ def preview_alert_rule():
                 "warnings": [],
             },
             "summary": build_empty_alert_rule_preview_summary(),
+            "decision_summary": build_empty_alert_rule_preview_decision_summary(),
             "items": [],
         }
 
@@ -2230,15 +2401,20 @@ def preview_alert_rule():
                 "warnings": [],
             },
             "summary": build_empty_alert_rule_preview_summary(),
+            "decision_summary": build_empty_alert_rule_preview_decision_summary(),
             "items": [],
         }
 
     rule_payload = serialize_alert_rule_preview_input(payload, rule_id=rule_id, status=status)
     compound_errors, compound_warnings = validate_alert_rule_preview_conditions(data, rule_payload)
     if compound_errors:
-        summary, items = build_empty_alert_rule_preview_summary(), []
+        summary, decision_summary, items = (
+            build_empty_alert_rule_preview_summary(),
+            build_empty_alert_rule_preview_decision_summary(),
+            [],
+        )
     else:
-        summary, items = build_alert_rule_target_preview(rule_payload, limit=limit)
+        summary, decision_summary, items = build_alert_rule_target_preview(rule_payload, limit=limit)
     return {
         "preview_source": "draft_preview",
         "rule": rule_payload,
@@ -2247,6 +2423,7 @@ def preview_alert_rule():
             "warnings": [*compound_warnings, *rule_payload["publish_warnings"]],
         },
         "summary": summary,
+        "decision_summary": decision_summary,
         "items": items,
     }
 

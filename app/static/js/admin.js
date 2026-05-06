@@ -3433,7 +3433,45 @@ function buildAlertRulePreviewSummaryNarrative(summary, rule) {
     return `metric 값을 읽을 수 있는 객체 ${metricAvailableCount}개 모두 현재 threshold 안에 있습니다.`;
 }
 
-function renderAlertRulePreviewSummaryBlock(summary, rule) {
+function buildAlertRuleDecisionSummaryNarrative(decisionSummary) {
+    const candidateRuleCount = Number(decisionSummary?.candidate_rule_count || 0);
+    const publishedCompetingRuleCount = Number(decisionSummary?.published_competing_rule_count || 0);
+    const itemsWithSuppressionCount = Number(decisionSummary?.items_with_suppression_count || 0);
+    if (candidateRuleCount <= 1) {
+        return "현재 입력 rule 단독 기준으로 preview를 해석합니다.";
+    }
+    if (itemsWithSuppressionCount > 0) {
+        return `현재 입력 rule과 published competing rule ${publishedCompetingRuleCount}개를 함께 비교했고, ${itemsWithSuppressionCount}개 객체에서는 우선순위에 따라 일반 rule이 눌릴 수 있습니다.`;
+    }
+    return `현재 입력 rule과 published competing rule ${publishedCompetingRuleCount}개를 함께 비교합니다.`;
+}
+
+function buildAlertRuleWinnerLabel(item) {
+    if (!item?.winner_display_name) {
+        return `winner 없음${Number(item?.candidate_rule_count || 0) > 1 ? " (현재 입력 rule이 발화하지 않음)" : ""}`;
+    }
+    const thresholdLevel = item.winner_threshold_level ? ` / ${item.winner_threshold_level}` : "";
+    if (item.winner_rule_origin === "current_preview") {
+        return `winner 현재 입력 rule (${item.winner_display_name}${thresholdLevel})`;
+    }
+    return `winner ${item.winner_display_name} (${item.winner_scope_type || "-"}${thresholdLevel})`;
+}
+
+function buildAlertRuleSuppressedLabel(item) {
+    const suppressedCount = Number(item?.suppressed_rule_count || 0);
+    if (suppressedCount <= 0) {
+        return "suppressed 없음";
+    }
+    const names = Array.isArray(item?.suppressed_rule_display_names)
+        ? item.suppressed_rule_display_names.filter((value) => typeof value === "string" && value.trim().length > 0)
+        : [];
+    if (!names.length) {
+        return `suppressed ${suppressedCount}건`;
+    }
+    return `suppressed ${suppressedCount}건: ${names.join(", ")}`;
+}
+
+function renderAlertRulePreviewSummaryBlock(summary, decisionSummary, rule) {
     return `
         <section class="alert-rule-preview-summary-panel">
             <div class="section-header">
@@ -3451,8 +3489,12 @@ function renderAlertRulePreviewSummaryBlock(summary, rule) {
                     ["metric 확인 가능", summary?.metric_available_count ?? 0],
                     ["warning 매칭", summary?.warning_match_count ?? 0],
                     ["critical 매칭", summary?.critical_match_count ?? 0],
+                    ["candidate rules", decisionSummary?.candidate_rule_count ?? 0],
+                    ["competing published", decisionSummary?.published_competing_rule_count ?? 0],
+                    ["suppression 객체", decisionSummary?.items_with_suppression_count ?? 0],
                 ])}
             </div>
+            <p class="section-copy">${escapeHtml(buildAlertRuleDecisionSummaryNarrative(decisionSummary))}</p>
             ${
                 rule.condition_mode === "compound"
                     ? '<p class="section-copy">compound trace의 clause 번호는 1부터 보이며, 각 item 카드에서 실제로 매칭된 절을 함께 확인할 수 있습니다.</p>'
@@ -3499,6 +3541,8 @@ function renderAlertRulePreviewItem(item, rule) {
                             ? `<p class="admin-meta">판정 trace ${escapeHtml(traceText)}</p>`
                             : '<p class="admin-meta">판정 trace 없음</p>'
                     }
+                    <p class="admin-meta">${escapeHtml(buildAlertRuleWinnerLabel(item))}</p>
+                    <p class="admin-meta">${escapeHtml(buildAlertRuleSuppressedLabel(item))}</p>
                 </section>
                 <section class="alert-rule-preview-item-block">
                     <h5>실시간 상태</h5>
@@ -3726,7 +3770,7 @@ function renderAlertRulePreviewPanel() {
         return;
     }
 
-    const { rule, summary, items, validation, preview_source: previewSource } = selectedAlertRulePreview;
+    const { rule, summary, decision_summary: decisionSummary, items, validation, preview_source: previewSource } = selectedAlertRulePreview;
     const errors = Array.isArray(validation?.errors) ? validation.errors : [];
     const previewSourceLabel = getAlertRulePreviewSourceLabel(previewSource);
     const header = `
@@ -3767,7 +3811,7 @@ function renderAlertRulePreviewPanel() {
     const noticeBlock = renderAlertRulePreviewNoticeBlock();
     const validationBlock = renderAlertRuleValidationBlock(validation, rule);
 
-    const summaryBlock = renderAlertRulePreviewSummaryBlock(summary, rule);
+    const summaryBlock = renderAlertRulePreviewSummaryBlock(summary, decisionSummary, rule);
 
     if (errors.length > 0) {
         alertRulePreviewPanel.innerHTML = `

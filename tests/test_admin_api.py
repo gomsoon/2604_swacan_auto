@@ -1141,6 +1141,11 @@ def test_admin_alert_rule_targets_preview_returns_matching_objects(seeded_client
         "warning_match_count": 0,
         "critical_match_count": 0,
     }
+    assert payload["decision_summary"] == {
+        "candidate_rule_count": 1,
+        "published_competing_rule_count": 0,
+        "items_with_suppression_count": 0,
+    }
     assert len(payload["items"]) == 1
     assert payload["items"][0]["display_name"] == "App Process"
     assert payload["items"][0]["object_type"] == "SoftwareProcess"
@@ -1149,6 +1154,11 @@ def test_admin_alert_rule_targets_preview_returns_matching_objects(seeded_client
     assert payload["items"][0]["current_metric_value"] is None
     assert payload["items"][0]["threshold_level"] == "unknown"
     assert payload["items"][0]["winning_condition_trace"] is None
+    assert payload["items"][0]["candidate_rule_count"] == 1
+    assert payload["items"][0]["winner_display_name"] is None
+    assert payload["items"][0]["winner_rule_origin"] is None
+    assert payload["items"][0]["suppressed_rule_count"] == 0
+    assert payload["items"][0]["suppressed_rule_display_names"] == []
 
 
 def test_admin_alert_rule_targets_preview_includes_current_alert_impact(seeded_app, seeded_client) -> None:
@@ -1215,6 +1225,10 @@ def test_admin_alert_rule_targets_preview_includes_current_alert_impact(seeded_a
         "logical_operator": None,
         "matched_clause_indexes": [0],
     }
+    assert payload["items"][0]["winner_display_name"] == "Process CPU High"
+    assert payload["items"][0]["winner_rule_origin"] == "current_preview"
+    assert payload["items"][0]["winner_threshold_level"] == "warning"
+    assert payload["items"][0]["suppressed_rule_count"] == 0
     assert payload["items"][0]["source_rule_open_alert_count"] == 1
 
 
@@ -1401,6 +1415,11 @@ def test_admin_alert_rule_preview_returns_compound_or_winning_trace(seeded_app, 
     assert payload["validation"]["errors"] == []
     assert payload["summary"]["warning_match_count"] == 1
     assert payload["summary"]["critical_match_count"] == 1
+    assert payload["decision_summary"] == {
+        "candidate_rule_count": 2,
+        "published_competing_rule_count": 1,
+        "items_with_suppression_count": 0,
+    }
     assert payload["items"][0]["current_metric_value"] == 97.0
     assert payload["items"][0]["threshold_level"] == "critical"
     assert payload["items"][0]["winning_condition_trace"] == {
@@ -1409,6 +1428,10 @@ def test_admin_alert_rule_preview_returns_compound_or_winning_trace(seeded_app, 
         "logical_operator": "or",
         "matched_clause_indexes": [1],
     }
+    assert payload["items"][0]["winner_display_name"] == "Preview CPU Band"
+    assert payload["items"][0]["winner_rule_origin"] == "current_preview"
+    assert payload["items"][0]["winner_threshold_level"] == "critical"
+    assert payload["items"][0]["suppressed_rule_count"] == 0
 
 
 def test_admin_alert_rule_preview_returns_compound_and_winning_trace(seeded_app, seeded_client) -> None:
@@ -1476,6 +1499,10 @@ def test_admin_alert_rule_preview_returns_compound_and_winning_trace(seeded_app,
         "logical_operator": "and",
         "matched_clause_indexes": [0, 1],
     }
+    assert payload["items"][0]["winner_display_name"] == "Preview CPU Window"
+    assert payload["items"][0]["winner_rule_origin"] == "current_preview"
+    assert payload["items"][0]["winner_threshold_level"] == "warning"
+    assert payload["items"][0]["suppressed_rule_count"] == 0
 
 
 def test_admin_alert_rule_preview_rejects_invalid_compound_shape_without_failing_request(seeded_client) -> None:
@@ -1665,6 +1692,97 @@ def test_admin_alert_rule_preview_returns_publish_warnings(seeded_client) -> Non
         {"message": "display_name still contains the '(Copy)' suffix."},
     ]
     assert payload["summary"]["matched_object_count"] == 1
+
+
+def test_admin_alert_rule_preview_reports_published_rule_winner_and_suppressed_current_rule(
+    seeded_app, seeded_client
+) -> None:
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO latest_states (
+                view_node_id, monitored_object_id, target_id, state_type, status, severity,
+                state_json, occurred_at, received_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                102,
+                1302,
+                "app_main",
+                "process",
+                "warning",
+                "warning",
+                json.dumps({"cpu_usage": 88.0}),
+                "2026-04-12T11:18:00.000+09:00",
+                "2026-04-12T11:18:00.100+09:00",
+                "2026-04-12T11:18:00.100+09:00",
+            ),
+        )
+        db_conn.execute(
+            """
+            INSERT INTO alert_rules (
+                id, rule_key, display_name, status, scope_type, object_type, monitored_object_id,
+                state_type, metric_key, comparison, warning_threshold, critical_threshold,
+                is_enabled, description, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1901,
+                "threshold.process.cpu_usage.app-process-cpu-override",
+                "App Process CPU Override",
+                "published",
+                "monitored_object",
+                None,
+                1302,
+                "process",
+                "cpu_usage",
+                "gte",
+                70.0,
+                92.0,
+                1,
+                "Specific override for App Process",
+                "2026-04-12T11:18:00.000+09:00",
+                "2026-04-12T11:18:00.000+09:00",
+            ),
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/alert-rules/preview?limit=20",
+        json={
+            "status": "draft",
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "cpu_usage",
+            "comparison": "gte",
+            "warning_threshold": 80,
+            "critical_threshold": 95,
+            "display_name": "Preview CPU High",
+            "rule_key": "threshold.process.cpu_usage.preview-cpu-high",
+            "is_enabled": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["decision_summary"] == {
+        "candidate_rule_count": 3,
+        "published_competing_rule_count": 2,
+        "items_with_suppression_count": 1,
+    }
+    assert payload["items"][0]["threshold_level"] == "warning"
+    assert payload["items"][0]["winner_display_name"] == "App Process CPU Override"
+    assert payload["items"][0]["winner_scope_type"] == "monitored_object"
+    assert payload["items"][0]["winner_rule_origin"] == "published_rule"
+    assert payload["items"][0]["winner_threshold_level"] == "warning"
+    assert payload["items"][0]["suppressed_rule_count"] == 2
+    assert payload["items"][0]["suppressed_rule_display_names"] == [
+        "Preview CPU High",
+        "Process CPU High",
+    ]
 
 
 def test_admin_monitored_objects_support_filters_and_counts(seeded_app, seeded_client) -> None:
