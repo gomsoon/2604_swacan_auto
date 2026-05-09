@@ -3438,12 +3438,12 @@ function buildAlertRuleDecisionSummaryNarrative(decisionSummary) {
     const publishedCompetingRuleCount = Number(decisionSummary?.published_competing_rule_count || 0);
     const itemsWithSuppressionCount = Number(decisionSummary?.items_with_suppression_count || 0);
     if (candidateRuleCount <= 1) {
-        return "현재 입력 rule 단독 기준으로 preview를 해석합니다.";
+        return "현재 입력 rule 단독 기준으로 preview를 해석합니다. winner/suppressed 비교는 발생하지 않습니다.";
     }
     if (itemsWithSuppressionCount > 0) {
         return `현재 입력 rule과 published competing rule ${publishedCompetingRuleCount}개를 함께 비교했고, ${itemsWithSuppressionCount}개 객체에서는 우선순위에 따라 일반 rule이 눌릴 수 있습니다.`;
     }
-    return `현재 입력 rule과 published competing rule ${publishedCompetingRuleCount}개를 함께 비교합니다.`;
+    return `현재 입력 rule과 published competing rule ${publishedCompetingRuleCount}개를 함께 비교합니다. winner 설명은 competing rule까지 함께 본 최종 결과입니다.`;
 }
 
 function buildAlertRuleWinnerLabel(item) {
@@ -3455,6 +3455,18 @@ function buildAlertRuleWinnerLabel(item) {
         return `winner 현재 입력 rule (${item.winner_display_name}${thresholdLevel})`;
     }
     return `winner ${item.winner_display_name} (${item.winner_scope_type || "-"}${thresholdLevel})`;
+}
+
+function buildAlertRuleDecisionOutcomeMessage(item, rule) {
+    if (!item?.winner_display_name) {
+        return "현재 입력 rule이 아직 발화하지 않아 precedence 비교 결과도 없습니다.";
+    }
+    if (item.winner_rule_origin === "current_preview") {
+        return "현재 입력 rule이 최종 winner입니다.";
+    }
+    const currentLevel = item?.threshold_level || "unknown";
+    const winnerLevel = item?.winner_threshold_level || "-";
+    return `현재 입력 rule은 ${currentLevel}로 매칭되지만, 최종 winner는 ${item.winner_display_name} (${item.winner_scope_type || "-" } / ${winnerLevel}) 입니다.`;
 }
 
 function buildAlertRuleSuppressedLabel(item) {
@@ -3495,6 +3507,7 @@ function renderAlertRulePreviewSummaryBlock(summary, decisionSummary, rule) {
                 ])}
             </div>
             <p class="section-copy">${escapeHtml(buildAlertRuleDecisionSummaryNarrative(decisionSummary))}</p>
+            <p class="admin-meta">매칭 수치와 warning / critical count는 현재 입력 rule 기준입니다. winner / suppressed 설명은 competing published rule까지 함께 본 결과입니다.</p>
             ${
                 rule.condition_mode === "compound"
                     ? '<p class="section-copy">compound trace의 clause 번호는 1부터 보이며, 각 item 카드에서 실제로 매칭된 절을 함께 확인할 수 있습니다.</p>'
@@ -3541,6 +3554,7 @@ function renderAlertRulePreviewItem(item, rule) {
                             ? `<p class="admin-meta">판정 trace ${escapeHtml(traceText)}</p>`
                             : '<p class="admin-meta">판정 trace 없음</p>'
                     }
+                    <p class="admin-meta">${escapeHtml(buildAlertRuleDecisionOutcomeMessage(item, rule))}</p>
                     <p class="admin-meta">${escapeHtml(buildAlertRuleWinnerLabel(item))}</p>
                     <p class="admin-meta">${escapeHtml(buildAlertRuleSuppressedLabel(item))}</p>
                 </section>
