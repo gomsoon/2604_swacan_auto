@@ -2992,6 +2992,12 @@ function buildAlertRuleConditionGroupFromInputs(prefix) {
     };
 }
 
+function buildAlertRuleConditionGroupSnapshot(prefix) {
+    return normalizeAlertRuleConditionGroup(buildAlertRuleConditionGroupFromInputs(prefix), {
+        condition_mode: "compound",
+    });
+}
+
 function populateAlertRuleConditionGroupInputs(prefix, condition) {
     const operatorSelect =
         prefix === "warning" ? alertRuleWarningConditionOperatorSelect : alertRuleCriticalConditionOperatorSelect;
@@ -3109,13 +3115,18 @@ function renderAlertRuleEditorStatus(rule = null) {
     }
 
     const warnings = Array.isArray(rule.publish_warnings) ? rule.publish_warnings : [];
+    const isCompoundDraft = rule.status === "draft" && rule.condition_mode === "compound";
     const statusMessage =
         rule.status === "draft"
-            ? "현재 rule은 draft입니다. selector, threshold, 이름을 편집한 뒤 publish 할 수 있습니다."
+            ? isCompoundDraft
+                ? "현재 rule은 compound draft입니다. draft 저장과 preview는 가능하지만, publish는 아직 지원하지 않습니다."
+                : "현재 rule은 draft입니다. selector, threshold, 이름을 편집한 뒤 publish 할 수 있습니다."
             : "현재 rule은 published라서 읽기 전용입니다. 조건을 바꾸려면 Clone으로 새 draft를 만든 뒤 수정하세요.";
     const toggleMessage =
         rule.status === "draft"
-            ? "draft에서는 활성화 토글과 조건 편집을 함께 저장합니다."
+            ? isCompoundDraft
+                ? "compound draft에서는 condition group을 저장하고, 다시 열어도 같은 shape로 복원됩니다."
+                : "draft에서는 활성화 토글과 조건 편집을 함께 저장합니다."
             : "published rule에서는 활성화 상태만 저장할 수 있습니다.";
     const warningBlock =
         warnings.length > 0
@@ -3158,7 +3169,8 @@ function setAlertRuleActionButtonState(rule = null) {
     }
     if (publishCurrentAlertRuleButton) {
         publishCurrentAlertRuleButton.hidden = !rule || rule.status !== "draft";
-        publishCurrentAlertRuleButton.disabled = !rule || rule.status !== "draft" || alertRuleDraftDirty;
+        publishCurrentAlertRuleButton.disabled =
+            !rule || rule.status !== "draft" || alertRuleDraftDirty || rule.condition_mode === "compound";
     }
     if (cloneCurrentAlertRuleButton) {
         cloneCurrentAlertRuleButton.hidden = !rule;
@@ -3180,6 +3192,17 @@ function setAlertRuleFormEditableState(rule = null) {
         alertRuleComparisonSelect,
         alertRuleWarningThresholdInput,
         alertRuleCriticalThresholdInput,
+        alertRulePreviewConditionModeSelect,
+        alertRuleWarningConditionOperatorSelect,
+        alertRuleWarningClause1ComparisonSelect,
+        alertRuleWarningClause1ValueInput,
+        alertRuleWarningClause2ComparisonSelect,
+        alertRuleWarningClause2ValueInput,
+        alertRuleCriticalConditionOperatorSelect,
+        alertRuleCriticalClause1ComparisonSelect,
+        alertRuleCriticalClause1ValueInput,
+        alertRuleCriticalClause2ComparisonSelect,
+        alertRuleCriticalClause2ValueInput,
         alertRuleDescriptionInput,
     ].forEach((input) => {
         if (input) {
@@ -3201,6 +3224,7 @@ function setAlertRuleFormEditableState(rule = null) {
 }
 
 function buildAlertRuleSnapshotFromRule(rule) {
+    const conditionMode = rule?.condition_mode || "scalar";
     return {
         rule_key: rule?.rule_key || null,
         display_name: rule?.display_name || null,
@@ -3209,15 +3233,29 @@ function buildAlertRuleSnapshotFromRule(rule) {
         object_type: rule?.object_type || null,
         monitored_object_id: rule?.monitored_object_id ?? null,
         metric_key: rule?.metric_key || null,
+        condition_mode: conditionMode,
         comparison: rule?.comparison || "gte",
         warning_threshold: rule?.warning_threshold ?? null,
         critical_threshold: rule?.critical_threshold ?? null,
+        warning_condition:
+            conditionMode === "compound"
+                ? normalizeAlertRuleConditionGroup(rule?.warning_condition, {
+                      condition_mode: "compound",
+                  })
+                : null,
+        critical_condition:
+            conditionMode === "compound"
+                ? normalizeAlertRuleConditionGroup(rule?.critical_condition, {
+                      condition_mode: "compound",
+                  })
+                : null,
         description: rule?.description || null,
         is_enabled: Boolean(rule?.is_enabled),
     };
 }
 
 function buildAlertRuleSnapshotFromForm() {
+    const conditionMode = alertRulePreviewConditionModeSelect?.value || "scalar";
     return {
         rule_key: alertRuleRuleKeyInput.value.trim() || null,
         display_name: alertRuleDisplayNameInput.value.trim() || null,
@@ -3226,9 +3264,12 @@ function buildAlertRuleSnapshotFromForm() {
         object_type: alertRuleObjectTypeInput.value.trim() || null,
         monitored_object_id: toOptionalNumberValue(alertRuleMonitoredObjectIdInput.value),
         metric_key: alertRuleMetricKeyInput.value.trim() || null,
+        condition_mode: conditionMode,
         comparison: alertRuleComparisonSelect.value,
         warning_threshold: toOptionalNumberValue(alertRuleWarningThresholdInput.value),
         critical_threshold: toOptionalNumberValue(alertRuleCriticalThresholdInput.value),
+        warning_condition: conditionMode === "compound" ? buildAlertRuleConditionGroupSnapshot("warning") : null,
+        critical_condition: conditionMode === "compound" ? buildAlertRuleConditionGroupSnapshot("critical") : null,
         description: alertRuleDescriptionInput.value.trim() || null,
         is_enabled: alertRuleEnabledInput.checked,
     };
@@ -3620,6 +3661,20 @@ function buildAlertRulePreviewRequestBody() {
         payload.warning_condition = buildAlertRuleConditionGroupFromInputs("warning");
         payload.critical_condition = buildAlertRuleConditionGroupFromInputs("critical");
     }
+    return payload;
+}
+
+function buildAlertRuleEditableRequestBody() {
+    const payload = buildAlertRulePreviewRequestBody();
+    delete payload.rule_id;
+    delete payload.status;
+    if (payload.condition_mode === "compound") {
+        payload.warning_threshold = null;
+        payload.critical_threshold = null;
+        return payload;
+    }
+    delete payload.warning_condition;
+    delete payload.critical_condition;
     return payload;
 }
 
@@ -4660,20 +4715,7 @@ async function saveAlertRule(event) {
     const ruleId = alertRuleIdInput.value ? Number(alertRuleIdInput.value) : null;
     const isEditable = alertRuleForm?.dataset.isEditable !== "false";
     const requestBody = isEditable
-        ? {
-              rule_key: alertRuleRuleKeyInput.value.trim() || null,
-              display_name: alertRuleDisplayNameInput.value.trim() || null,
-              scope_type: alertRuleScopeTypeSelect.value,
-              state_type: alertRuleStateTypeSelect.value,
-              object_type: alertRuleObjectTypeInput.value.trim() || null,
-              monitored_object_id: toOptionalNumberValue(alertRuleMonitoredObjectIdInput.value),
-              metric_key: alertRuleMetricKeyInput.value.trim(),
-              comparison: alertRuleComparisonSelect.value,
-              warning_threshold: toOptionalNumberValue(alertRuleWarningThresholdInput.value),
-              critical_threshold: toOptionalNumberValue(alertRuleCriticalThresholdInput.value),
-              description: alertRuleDescriptionInput.value.trim() || null,
-              is_enabled: alertRuleEnabledInput.checked,
-          }
+        ? buildAlertRuleEditableRequestBody()
         : {
               is_enabled: alertRuleEnabledInput.checked,
           };
