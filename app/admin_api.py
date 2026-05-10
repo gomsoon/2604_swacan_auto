@@ -9,6 +9,16 @@ from flask import Blueprint, current_app, g, request
 
 from .alert_archive import insert_alert_history_archive, serialize_alert_archive_row
 from .alert_history import record_alert_history
+from .alert_rule_evaluator import (
+    alert_rule_candidate_identity as shared_alert_rule_candidate_identity,
+    alert_rule_specificity_rank as shared_alert_rule_specificity_rank,
+    evaluate_condition_group as shared_evaluate_condition_group,
+    evaluate_threshold_candidates,
+    evaluate_threshold_rule,
+    metric_value_for_state,
+    summarize_threshold_decision,
+    threshold_clause_matches,
+)
 from .auth import admin_required, error_response
 from .db import (
     RULE_KEY_ALLOWED_PATTERN,
@@ -795,20 +805,11 @@ def build_empty_alert_rule_preview_decision_summary() -> dict[str, int]:
 
 
 def alert_rule_preview_specificity_rank(rule: dict[str, Any]) -> int:
-    return 2 if rule.get("scope_type") == "monitored_object" else 1
+    return shared_alert_rule_specificity_rank(rule)
 
 
 def alert_rule_preview_candidate_identity(rule: dict[str, Any]) -> str:
-    rule_key = rule.get("rule_key")
-    if isinstance(rule_key, str) and rule_key:
-        return rule_key
-    rule_id = rule.get("id")
-    if isinstance(rule_id, int):
-        return f"rule:{rule_id}"
-    display_name = rule.get("display_name")
-    if isinstance(display_name, str) and display_name:
-        return f"name:{display_name}"
-    return f"preview:{rule.get('scope_type')}:{rule.get('metric_key')}"
+    return shared_alert_rule_candidate_identity(rule)
 
 
 def load_alert_rule_preview_competing_rules(
@@ -858,72 +859,33 @@ def evaluate_alert_rule_preview_decision(
     metric_value: float | None,
     competing_rules: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    decision = {
-        "candidate_rule_count": 1 + len(competing_rules),
-        "winner_rule_key": None,
-        "winner_display_name": None,
-        "winner_scope_type": None,
-        "winner_rule_origin": None,
-        "winner_threshold_level": None,
-        "suppressed_rule_count": 0,
-        "suppressed_rule_display_names": [],
-    }
     if current_threshold_evaluation["threshold_level"] not in {"warning", "critical"}:
-        return decision
-
-    firing_rules: list[dict[str, Any]] = [
-        {
-            **current_rule,
-            "_origin": "current_preview",
-            "_threshold_level": current_threshold_evaluation["threshold_level"],
+        return {
+            "candidate_rule_count": 1 + len(competing_rules),
+            "winner_rule_key": None,
+            "winner_display_name": None,
+            "winner_scope_type": None,
+            "winner_rule_origin": None,
+            "winner_threshold_level": None,
+            "suppressed_rule_count": 0,
+            "suppressed_rule_display_names": [],
         }
-    ]
-    for competing_rule in competing_rules:
-        threshold_evaluation = preview_threshold_evaluation(metric_value, competing_rule)
-        if threshold_evaluation["threshold_level"] not in {"warning", "critical"}:
-            continue
-        firing_rules.append(
-            {
-                **competing_rule,
-                "_threshold_level": threshold_evaluation["threshold_level"],
-            }
-        )
 
-    if not firing_rules:
-        return decision
-
-    severity_rank = {"critical": 2, "warning": 1}
-    firing_rules.sort(
-        key=lambda item: (
-            -severity_rank[item["_threshold_level"]],
-            -alert_rule_preview_specificity_rank(item),
-            0 if item.get("_origin") == "current_preview" else 1,
-            item.get("id") if isinstance(item.get("id"), int) else 10**12,
-            item.get("rule_key") or "",
-        )
+    candidates = evaluate_threshold_candidates(
+        metric_value,
+        [{**current_rule, "_origin": "current_preview"}, *[{**item, "_origin": "published_rule"} for item in competing_rules]],
     )
-    winner = firing_rules[0]
-    winner_specificity_rank = alert_rule_preview_specificity_rank(winner)
-    suppressed_rules = [
-        item
-        for item in firing_rules[1:]
-        if alert_rule_preview_specificity_rank(item) < winner_specificity_rank
-    ]
-    decision.update(
-        {
-            "winner_rule_key": winner.get("rule_key"),
-            "winner_display_name": winner.get("display_name") or winner.get("rule_key"),
-            "winner_scope_type": winner.get("scope_type"),
-            "winner_rule_origin": winner.get("_origin"),
-            "winner_threshold_level": winner.get("_threshold_level"),
-            "suppressed_rule_count": len(suppressed_rules),
-            "suppressed_rule_display_names": [
-                item.get("display_name") or item.get("rule_key") or "unnamed rule"
-                for item in suppressed_rules
-            ],
-        }
-    )
-    return decision
+    decision = summarize_threshold_decision(candidates)
+    return {
+        "candidate_rule_count": decision["candidate_rule_count"],
+        "winner_rule_key": decision["winner_rule_key"],
+        "winner_display_name": decision["winner_display_name"],
+        "winner_scope_type": decision["winner_scope_type"],
+        "winner_rule_origin": decision["winner_rule_origin"],
+        "winner_threshold_level": decision["winner_threshold_level"],
+        "suppressed_rule_count": decision["suppressed_rule_count"],
+        "suppressed_rule_display_names": decision["suppressed_rule_display_names"],
+    }
 
 
 def build_alert_rule_target_preview(
@@ -1112,35 +1074,11 @@ def serialize_monitored_object(row) -> dict[str, Any]:
 
 
 def preview_metric_value(state: dict[str, Any], metric_key: str) -> float | None:
-    if metric_key == "memory_used_ratio":
-        total = state.get("memory_total")
-        used = state.get("memory_used")
-        try:
-            total_value = float(total)
-            used_value = float(used)
-        except (TypeError, ValueError):
-            return None
-        if total_value <= 0:
-            return None
-        return (used_value / total_value) * 100.0
-
-    value = state.get(metric_key)
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+    return metric_value_for_state(state, metric_key)
 
 
 def preview_threshold_clause_matches(metric_value: float, clause: dict[str, Any]) -> bool:
-    comparison = clause["comparison"]
-    threshold = float(clause["value"])
-    if comparison == "gt":
-        return metric_value > threshold
-    if comparison == "gte":
-        return metric_value >= threshold
-    if comparison == "lt":
-        return metric_value < threshold
-    return metric_value <= threshold
+    return threshold_clause_matches(metric_value, clause)
 
 
 def evaluate_preview_condition_group(
@@ -1149,78 +1087,15 @@ def evaluate_preview_condition_group(
     condition_mode: str,
     condition_group: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    if metric_value is None or not isinstance(condition_group, dict):
-        return None
-
-    raw_clauses = condition_group.get("clauses")
-    if not isinstance(raw_clauses, list) or not raw_clauses:
-        return None
-
-    clauses = [normalize_alert_rule_condition_clause(raw_clause) for raw_clause in raw_clauses]
-    clauses = [clause for clause in clauses if clause is not None]
-    if not clauses:
-        return None
-
-    logical_operator = condition_group.get("logical_operator") if len(clauses) > 1 else None
-    matched_clause_indexes = [
-        index
-        for index, clause in enumerate(clauses)
-        if preview_threshold_clause_matches(metric_value, clause)
-    ]
-
-    if logical_operator == "and":
-        if len(matched_clause_indexes) != len(clauses):
-            return None
-    elif logical_operator == "or":
-        if not matched_clause_indexes:
-            return None
-    else:
-        if not matched_clause_indexes:
-            return None
-        matched_clause_indexes = [matched_clause_indexes[0]]
-        logical_operator = None
-
-    return {
-        "condition_mode": condition_mode,
-        "logical_operator": logical_operator,
-        "matched_clause_indexes": matched_clause_indexes,
-    }
+    return shared_evaluate_condition_group(
+        metric_value,
+        condition_mode=condition_mode,
+        condition_group=condition_group,
+    )
 
 
 def preview_threshold_evaluation(metric_value: float | None, rule: dict[str, Any]) -> dict[str, Any]:
-    if metric_value is None:
-        return {"threshold_level": "unknown", "winning_condition_trace": None}
-
-    condition_mode = rule.get("condition_mode") or "scalar"
-    critical_trace = evaluate_preview_condition_group(
-        metric_value,
-        condition_mode=condition_mode,
-        condition_group=rule.get("critical_condition"),
-    )
-    if critical_trace is not None:
-        return {
-            "threshold_level": "critical",
-            "winning_condition_trace": {
-                "severity": "critical",
-                **critical_trace,
-            },
-        }
-
-    warning_trace = evaluate_preview_condition_group(
-        metric_value,
-        condition_mode=condition_mode,
-        condition_group=rule.get("warning_condition"),
-    )
-    if warning_trace is not None:
-        return {
-            "threshold_level": "warning",
-            "winning_condition_trace": {
-                "severity": "warning",
-                **warning_trace,
-            },
-        }
-
-    return {"threshold_level": "normal", "winning_condition_trace": None}
+    return evaluate_threshold_rule(metric_value, rule)
 
 
 def preview_threshold_level(

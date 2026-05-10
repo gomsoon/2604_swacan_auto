@@ -1418,7 +1418,7 @@ def test_admin_alert_rule_preview_returns_compound_or_winning_trace(seeded_app, 
     assert payload["decision_summary"] == {
         "candidate_rule_count": 2,
         "published_competing_rule_count": 1,
-        "items_with_suppression_count": 0,
+        "items_with_suppression_count": 1,
     }
     assert payload["items"][0]["current_metric_value"] == 97.0
     assert payload["items"][0]["threshold_level"] == "critical"
@@ -1431,7 +1431,8 @@ def test_admin_alert_rule_preview_returns_compound_or_winning_trace(seeded_app, 
     assert payload["items"][0]["winner_display_name"] == "Preview CPU Band"
     assert payload["items"][0]["winner_rule_origin"] == "current_preview"
     assert payload["items"][0]["winner_threshold_level"] == "critical"
-    assert payload["items"][0]["suppressed_rule_count"] == 0
+    assert payload["items"][0]["suppressed_rule_count"] == 1
+    assert payload["items"][0]["suppressed_rule_display_names"] == ["Process CPU High"]
 
 
 def test_admin_alert_rule_preview_returns_compound_and_winning_trace(seeded_app, seeded_client) -> None:

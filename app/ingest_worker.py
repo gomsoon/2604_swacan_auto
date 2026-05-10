@@ -10,6 +10,14 @@ from flask import current_app
 from flask.cli import with_appcontext
 
 from .alert_history import record_alert_history
+from .alert_rule_evaluator import (
+    THRESHOLD_FIRING_LEVELS,
+    evaluate_threshold_candidates,
+    evaluate_threshold_rule,
+    metric_value_for_state,
+    summarize_threshold_decision,
+    threshold_family_key,
+)
 from .db import get_db
 
 VALID_EVENT_TYPES = {
@@ -333,49 +341,52 @@ def sync_latest_state_alert(
 
 
 def numeric_metric_value(state: dict, metric_key: str) -> float | None:
-    if metric_key == "memory_used_ratio":
-        total = state.get("memory_total")
-        used = state.get("memory_used")
-        try:
-            total_value = float(total)
-            used_value = float(used)
-        except (TypeError, ValueError):
-            return None
-        if total_value <= 0:
-            return None
-        return (used_value / total_value) * 100.0
-
-    value = state.get(metric_key)
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+    return metric_value_for_state(state, metric_key)
 
 
 def threshold_level(metric_value: float | None, rule) -> str | None:
-    if metric_value is None:
-        return None
-
-    comparison = rule["comparison"]
-    warning_threshold = rule["warning_threshold"]
-    critical_threshold = rule["critical_threshold"]
-
-    def matches(value: float, threshold: float | None) -> bool:
-        if threshold is None:
-            return False
-        return value >= threshold if comparison == "gte" else value <= threshold
-
-    if matches(metric_value, critical_threshold):
-        return "critical"
-    if matches(metric_value, warning_threshold):
-        return "warning"
-    return None
+    evaluation = evaluate_threshold_rule(metric_value, rule)
+    return evaluation["threshold_level"] if evaluation["threshold_level"] in THRESHOLD_FIRING_LEVELS else None
 
 
 def threshold_message(rule, metric_value: float, level: str) -> str:
     threshold = rule["critical_threshold"] if level == "critical" else rule["warning_threshold"]
     operator = ">=" if rule["comparison"] == "gte" else "<="
     return f"{rule['metric_key']}={metric_value:.3f} {operator} {threshold:.3f}"
+
+
+def fetch_open_alert_rows_for_rule_ids(*, monitored_object_id: int, rule_ids: list[int]):
+    if not rule_ids:
+        return []
+
+    placeholders = ", ".join("?" for _ in rule_ids)
+    return get_db().execute(
+        f"""
+        SELECT id, source_rule_id, status, acknowledged_at
+        FROM alert_instances
+        WHERE monitored_object_id = ?
+          AND status != 'resolved'
+          AND source_rule_id IN ({placeholders})
+        """,
+        (monitored_object_id, *rule_ids),
+    ).fetchall()
+
+
+def build_threshold_alert_metadata(rule, metric_value: float, level: str, family_key: tuple[str, str | None, str | None, str | None]) -> str:
+    return json.dumps(
+        {
+            "rule_id": rule["id"],
+            "metric_key": rule["metric_key"],
+            "metric_value": metric_value,
+            "comparison": rule["comparison"],
+            "warning_threshold": rule["warning_threshold"],
+            "critical_threshold": rule["critical_threshold"],
+            "scope_type": rule["scope_type"],
+            "threshold_level": level,
+            "family_key": list(family_key),
+        },
+        ensure_ascii=False,
+    )
 
 
 def sync_threshold_alerts(
@@ -399,78 +410,101 @@ def sync_threshold_alerts(
 
     rules = db_conn.execute(
         """
-        SELECT id, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
-               warning_threshold, critical_threshold, is_enabled, description
+        SELECT id, rule_key, display_name, status, scope_type, object_type, monitored_object_id,
+               state_type, metric_key, comparison, warning_threshold, critical_threshold,
+               cond_mode, is_enabled, description, created_at, updated_at
         FROM alert_rules
         WHERE is_enabled = 1
+          AND status = 'published'
+          AND cond_mode = 'scalar'
           AND state_type = ?
           AND (
                 (scope_type = 'monitored_object' AND monitored_object_id = ?)
              OR (scope_type = 'object_type' AND object_type = ?)
           )
-        ORDER BY scope_type DESC, id ASC
+        ORDER BY id ASC
         """,
         (state_type, monitored_object_id, object_row["object_type"]),
     ).fetchall()
 
-    for rule in rules:
-        metric_value = numeric_metric_value(state, rule["metric_key"])
-        level = threshold_level(metric_value, rule)
-        alert_code = f"rule.{rule['id']}"
+    families: dict[tuple[str, str | None, str | None, str | None], list] = {}
+    for rule_row in rules:
+        rule = dict(rule_row)
+        families.setdefault(threshold_family_key(rule), []).append(rule)
 
-        if level is None:
-            rows_to_resolve = db_conn.execute(
-                """
-                SELECT id, status, acknowledged_at
-                FROM alert_instances
-                WHERE monitored_object_id = ?
-                  AND alert_code = ?
-                  AND status != 'resolved'
-                """,
-                (monitored_object_id, alert_code),
-            ).fetchall()
+    for family_key, family_rules in families.items():
+        metric_value = numeric_metric_value(state, family_rules[0]["metric_key"])
+        candidates = evaluate_threshold_candidates(metric_value, [{**dict(rule), "_origin": "runtime_rule"} for rule in family_rules])
+        decision = summarize_threshold_decision(candidates)
+        winner_rule = decision["winner_rule"]
+        firing_rule_ids = [rule_id for rule_id in decision["firing_rule_ids"] if isinstance(rule_id, int)]
+        winner_rule_id = decision["winner_rule_id"] if isinstance(decision["winner_rule_id"], int) else None
+        losing_rule_ids = [rule_id for rule_id in firing_rule_ids if rule_id != winner_rule_id]
+        non_firing_rule_ids = [
+            rule["id"]
+            for rule in family_rules
+            if isinstance(rule["id"], int) and rule["id"] not in firing_rule_ids
+        ]
+
+        if non_firing_rule_ids:
             resolve_alert_rows(
-                rows=rows_to_resolve,
+                rows=fetch_open_alert_rows_for_rule_ids(
+                    monitored_object_id=monitored_object_id,
+                    rule_ids=non_firing_rule_ids,
+                ),
                 occurred_at=occurred_at,
                 received_at=received_at,
                 note="threshold no longer matched",
-                payload={"source": "worker", "reason": "threshold_cleared", "rule_id": rule["id"]},
+                payload={
+                    "source": "worker",
+                    "reason": "threshold_cleared",
+                    "family_key": list(family_key),
+                },
             )
+
+        if losing_rule_ids:
+            resolve_alert_rows(
+                rows=fetch_open_alert_rows_for_rule_ids(
+                    monitored_object_id=monitored_object_id,
+                    rule_ids=losing_rule_ids,
+                ),
+                occurred_at=occurred_at,
+                received_at=received_at,
+                note="suppressed by threshold precedence",
+                payload={
+                    "source": "worker",
+                    "reason": "suppressed_by_precedence",
+                    "family_key": list(family_key),
+                    "winner_rule_id": winner_rule_id,
+                },
+            )
+
+        if winner_rule is None or metric_value is None or winner_rule_id is None:
             continue
 
-        latest_message = threshold_message(rule, metric_value, level)
-        metadata_json = json.dumps(
-            {
-                "rule_id": rule["id"],
-                "metric_key": rule["metric_key"],
-                "metric_value": metric_value,
-                "comparison": rule["comparison"],
-                "warning_threshold": rule["warning_threshold"],
-                "critical_threshold": rule["critical_threshold"],
-                "scope_type": rule["scope_type"],
-            },
-            ensure_ascii=False,
-        )
-
+        winner_level = winner_rule["_threshold_level"]
+        latest_message = threshold_message(winner_rule, metric_value, winner_level)
+        metadata_json = build_threshold_alert_metadata(winner_rule, metric_value, winner_level, family_key)
+        alert_code = f"rule.{winner_rule_id}"
         existing = db_conn.execute(
             """
             SELECT id, status
             FROM alert_instances
             WHERE monitored_object_id = ?
-              AND alert_code = ?
+              AND source_rule_id = ?
               AND status != 'resolved'
             ORDER BY id DESC
             LIMIT 1
             """,
-            (monitored_object_id, alert_code),
+            (monitored_object_id, winner_rule_id),
         ).fetchone()
 
         if existing is None:
             create_alert_instance(
                 monitored_object_id=monitored_object_id,
                 alert_code=alert_code,
-                source_rule_id=rule["id"],
-                severity=level,
+                source_rule_id=winner_rule_id,
+                severity=winner_level,
                 occurred_at=occurred_at,
                 received_at=received_at,
                 latest_message=latest_message,
@@ -491,8 +525,8 @@ def sync_threshold_alerts(
             WHERE id = ?
             """,
             (
-                rule["id"],
-                level,
+                winner_rule_id,
+                winner_level,
                 occurred_at,
                 latest_message,
                 metadata_json,

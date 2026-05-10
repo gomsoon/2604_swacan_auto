@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from app.db import get_db
 from app.ingest_worker import process_pending_ingest
 
@@ -931,6 +933,140 @@ def test_agent_threshold_alert_opens_on_exact_queue_depth_boundaries(seeded_app,
     assert rule_alert["status"] == "open"
     assert rule_alert["repeat_count"] == 2
     assert "500.000" in rule_alert["latest_message"]
+
+
+def test_specific_threshold_rule_resolves_existing_general_alert_by_precedence(seeded_app, seeded_client) -> None:
+    general_batch = {
+        "agent_id": "agent_local",
+        "boot_id": "boot_threshold_precedence",
+        "seq_start": 83,
+        "seq_end": 83,
+        "sent_at": "2026-04-10T11:12:00.150+09:00",
+        "items": [
+            {
+                "seq": 83,
+                "payload_type": "process_snapshot",
+                "occurred_at": "2026-04-10T11:12:00.100+09:00",
+                "target_id": "app_main",
+                "payload": {
+                    "pid": 1234,
+                    "state": "running",
+                    "cpu_usage": 88.0,
+                    "memory_rss": 4096,
+                },
+            }
+        ],
+    }
+    specific_batch = {
+        **general_batch,
+        "seq_start": 84,
+        "seq_end": 84,
+        "items": [
+            {
+                **general_batch["items"][0],
+                "seq": 84,
+                "occurred_at": "2026-04-10T11:12:05.100+09:00",
+            }
+        ],
+    }
+
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=general_batch).status_code == 202
+
+    with seeded_app.app_context():
+        first_result = process_pending_ingest(limit=1)
+        db_conn = get_db()
+        initial_general = db_conn.execute(
+            """
+            SELECT id, alert_code, severity, status
+            FROM alert_instances
+            WHERE monitored_object_id = 1302
+              AND alert_code = 'rule.1501'
+              AND status = 'open'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        db_conn.execute(
+            """
+            INSERT INTO alert_rules (
+                id, rule_key, display_name, status, scope_type, object_type, monitored_object_id,
+                state_type, metric_key, comparison, warning_threshold, critical_threshold,
+                cond_mode, is_enabled, description, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1901,
+                "threshold.process.cpu_usage.app-process-cpu-override",
+                "App Process CPU Override",
+                "published",
+                "monitored_object",
+                None,
+                1302,
+                "process",
+                "cpu_usage",
+                "gte",
+                80.0,
+                95.0,
+                "scalar",
+                1,
+                "Specific override for App Process",
+                "2026-04-10T11:12:04.000+09:00",
+                "2026-04-10T11:12:04.000+09:00",
+            ),
+        )
+        db_conn.commit()
+
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=specific_batch).status_code == 202
+
+    with seeded_app.app_context():
+        second_result = process_pending_ingest(limit=1)
+        db_conn = get_db()
+        general_rows = db_conn.execute(
+            """
+            SELECT id, alert_code, severity, status, resolved_at
+            FROM alert_instances
+            WHERE monitored_object_id = 1302
+              AND source_rule_id = 1501
+            ORDER BY id ASC
+            """
+        ).fetchall()
+        specific_row = db_conn.execute(
+            """
+            SELECT alert_code, severity, status, repeat_count, latest_message
+            FROM alert_instances
+            WHERE monitored_object_id = 1302
+              AND source_rule_id = 1901
+              AND status = 'open'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        history_row = db_conn.execute(
+            """
+            SELECT note, payload_json
+            FROM alert_history
+            WHERE alert_instance_id = ?
+              AND action_type = 'resolved'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (initial_general["id"],),
+        ).fetchone()
+
+    assert first_result["processed_items"] == 1
+    assert second_result["processed_items"] == 1
+    assert initial_general["alert_code"] == "rule.1501"
+    assert initial_general["status"] == "open"
+    assert len(general_rows) == 1
+    assert general_rows[0]["status"] == "resolved"
+    assert general_rows[0]["resolved_at"] is not None
+    assert specific_row["alert_code"] == "rule.1901"
+    assert specific_row["severity"] == "warning"
+    assert specific_row["status"] == "open"
+    assert specific_row["repeat_count"] == 1
+    assert "88.000" in specific_row["latest_message"]
+    assert history_row["note"] == "suppressed by threshold precedence"
+    assert json.loads(history_row["payload_json"])["reason"] == "suppressed_by_precedence"
 
 
 def test_grouped_events_merge_at_exact_window_boundary(seeded_app, seeded_client) -> None:
