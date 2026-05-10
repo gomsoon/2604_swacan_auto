@@ -3108,6 +3108,7 @@ function renderAlertRuleEditorStatus(rule = null) {
             <p class="section-copy">새 draft rule을 생성하는 모드입니다. rule_key와 display_name은 비워둘 수 있고, 저장 시 기본값이 자동 제안됩니다.</p>
             <div class="toolbar-inline">
                 <span class="meta-pill">draft</span>
+                <span class="meta-pill">scalar</span>
                 <span class="meta-pill">편집 가능</span>
             </div>
         `;
@@ -3170,8 +3171,10 @@ function renderAlertRuleEditorStatus(rule = null) {
         <p class="section-copy">${escapeHtml(statusMessage)}</p>
         <div class="toolbar-inline alert-rule-editor-pills">
             <span class="meta-pill">${escapeHtml(rule.status || "-")}</span>
+            <span class="meta-pill">${escapeHtml(rule.condition_mode || "scalar")}</span>
             <span class="meta-pill">${rule.is_editable ? "편집 가능" : "읽기 전용"}</span>
             <span class="meta-pill">${rule.is_enabled ? "활성" : "비활성"}</span>
+            ${rule.status === "draft" ? `<span class="meta-pill">${escapeHtml(publishReadiness.label)}</span>` : ""}
             ${rule.status === "draft" && alertRuleDraftDirty ? '<span class="meta-pill">미저장 변경</span>' : ""}
         </div>
         <p class="section-copy">${escapeHtml(toggleMessage)}</p>
@@ -3391,17 +3394,28 @@ function renderAlertRules(items) {
 
     alertRulesList.innerHTML = items
         .map(
-            (rule) => `
+            (rule) => {
+                const publishReadiness = getAlertRulePublishReadiness(rule);
+                const conditionSummary =
+                    rule.condition_mode === "compound"
+                        ? `
+                            <p class="admin-meta">warning condition: ${escapeHtml(formatAlertRuleConditionGroup(rule.warning_condition))}</p>
+                            <p class="admin-meta">critical condition: ${escapeHtml(formatAlertRuleConditionGroup(rule.critical_condition))}</p>
+                        `
+                        : `<p class="admin-meta">warning=${escapeHtml(rule.warning_threshold ?? "-")} | critical=${escapeHtml(rule.critical_threshold ?? "-")} | comparison=${escapeHtml(rule.comparison)}</p>`;
+                return `
                 <article class="admin-item ${rule.is_enabled ? "" : "is-disabled"}">
                     <div class="section-header">
                         <div>
                             <h3>${escapeHtml(rule.display_name || rule.metric_key)}</h3>
                             <p class="admin-meta">${escapeHtml(rule.rule_key || "-")}</p>
-                            <p class="admin-meta">${escapeHtml(rule.scope_type)} | ${escapeHtml(rule.state_type)} | ${escapeHtml(rule.comparison)}</p>
+                            <p class="admin-meta">${escapeHtml(rule.scope_type)} | ${escapeHtml(rule.state_type)} | ${escapeHtml(rule.condition_mode || "scalar")}</p>
                         </div>
                         <div class="toolbar-inline">
                             <span class="meta-pill">${escapeHtml(rule.status || "-")}</span>
+                            <span class="meta-pill">${escapeHtml(rule.condition_mode || "scalar")}</span>
                             <span class="meta-pill">${rule.is_enabled ? "활성" : "비활성"}</span>
+                            ${rule.status === "draft" ? `<span class="meta-pill">${escapeHtml(publishReadiness.label)}</span>` : ""}
                             ${
                                 Array.isArray(rule.publish_warnings) && rule.publish_warnings.length
                                     ? `<span class="meta-pill">${escapeHtml(`경고 ${rule.publish_warnings.length}건`)}</span>`
@@ -3410,15 +3424,20 @@ function renderAlertRules(items) {
                             <button class="button ghost small preview-alert-rule-button" type="button" data-rule-id="${escapeHtml(rule.id)}">미리보기</button>
                             <button class="button ghost small toggle-alert-rule-button" type="button" data-rule-id="${escapeHtml(rule.id)}" data-enabled="${rule.is_enabled ? "true" : "false"}">${rule.is_enabled ? "비활성화" : "활성화"}</button>
                             <button class="button ghost small edit-alert-rule-button" type="button" data-rule-id="${escapeHtml(rule.id)}">수정</button>
-                            ${rule.status === "draft" ? `<button class="button ghost small publish-alert-rule-button" type="button" data-rule-id="${escapeHtml(rule.id)}">Publish</button>` : ""}
+                            ${
+                                rule.status === "draft"
+                                    ? `<button class="button ghost small publish-alert-rule-button" type="button" data-rule-id="${escapeHtml(rule.id)}"${publishReadiness.state !== "ready" ? ` disabled title="${escapeHtml(publishReadiness.message)}"` : ""}>Publish</button>`
+                                    : ""
+                            }
                             <button class="button ghost small clone-alert-rule-button" type="button" data-rule-id="${escapeHtml(rule.id)}">Clone</button>
                         </div>
                     </div>
-                    <p class="admin-meta">warning=${escapeHtml(rule.warning_threshold ?? "-")} | critical=${escapeHtml(rule.critical_threshold ?? "-")}</p>
+                    ${conditionSummary}
                     <p class="admin-meta">target=${escapeHtml(rule.target_display_name || rule.object_type || "-")} | binding=${escapeHtml(rule.target_runtime_binding_key || "-")} | monitored_object_id=${escapeHtml(rule.monitored_object_id ?? "-")}</p>
                     <p class="admin-meta">${escapeHtml(rule.description || "설명 없음")}</p>
                 </article>
-            `
+            `;
+            }
         )
         .join("");
 }

@@ -893,6 +893,10 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
 
     createdRule = page.locator(".admin-item", has_text="threshold.process.fd_count.file-descriptor-high").first
     expect(createdRule).to_contain_text("draft")
+    expect(createdRule).to_contain_text("compound")
+    expect(createdRule).to_contain_text("warning condition: lte 20 OR gte 80")
+    expect(createdRule).to_contain_text("critical condition: gte 90 OR gte 95")
+    expect(createdRule.get_by_role("button", name="Publish")).to_be_disabled()
 
     createdRule.get_by_role("button", name="수정").click()
     expect(page.locator("#alert-rule-preview-condition-mode")).to_have_value("compound")
@@ -915,6 +919,8 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     expect(page.locator("#publish-current-alert-rule-button")).to_be_disabled()
 
     createdRule = page.locator(".admin-item", has_text="threshold.process.fd_count.file-descriptor-high").first
+    expect(createdRule).to_contain_text("blocked compound draft")
+    expect(createdRule).to_contain_text("warning condition: lte 20 OR gte 85")
     createdRule.get_by_role("button", name="미리보기").click()
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("App Process")
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("열린 alert 0")
