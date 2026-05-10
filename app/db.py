@@ -112,10 +112,32 @@ def ensure_alert_rule_lifecycle_schema(db_conn: sqlite3.Connection) -> None:
         db_conn.execute("ALTER TABLE alert_rules ADD COLUMN display_name TEXT")
     if "status" not in columns:
         db_conn.execute("ALTER TABLE alert_rules ADD COLUMN status TEXT")
+    if "cond_mode" not in columns:
+        db_conn.execute("ALTER TABLE alert_rules ADD COLUMN cond_mode TEXT")
+    if "warning_logical_op" not in columns:
+        db_conn.execute("ALTER TABLE alert_rules ADD COLUMN warning_logical_op TEXT")
+    if "warning_cl1_comp" not in columns:
+        db_conn.execute("ALTER TABLE alert_rules ADD COLUMN warning_cl1_comp TEXT")
+    if "warning_cl1_val" not in columns:
+        db_conn.execute("ALTER TABLE alert_rules ADD COLUMN warning_cl1_val REAL")
+    if "warning_cl2_comp" not in columns:
+        db_conn.execute("ALTER TABLE alert_rules ADD COLUMN warning_cl2_comp TEXT")
+    if "warning_cl2_val" not in columns:
+        db_conn.execute("ALTER TABLE alert_rules ADD COLUMN warning_cl2_val REAL")
+    if "critical_logical_op" not in columns:
+        db_conn.execute("ALTER TABLE alert_rules ADD COLUMN critical_logical_op TEXT")
+    if "critical_cl1_comp" not in columns:
+        db_conn.execute("ALTER TABLE alert_rules ADD COLUMN critical_cl1_comp TEXT")
+    if "critical_cl1_val" not in columns:
+        db_conn.execute("ALTER TABLE alert_rules ADD COLUMN critical_cl1_val REAL")
+    if "critical_cl2_comp" not in columns:
+        db_conn.execute("ALTER TABLE alert_rules ADD COLUMN critical_cl2_comp TEXT")
+    if "critical_cl2_val" not in columns:
+        db_conn.execute("ALTER TABLE alert_rules ADD COLUMN critical_cl2_val REAL")
 
     rows = db_conn.execute(
         """
-        SELECT id, state_type, metric_key, description, rule_key, display_name, status
+        SELECT id, state_type, metric_key, description, rule_key, display_name, status, cond_mode
         FROM alert_rules
         ORDER BY id ASC
         """
@@ -134,13 +156,14 @@ def ensure_alert_rule_lifecycle_schema(db_conn: sqlite3.Connection) -> None:
         if not RULE_KEY_ALLOWED_PATTERN.fullmatch(normalized_rule_key):
             normalized_rule_key = f"threshold.{row['state_type']}.{row['metric_key']}.legacy-{row['id']}"
         normalized_status = status or "published"
+        normalized_cond_mode = row["cond_mode"] or "scalar"
         db_conn.execute(
             """
             UPDATE alert_rules
-            SET rule_key = ?, display_name = ?, status = ?
+            SET rule_key = ?, display_name = ?, status = ?, cond_mode = ?
             WHERE id = ?
             """,
-            (normalized_rule_key, normalized_display_name, normalized_status, row["id"]),
+            (normalized_rule_key, normalized_display_name, normalized_status, normalized_cond_mode, row["id"]),
         )
 
     db_conn.execute(

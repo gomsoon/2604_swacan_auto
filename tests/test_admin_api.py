@@ -1854,6 +1854,111 @@ def test_admin_create_alert_rule_accepts_valid_object_type_rule(seeded_client) -
     assert payload["display_name"] is not None
 
 
+def test_admin_create_alert_rule_accepts_compound_draft_rule(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "cpu_usage",
+            "comparison": "gte",
+            "condition_mode": "compound",
+            "warning_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "lte", "value": 20},
+                    {"comparison": "gte", "value": 80},
+                ],
+            },
+            "critical_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "lte", "value": 10},
+                    {"comparison": "gte", "value": 90},
+                ],
+            },
+            "is_enabled": True,
+            "display_name": "CPU Band",
+            "rule_key": "threshold.process.cpu_usage.cpu-band",
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.get_json()["rule"]
+    assert payload["status"] == "draft"
+    assert payload["condition_mode"] == "compound"
+    assert payload["warning_threshold"] is None
+    assert payload["critical_threshold"] is None
+    assert payload["warning_condition"] == {
+        "logical_operator": "or",
+        "clauses": [
+            {"comparison": "lte", "value": 20.0},
+            {"comparison": "gte", "value": 80.0},
+        ],
+    }
+    assert payload["critical_condition"] == {
+        "logical_operator": "or",
+        "clauses": [
+            {"comparison": "lte", "value": 10.0},
+            {"comparison": "gte", "value": 90.0},
+        ],
+    }
+    assert payload["publish_warnings"] == []
+
+
+def test_admin_alert_rule_targets_preview_supports_saved_compound_draft(seeded_client) -> None:
+    login(seeded_client)
+
+    create_response = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "cpu_usage",
+            "comparison": "gte",
+            "condition_mode": "compound",
+            "warning_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "lte", "value": 20},
+                    {"comparison": "gte", "value": 80},
+                ],
+            },
+            "critical_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "lte", "value": 10},
+                    {"comparison": "gte", "value": 90},
+                ],
+            },
+            "display_name": "CPU Band Saved Preview",
+            "rule_key": "threshold.process.cpu_usage.cpu-band-saved-preview",
+            "is_enabled": True,
+        },
+    )
+    assert create_response.status_code == 201
+    rule_id = create_response.get_json()["rule"]["id"]
+
+    preview_response = seeded_client.get(f"/api/admin/alert-rules/{rule_id}/targets-preview?limit=10")
+
+    assert preview_response.status_code == 200
+    payload = preview_response.get_json()
+    assert payload["preview_source"] == "saved_rule"
+    assert payload["rule"]["condition_mode"] == "compound"
+    assert payload["validation"]["errors"] == []
+    assert payload["rule"]["warning_condition"] == {
+        "logical_operator": "or",
+        "clauses": [
+            {"comparison": "lte", "value": 20.0},
+            {"comparison": "gte", "value": 80.0},
+        ],
+    }
+
+
 def test_admin_update_alert_rule_rejects_semantic_edit_for_published_rule(seeded_client) -> None:
     login(seeded_client)
 
@@ -1882,6 +1987,71 @@ def test_admin_update_alert_rule_allows_enabled_toggle_for_published_rule(seeded
     assert payload["publish_warnings"] == []
 
 
+def test_admin_update_alert_rule_accepts_compound_draft_changes(seeded_client) -> None:
+    login(seeded_client)
+
+    create_response = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "cpu_usage",
+            "comparison": "gte",
+            "warning_threshold": 80,
+            "critical_threshold": 95,
+            "display_name": "CPU High Draft",
+            "rule_key": "threshold.process.cpu_usage.cpu-high-draft",
+            "is_enabled": True,
+        },
+    )
+    assert create_response.status_code == 201
+    rule_id = create_response.get_json()["rule"]["id"]
+
+    update_response = seeded_client.patch(
+        f"/api/admin/alert-rules/{rule_id}",
+        json={
+            "condition_mode": "compound",
+            "warning_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "lte", "value": 20},
+                    {"comparison": "gte", "value": 80},
+                ],
+            },
+            "critical_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "lte", "value": 10},
+                    {"comparison": "gte", "value": 90},
+                ],
+            },
+            "warning_threshold": None,
+            "critical_threshold": None,
+        },
+    )
+
+    assert update_response.status_code == 200
+    payload = update_response.get_json()["rule"]
+    assert payload["condition_mode"] == "compound"
+    assert payload["warning_threshold"] is None
+    assert payload["critical_threshold"] is None
+    assert payload["warning_condition"] == {
+        "logical_operator": "or",
+        "clauses": [
+            {"comparison": "lte", "value": 20.0},
+            {"comparison": "gte", "value": 80.0},
+        ],
+    }
+    assert payload["critical_condition"] == {
+        "logical_operator": "or",
+        "clauses": [
+            {"comparison": "lte", "value": 10.0},
+            {"comparison": "gte", "value": 90.0},
+        ],
+    }
+
+
 def test_admin_clone_alert_rule_creates_disabled_draft_copy(seeded_client) -> None:
     login(seeded_client)
 
@@ -1895,6 +2065,63 @@ def test_admin_clone_alert_rule_creates_disabled_draft_copy(seeded_client) -> No
     assert payload["rule_key"] == "threshold.process.cpu_usage.process-cpu-high-2"
     assert payload["display_name"] == "Process CPU High (Copy)"
     assert payload["publish_warnings"] == [{"message": "display_name still contains the '(Copy)' suffix."}]
+
+
+def test_admin_clone_alert_rule_preserves_compound_conditions(seeded_client) -> None:
+    login(seeded_client)
+
+    create_response = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "cpu_usage",
+            "comparison": "gte",
+            "condition_mode": "compound",
+            "critical_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "lte", "value": 10},
+                    {"comparison": "gte", "value": 90},
+                ],
+            },
+            "warning_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "lte", "value": 20},
+                    {"comparison": "gte", "value": 80},
+                ],
+            },
+            "is_enabled": True,
+            "display_name": "CPU Window",
+            "rule_key": "threshold.process.cpu_usage.cpu-window",
+        },
+    )
+    assert create_response.status_code == 201
+    rule_id = create_response.get_json()["rule"]["id"]
+
+    clone_response = seeded_client.post(f"/api/admin/alert-rules/{rule_id}/clone")
+
+    assert clone_response.status_code == 201
+    payload = clone_response.get_json()["rule"]
+    assert payload["status"] == "draft"
+    assert payload["is_enabled"] is False
+    assert payload["condition_mode"] == "compound"
+    assert payload["warning_condition"] == {
+        "logical_operator": "or",
+        "clauses": [
+            {"comparison": "lte", "value": 20.0},
+            {"comparison": "gte", "value": 80.0},
+        ],
+    }
+    assert payload["critical_condition"] == {
+        "logical_operator": "or",
+        "clauses": [
+            {"comparison": "lte", "value": 10.0},
+            {"comparison": "gte", "value": 90.0},
+        ],
+    }
 
 
 def test_admin_publish_alert_rule_accepts_warnings_but_publishes_draft(seeded_client) -> None:
@@ -1925,6 +2152,46 @@ def test_admin_publish_alert_rule_accepts_warnings_but_publishes_draft(seeded_cl
     assert payload["rule"]["status"] == "published"
     assert payload["validation"]["errors"] == []
     assert len(payload["validation"]["warnings"]) == 2
+
+
+def test_admin_publish_alert_rule_blocks_compound_draft(seeded_client) -> None:
+    login(seeded_client)
+
+    create_response = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "cpu_usage",
+            "comparison": "gte",
+            "condition_mode": "compound",
+            "warning_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "lte", "value": 20},
+                    {"comparison": "gte", "value": 80},
+                ],
+            },
+            "critical_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "lte", "value": 10},
+                    {"comparison": "gte", "value": 90},
+                ],
+            },
+            "display_name": "CPU Band",
+            "rule_key": "threshold.process.cpu_usage.cpu-band-publish",
+            "is_enabled": True,
+        },
+    )
+    assert create_response.status_code == 201
+    rule_id = create_response.get_json()["rule"]["id"]
+
+    publish_response = seeded_client.post(f"/api/admin/alert-rules/{rule_id}/publish")
+
+    assert publish_response.status_code == 400
+    assert publish_response.get_json()["error"]["message"] == "compound threshold publish is not enabled yet"
 
 
 def test_admin_alert_rule_rejects_duplicate_rule_key(seeded_client) -> None:

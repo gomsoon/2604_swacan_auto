@@ -45,6 +45,9 @@ ALERT_RULE_DRAFT_ONLY_FIELDS = {
     "comparison",
     "warning_threshold",
     "critical_threshold",
+    "condition_mode",
+    "warning_condition",
+    "critical_condition",
     "description",
 }
 
@@ -62,6 +65,17 @@ ALERT_RULE_SELECT_SQL = """
         rules.comparison,
         rules.warning_threshold,
         rules.critical_threshold,
+        rules.cond_mode,
+        rules.warning_logical_op,
+        rules.warning_cl1_comp,
+        rules.warning_cl1_val,
+        rules.warning_cl2_comp,
+        rules.warning_cl2_val,
+        rules.critical_logical_op,
+        rules.critical_cl1_comp,
+        rules.critical_cl1_val,
+        rules.critical_cl2_comp,
+        rules.critical_cl2_val,
         rules.is_enabled,
         rules.description,
         rules.created_at,
@@ -457,7 +471,7 @@ def serialize_alert_rule(row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
-    attach_normalized_alert_rule_conditions(payload, payload)
+    attach_normalized_alert_rule_conditions(payload, dict(row))
     payload["publish_warnings"] = build_alert_rule_publish_warnings(payload)
     return payload
 
@@ -526,7 +540,11 @@ def build_default_alert_rule_key(payload: dict[str, Any]) -> str:
 
 def build_alert_rule_publish_warnings(rule: dict[str, Any]) -> list[dict[str, Any]]:
     warnings: list[dict[str, Any]] = []
-    if rule.get("warning_threshold") is None or rule.get("critical_threshold") is None:
+    condition_mode = normalize_alert_rule_condition_mode(rule)
+    if condition_mode == "compound":
+        if rule.get("warning_condition") is None or rule.get("critical_condition") is None:
+            warnings.append({"message": "This rule only emits a single severity level."})
+    elif rule.get("warning_threshold") is None or rule.get("critical_threshold") is None:
         warnings.append({"message": "This rule only emits a single severity level."})
     if isinstance(rule.get("display_name"), str) and "(Copy)" in rule["display_name"]:
         warnings.append({"message": "display_name still contains the '(Copy)' suffix."})
@@ -534,7 +552,70 @@ def build_alert_rule_publish_warnings(rule: dict[str, Any]) -> list[dict[str, An
 
 
 def normalize_alert_rule_condition_mode(rule: dict[str, Any]) -> str:
-    return "compound" if rule.get("condition_mode") == "compound" else "scalar"
+    return "compound" if (rule.get("condition_mode") or rule.get("cond_mode")) == "compound" else "scalar"
+
+
+def build_alert_rule_condition_group_from_columns(
+    source_rule: dict[str, Any],
+    *,
+    severity: str,
+) -> dict[str, Any] | None:
+    logical_op = source_rule.get(f"{severity}_logical_op")
+    clause1_comp = source_rule.get(f"{severity}_cl1_comp")
+    clause1_val = source_rule.get(f"{severity}_cl1_val")
+    clause2_comp = source_rule.get(f"{severity}_cl2_comp")
+    clause2_val = source_rule.get(f"{severity}_cl2_val")
+
+    if (
+        logical_op is None
+        and clause1_comp is None
+        and clause1_val is None
+        and clause2_comp is None
+        and clause2_val is None
+    ):
+        return None
+
+    clauses: list[dict[str, Any]] = []
+    if clause1_comp is not None or clause1_val is not None:
+        clauses.append({"comparison": clause1_comp, "value": clause1_val})
+    if clause2_comp is not None or clause2_val is not None:
+        clauses.append({"comparison": clause2_comp, "value": clause2_val})
+
+    return {
+        "logical_operator": logical_op,
+        "clauses": clauses,
+    }
+
+
+def build_alert_rule_condition_columns(rule: dict[str, Any]) -> dict[str, Any]:
+    def fill_group(group: dict[str, Any] | None, prefix: str, dest: dict[str, Any]) -> None:
+        if not group:
+            dest[f"{prefix}_logical_op"] = None
+            dest[f"{prefix}_cl1_comp"] = None
+            dest[f"{prefix}_cl1_val"] = None
+            dest[f"{prefix}_cl2_comp"] = None
+            dest[f"{prefix}_cl2_val"] = None
+            return
+
+        clauses = group.get("clauses") or []
+        clause1 = clauses[0] if len(clauses) >= 1 else {}
+        clause2 = clauses[1] if len(clauses) >= 2 else {}
+        dest[f"{prefix}_logical_op"] = group.get("logical_operator")
+        dest[f"{prefix}_cl1_comp"] = clause1.get("comparison")
+        dest[f"{prefix}_cl1_val"] = clause1.get("value")
+        dest[f"{prefix}_cl2_comp"] = clause2.get("comparison")
+        dest[f"{prefix}_cl2_val"] = clause2.get("value")
+
+    condition_mode = normalize_alert_rule_condition_mode(rule)
+    columns: dict[str, Any] = {"cond_mode": condition_mode}
+    if condition_mode == "compound":
+        fill_group(rule.get("warning_condition"), "warning", columns)
+        fill_group(rule.get("critical_condition"), "critical", columns)
+        return columns
+
+    fill_group(None, "warning", columns)
+    fill_group(None, "critical", columns)
+    return columns
 
 
 def normalize_alert_rule_condition_clause(raw_clause: Any) -> dict[str, Any] | None:
@@ -603,15 +684,21 @@ def normalize_alert_rule_condition_group(
 
 def attach_normalized_alert_rule_conditions(payload: dict[str, Any], source_rule: dict[str, Any]) -> None:
     condition_mode = normalize_alert_rule_condition_mode(source_rule)
+    warning_condition = source_rule.get("warning_condition")
+    critical_condition = source_rule.get("critical_condition")
+    if warning_condition is None:
+        warning_condition = build_alert_rule_condition_group_from_columns(source_rule, severity="warning")
+    if critical_condition is None:
+        critical_condition = build_alert_rule_condition_group_from_columns(source_rule, severity="critical")
     payload["condition_mode"] = condition_mode
     payload["warning_condition"] = normalize_alert_rule_condition_group(
-        source_rule.get("warning_condition"),
+        warning_condition,
         condition_mode=condition_mode,
         fallback_comparison=payload["comparison"],
         fallback_threshold=payload.get("warning_threshold"),
     )
     payload["critical_condition"] = normalize_alert_rule_condition_group(
-        source_rule.get("critical_condition"),
+        critical_condition,
         condition_mode=condition_mode,
         fallback_comparison=payload["comparison"],
         fallback_threshold=payload.get("critical_threshold"),
@@ -1465,7 +1552,12 @@ def parse_alert_status_filter(value: str | None) -> tuple[str, Any | None]:
     return normalized, error_response("validation_error", "invalid status filter", 400)
 
 
-def validate_alert_rule_payload(data: dict[str, Any], *, partial: bool = False) -> tuple[dict[str, Any] | None, Any | None]:
+def validate_alert_rule_payload(
+    data: dict[str, Any],
+    *,
+    partial: bool = False,
+    enforce_compound_validation: bool = True,
+) -> tuple[dict[str, Any] | None, Any | None]:
     payload = dict(data)
 
     if "status" in payload:
@@ -1510,6 +1602,14 @@ def validate_alert_rule_payload(data: dict[str, Any], *, partial: bool = False) 
         if comparison not in ALLOWED_ALERT_COMPARISONS:
             return None, error_response("validation_error", "comparison is invalid", 400)
 
+    if not partial or "condition_mode" in payload or "cond_mode" in payload:
+        condition_mode = payload.get("condition_mode") or payload.get("cond_mode") or "scalar"
+        if condition_mode not in {"scalar", "compound"}:
+            return None, error_response("validation_error", "condition_mode is invalid", 400)
+        payload["condition_mode"] = condition_mode
+    else:
+        payload["condition_mode"] = normalize_alert_rule_condition_mode(payload)
+
     if not partial or "metric_key" in payload:
         metric_key = payload.get("metric_key")
         if not isinstance(metric_key, str) or not metric_key.strip():
@@ -1546,23 +1646,55 @@ def validate_alert_rule_payload(data: dict[str, Any], *, partial: bool = False) 
             return None, error_response("validation_error", "monitored_object_id not found", 400)
         payload["object_type"] = None
 
-    warning_threshold = payload.get("warning_threshold")
-    critical_threshold = payload.get("critical_threshold")
-    if warning_threshold is None and critical_threshold is None:
-        return None, error_response("validation_error", "at least one threshold is required", 400)
-
     description = payload.get("description")
     if description is not None:
         if not isinstance(description, str):
             return None, error_response("validation_error", "description must be a string", 400)
         payload["description"] = description.strip() or None
 
-    comparison = payload.get("comparison")
-    if warning_threshold is not None and critical_threshold is not None:
-        if comparison == "gte" and critical_threshold < warning_threshold:
-            return None, error_response("validation_error", "critical_threshold must be greater than or equal to warning_threshold", 400)
-        if comparison == "lte" and critical_threshold > warning_threshold:
-            return None, error_response("validation_error", "critical_threshold must be less than or equal to warning_threshold", 400)
+    condition_mode = payload["condition_mode"]
+    warning_threshold = payload.get("warning_threshold")
+    critical_threshold = payload.get("critical_threshold")
+    if condition_mode == "compound":
+        raw_rule = dict(payload)
+        if raw_rule.get("warning_condition") is None:
+            raw_rule["warning_condition"] = build_alert_rule_condition_group_from_columns(raw_rule, severity="warning")
+        if raw_rule.get("critical_condition") is None:
+            raw_rule["critical_condition"] = build_alert_rule_condition_group_from_columns(raw_rule, severity="critical")
+
+        normalized_rule = serialize_alert_rule_preview_input(
+            raw_rule,
+            rule_id=payload.get("id"),
+            status=payload.get("status") or "draft",
+        )
+        validation_errors, _ = validate_alert_rule_preview_conditions(raw_rule, normalized_rule)
+        if validation_errors and enforce_compound_validation:
+            return None, error_response("validation_error", validation_errors[0]["message"], 400)
+
+        payload["warning_condition"] = normalized_rule.get("warning_condition")
+        payload["critical_condition"] = normalized_rule.get("critical_condition")
+        payload["warning_threshold"] = None
+        payload["critical_threshold"] = None
+    else:
+        if warning_threshold is None and critical_threshold is None:
+            return None, error_response("validation_error", "at least one threshold is required", 400)
+
+        comparison = payload.get("comparison")
+        if warning_threshold is not None and critical_threshold is not None:
+            if comparison == "gte" and critical_threshold < warning_threshold:
+                return None, error_response(
+                    "validation_error",
+                    "critical_threshold must be greater than or equal to warning_threshold",
+                    400,
+                )
+            if comparison == "lte" and critical_threshold > warning_threshold:
+                return None, error_response(
+                    "validation_error",
+                    "critical_threshold must be less than or equal to warning_threshold",
+                    400,
+                )
+        payload["warning_condition"] = None
+        payload["critical_condition"] = None
 
     if payload.get("display_name") is None:
         payload["display_name"] = build_default_alert_rule_display_name(payload)
@@ -2345,12 +2477,17 @@ def get_alert_rule_targets_preview(rule_id: int):
         return error_response("not_found", "alert rule not found", 404)
 
     rule_payload = serialize_alert_rule(row)
+    raw_rule_for_validation = rule_payload if rule_payload.get("condition_mode") == "compound" else {
+        "condition_mode": "scalar"
+    }
     compound_errors, compound_warnings = validate_alert_rule_preview_conditions(
-        {"condition_mode": rule_payload.get("condition_mode")},
+        raw_rule_for_validation,
         rule_payload,
     )
     if compound_errors:
-        summary, items = build_empty_alert_rule_preview_summary(), []
+        summary = build_empty_alert_rule_preview_summary()
+        decision_summary = build_empty_alert_rule_preview_decision_summary()
+        items = []
     else:
         summary, decision_summary, items = build_alert_rule_target_preview(rule_payload, limit=limit)
     return {
@@ -2358,7 +2495,9 @@ def get_alert_rule_targets_preview(rule_id: int):
         "rule": rule_payload,
         "validation": {
             "errors": compound_errors,
-            "warnings": [*compound_warnings, *rule_payload["publish_warnings"]],
+            "warnings": compound_warnings
+            if compound_errors
+            else [*compound_warnings, *rule_payload["publish_warnings"]],
         },
         "summary": summary,
         "decision_summary": decision_summary,
@@ -2377,7 +2516,11 @@ def preview_alert_rule():
     rule_id = coerce_optional_int(data.get("rule_id"))
     status = data.get("status") if data.get("status") in ALLOWED_ALERT_RULE_STATUSES else "draft"
 
-    payload, validation_error = validate_alert_rule_payload(data, partial=False)
+    payload, validation_error = validate_alert_rule_payload(
+        data,
+        partial=False,
+        enforce_compound_validation=False,
+    )
     if validation_error:
         return {
             "preview_source": "draft_preview",
@@ -2420,7 +2563,9 @@ def preview_alert_rule():
         "rule": rule_payload,
         "validation": {
             "errors": compound_errors,
-            "warnings": [*compound_warnings, *rule_payload["publish_warnings"]],
+            "warnings": compound_warnings
+            if compound_errors
+            else [*compound_warnings, *rule_payload["publish_warnings"]],
         },
         "summary": summary,
         "decision_summary": decision_summary,
@@ -2440,13 +2585,17 @@ def create_alert_rule():
         return uniqueness_error
 
     timestamp = now_iso()
+    condition_columns = build_alert_rule_condition_columns(payload)
     db_conn = get_db()
     cursor = db_conn.execute(
         """
         INSERT INTO alert_rules (
             rule_key, display_name, status, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
-            warning_threshold, critical_threshold, is_enabled, description, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            warning_threshold, critical_threshold,
+            cond_mode, warning_logical_op, warning_cl1_comp, warning_cl1_val, warning_cl2_comp, warning_cl2_val,
+            critical_logical_op, critical_cl1_comp, critical_cl1_val, critical_cl2_comp, critical_cl2_val,
+            is_enabled, description, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             payload["rule_key"],
@@ -2460,6 +2609,17 @@ def create_alert_rule():
             payload["comparison"],
             payload.get("warning_threshold"),
             payload.get("critical_threshold"),
+            condition_columns["cond_mode"],
+            condition_columns["warning_logical_op"],
+            condition_columns["warning_cl1_comp"],
+            condition_columns["warning_cl1_val"],
+            condition_columns["warning_cl2_comp"],
+            condition_columns["warning_cl2_val"],
+            condition_columns["critical_logical_op"],
+            condition_columns["critical_cl1_comp"],
+            condition_columns["critical_cl1_val"],
+            condition_columns["critical_cl2_comp"],
+            condition_columns["critical_cl2_val"],
             int(payload["is_enabled"]),
             payload.get("description"),
             timestamp,
@@ -2503,11 +2663,15 @@ def update_alert_rule(rule_id: int):
         return uniqueness_error
 
     timestamp = now_iso()
+    condition_columns = build_alert_rule_condition_columns(payload)
     db_conn.execute(
         """
         UPDATE alert_rules
         SET rule_key = ?, display_name = ?, scope_type = ?, object_type = ?, monitored_object_id = ?, state_type = ?, metric_key = ?,
-            comparison = ?, warning_threshold = ?, critical_threshold = ?, is_enabled = ?,
+            comparison = ?, warning_threshold = ?, critical_threshold = ?,
+            cond_mode = ?, warning_logical_op = ?, warning_cl1_comp = ?, warning_cl1_val = ?, warning_cl2_comp = ?, warning_cl2_val = ?,
+            critical_logical_op = ?, critical_cl1_comp = ?, critical_cl1_val = ?, critical_cl2_comp = ?, critical_cl2_val = ?,
+            is_enabled = ?,
             description = ?, updated_at = ?
         WHERE id = ?
         """,
@@ -2522,6 +2686,17 @@ def update_alert_rule(rule_id: int):
             payload["comparison"],
             payload.get("warning_threshold"),
             payload.get("critical_threshold"),
+            condition_columns["cond_mode"],
+            condition_columns["warning_logical_op"],
+            condition_columns["warning_cl1_comp"],
+            condition_columns["warning_cl1_val"],
+            condition_columns["warning_cl2_comp"],
+            condition_columns["warning_cl2_val"],
+            condition_columns["critical_logical_op"],
+            condition_columns["critical_cl1_comp"],
+            condition_columns["critical_cl1_val"],
+            condition_columns["critical_cl2_comp"],
+            condition_columns["critical_cl2_val"],
             int(payload["is_enabled"]),
             payload.get("description"),
             timestamp,
@@ -2546,6 +2721,8 @@ def publish_alert_rule(rule_id: int):
     payload, error = validate_alert_rule_payload(dict(existing), partial=False)
     if error:
         return error
+    if payload["condition_mode"] == "compound":
+        return error_response("validation_error", "compound threshold publish is not enabled yet", 400)
     uniqueness_error = ensure_alert_rule_key_unique(payload["rule_key"], exclude_rule_id=rule_id)
     if uniqueness_error:
         return uniqueness_error
@@ -2582,8 +2759,11 @@ def clone_alert_rule(rule_id: int):
         """
         INSERT INTO alert_rules (
             rule_key, display_name, status, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
-            warning_threshold, critical_threshold, is_enabled, description, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            warning_threshold, critical_threshold,
+            cond_mode, warning_logical_op, warning_cl1_comp, warning_cl1_val, warning_cl2_comp, warning_cl2_val,
+            critical_logical_op, critical_cl1_comp, critical_cl1_val, critical_cl2_comp, critical_cl2_val,
+            is_enabled, description, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             cloned_rule_key,
@@ -2597,6 +2777,17 @@ def clone_alert_rule(rule_id: int):
             existing["comparison"],
             existing["warning_threshold"],
             existing["critical_threshold"],
+            existing["cond_mode"],
+            existing["warning_logical_op"],
+            existing["warning_cl1_comp"],
+            existing["warning_cl1_val"],
+            existing["warning_cl2_comp"],
+            existing["warning_cl2_val"],
+            existing["critical_logical_op"],
+            existing["critical_cl1_comp"],
+            existing["critical_cl1_val"],
+            existing["critical_cl2_comp"],
+            existing["critical_cl2_val"],
             0,
             existing["description"],
             timestamp,
