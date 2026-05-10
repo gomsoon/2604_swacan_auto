@@ -3116,6 +3116,7 @@ function renderAlertRuleEditorStatus(rule = null) {
 
     const warnings = Array.isArray(rule.publish_warnings) ? rule.publish_warnings : [];
     const isCompoundDraft = rule.status === "draft" && rule.condition_mode === "compound";
+    const publishReadiness = getAlertRulePublishReadiness(rule, { hasUnsavedChanges: alertRuleDraftDirty });
     const statusMessage =
         rule.status === "draft"
             ? isCompoundDraft
@@ -3148,6 +3149,22 @@ function renderAlertRuleEditorStatus(rule = null) {
                 </div>
             `
             : "";
+    const publishBlock =
+        rule.status === "draft" && publishReadiness.state !== "ready"
+            ? `
+                <div class="alert-rule-editor-warning-list">
+                    <h4>Publish 차단</h4>
+                    <p class="section-copy">${escapeHtml(publishReadiness.message)}</p>
+                </div>
+            `
+            : rule.status === "draft"
+              ? `
+                <div class="alert-rule-editor-warning-list">
+                    <h4>Publish 준비됨</h4>
+                    <p class="section-copy">${escapeHtml(publishReadiness.message)}</p>
+                </div>
+            `
+              : "";
 
     alertRuleEditorStatus.innerHTML = `
         <p class="section-copy">${escapeHtml(statusMessage)}</p>
@@ -3159,6 +3176,7 @@ function renderAlertRuleEditorStatus(rule = null) {
         </div>
         <p class="section-copy">${escapeHtml(toggleMessage)}</p>
         ${dirtyBlock}
+        ${publishBlock}
         ${warningBlock}
     `;
 }
@@ -3168,9 +3186,11 @@ function setAlertRuleActionButtonState(rule = null) {
         previewCurrentAlertRuleButton.disabled = false;
     }
     if (publishCurrentAlertRuleButton) {
+        const publishReadiness = getAlertRulePublishReadiness(rule, { hasUnsavedChanges: alertRuleDraftDirty });
         publishCurrentAlertRuleButton.hidden = !rule || rule.status !== "draft";
         publishCurrentAlertRuleButton.disabled =
             !rule || rule.status !== "draft" || alertRuleDraftDirty || rule.condition_mode === "compound";
+        publishCurrentAlertRuleButton.title = !rule || rule.status !== "draft" ? "" : publishReadiness.message;
     }
     if (cloneCurrentAlertRuleButton) {
         cloneCurrentAlertRuleButton.hidden = !rule;
@@ -3524,7 +3544,51 @@ function buildAlertRuleSuppressedLabel(item) {
     return `suppressed ${suppressedCount}건: ${names.join(", ")}`;
 }
 
-function renderAlertRulePreviewSummaryBlock(summary, decisionSummary, rule) {
+function getAlertRulePublishReadiness(rule, options = {}) {
+    const hasUnsavedChanges = options.hasUnsavedChanges ?? false;
+    if (!rule) {
+        return {
+            state: "blocked",
+            label: "blocked draft save",
+            message: "draft를 먼저 저장한 뒤 publish 가능합니다.",
+        };
+    }
+    if (rule.status !== "draft") {
+        return {
+            state: "read-only",
+            label: "read-only",
+            message: "published rule은 다시 publish하지 않습니다. 조건을 바꾸려면 Clone으로 새 draft를 만드세요.",
+        };
+    }
+    if (!rule.id) {
+        return {
+            state: "blocked",
+            label: "blocked draft save",
+            message: "draft를 먼저 저장한 뒤 publish 가능합니다.",
+        };
+    }
+    if (hasUnsavedChanges) {
+        return {
+            state: "blocked",
+            label: "blocked unsaved changes",
+            message: "미저장 draft 변경이 있습니다. 먼저 저장하세요.",
+        };
+    }
+    if (rule.condition_mode === "compound") {
+        return {
+            state: "blocked",
+            label: "blocked compound draft",
+            message: "compound threshold는 아직 publish를 지원하지 않습니다. draft 저장과 preview만 가능합니다.",
+        };
+    }
+    return {
+        state: "ready",
+        label: "ready",
+        message: "현재 draft는 publish 가능합니다.",
+    };
+}
+
+function renderAlertRulePreviewSummaryBlock(summary, decisionSummary, rule, publishReadiness) {
     return `
         <section class="alert-rule-preview-summary-panel">
             <div class="section-header">
@@ -3545,10 +3609,12 @@ function renderAlertRulePreviewSummaryBlock(summary, decisionSummary, rule) {
                     ["candidate rules", decisionSummary?.candidate_rule_count ?? 0],
                     ["competing published", decisionSummary?.published_competing_rule_count ?? 0],
                     ["suppression 객체", decisionSummary?.items_with_suppression_count ?? 0],
+                    ["publish", publishReadiness?.label || "-"],
                 ])}
             </div>
             <p class="section-copy">${escapeHtml(buildAlertRuleDecisionSummaryNarrative(decisionSummary))}</p>
             <p class="admin-meta">매칭 수치와 warning / critical count는 현재 입력 rule 기준입니다. winner / suppressed 설명은 competing published rule까지 함께 본 결과입니다.</p>
+            <p class="section-copy">Publish readiness: ${escapeHtml(publishReadiness?.message || "-")}</p>
             ${
                 rule.condition_mode === "compound"
                     ? '<p class="section-copy">compound trace의 clause 번호는 1부터 보이며, 각 item 카드에서 실제로 매칭된 절을 함께 확인할 수 있습니다.</p>'
@@ -3629,6 +3695,14 @@ function buildAlertRulePublishNotice(validation = null) {
               title: "Publish 완료",
               message: "rule을 publish했습니다. 현재 상태와 적용 대상을 바로 확인할 수 있습니다.",
           };
+}
+
+function buildAlertRulePublishBlockedNotice(message) {
+    return {
+        tone: "warning",
+        title: "Publish 차단",
+        message,
+    };
 }
 
 function buildAlertRulePublishBannerMessage(validation = null) {
@@ -3842,6 +3916,9 @@ function renderAlertRulePreviewPanel() {
     const { rule, summary, decision_summary: decisionSummary, items, validation, preview_source: previewSource } = selectedAlertRulePreview;
     const errors = Array.isArray(validation?.errors) ? validation.errors : [];
     const previewSourceLabel = getAlertRulePreviewSourceLabel(previewSource);
+    const publishReadiness = getAlertRulePublishReadiness(rule, {
+        hasUnsavedChanges: previewSource === "draft_preview" ? alertRuleDraftDirty : false,
+    });
     const header = `
         <div class="section-header">
             <h3>${escapeHtml(rule.display_name || rule.metric_key)}</h3>
@@ -3872,7 +3949,7 @@ function renderAlertRulePreviewPanel() {
             <p class="admin-meta">critical condition: ${escapeHtml(formatAlertRuleConditionGroup(rule.critical_condition))}</p>
             ${
                 rule.condition_mode === "compound"
-                    ? '<p class="section-copy">compound threshold는 현재 preview/validation 전용입니다. 저장과 publish는 scalar rule을 유지합니다.</p>'
+                    ? '<p class="section-copy">compound threshold는 현재 draft 저장과 preview를 지원합니다. publish는 아직 scalar rule만 지원합니다.</p>'
                     : ""
             }
         </section>
@@ -3880,7 +3957,7 @@ function renderAlertRulePreviewPanel() {
     const noticeBlock = renderAlertRulePreviewNoticeBlock();
     const validationBlock = renderAlertRuleValidationBlock(validation, rule);
 
-    const summaryBlock = renderAlertRulePreviewSummaryBlock(summary, decisionSummary, rule);
+    const summaryBlock = renderAlertRulePreviewSummaryBlock(summary, decisionSummary, rule, publishReadiness);
 
     if (errors.length > 0) {
         alertRulePreviewPanel.innerHTML = `
@@ -4770,18 +4847,26 @@ async function publishSelectedAlertRule() {
         return;
     }
     if (alertRuleDraftDirty) {
+        selectedAlertRulePreviewNotice = buildAlertRulePublishBlockedNotice("미저장 draft 변경이 있습니다. 먼저 저장하세요.");
+        renderAlertRulePreviewPanel();
         showBanner("저장되지 않은 draft 변경이 있습니다. 먼저 저장한 뒤 publish 하세요.", "error");
         return;
     }
-    const payload = await publishAlertRule(Number(alertRuleIdInput.value));
-    await Promise.all([loadAlertRules(), loadSummary()]);
-    if (payload?.rule) {
-        fillAlertRuleForm(payload.rule);
-        await loadAlertRulePreview(payload.rule.id);
+    try {
+        const payload = await publishAlertRule(Number(alertRuleIdInput.value));
+        await Promise.all([loadAlertRules(), loadSummary()]);
+        if (payload?.rule) {
+            fillAlertRuleForm(payload.rule);
+            await loadAlertRulePreview(payload.rule.id);
+        }
+        selectedAlertRulePreviewNotice = buildAlertRulePublishNotice(payload?.validation);
+        renderAlertRulePreviewPanel();
+        showBanner(buildAlertRulePublishBannerMessage(payload?.validation), "success");
+    } catch (error) {
+        selectedAlertRulePreviewNotice = buildAlertRulePublishBlockedNotice(error.message);
+        renderAlertRulePreviewPanel();
+        showBanner(error.message, "error");
     }
-    selectedAlertRulePreviewNotice = buildAlertRulePublishNotice(payload?.validation);
-    renderAlertRulePreviewPanel();
-    showBanner(buildAlertRulePublishBannerMessage(payload?.validation), "success");
 }
 
 async function cloneSelectedAlertRule() {
@@ -5392,7 +5477,11 @@ alertRulesList?.addEventListener("click", (event) => {
                 renderAlertRulePreviewPanel();
                 showBanner(buildAlertRulePublishBannerMessage(payload?.validation), "success");
             })
-            .catch((error) => showBanner(error.message, "error"));
+            .catch((error) => {
+                selectedAlertRulePreviewNotice = buildAlertRulePublishBlockedNotice(error.message);
+                renderAlertRulePreviewPanel();
+                showBanner(error.message, "error");
+            });
         return;
     }
 
