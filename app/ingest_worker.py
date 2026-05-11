@@ -9,6 +9,7 @@ import click
 from flask import current_app
 from flask.cli import with_appcontext
 
+from .alert_archive import close_alert_instance_with_archive
 from .alert_history import record_alert_history
 from .alert_rule_evaluator import (
     THRESHOLD_FIRING_LEVELS,
@@ -198,22 +199,27 @@ def create_alert_instance(
     )
 
 
-def resolve_alert_rows(*, rows, occurred_at: str, received_at: str, note: str, payload: dict) -> None:
+def resolve_alert_rows(
+    *,
+    rows,
+    occurred_at: str,
+    received_at: str,
+    note: str,
+    payload: dict,
+    resolution_source: str,
+    resolution_reason: str,
+) -> None:
     db_conn = get_db()
     for row in rows:
-        db_conn.execute(
-            """
-            UPDATE alert_instances
-            SET status = 'resolved',
-                resolved_at = COALESCE(resolved_at, ?),
-                resolved_by_user_id = NULL,
-                status_updated_at = ?,
-                status_updated_by_user_id = NULL,
-                updated_at = ?,
-                last_occurred_at = ?
-            WHERE id = ?
-            """,
-            (received_at, received_at, received_at, occurred_at, row["id"]),
+        archive_id = close_alert_instance_with_archive(
+            db_conn,
+            alert_row=row,
+            resolved_at=received_at,
+            last_occurred_at=occurred_at,
+            status_note=note,
+            resolution_source=resolution_source,
+            resolution_reason=resolution_reason,
+            resolved_by_user_id=None,
         )
         record_alert_history(
             db_conn,
@@ -225,7 +231,11 @@ def resolve_alert_rows(*, rows, occurred_at: str, received_at: str, note: str, p
             previous_acknowledged=row["acknowledged_at"] is not None,
             new_acknowledged=row["acknowledged_at"] is not None,
             note=note,
-            payload=payload,
+            payload={
+                **payload,
+                "resolution_source": resolution_source,
+                "archive_id": archive_id,
+            },
         )
 
 
@@ -249,7 +259,10 @@ def sync_latest_state_alert(
     if alert_code is None:
         rows_to_resolve = db_conn.execute(
             """
-            SELECT id, status, acknowledged_at
+            SELECT id, monitored_object_id, alert_code, source_rule_id, severity, status,
+                   acknowledged_at, acknowledged_by_user_id,
+                   first_occurred_at, last_occurred_at, repeat_count,
+                   latest_message, metadata_json
             FROM alert_instances
             WHERE monitored_object_id = ?
               AND status != 'resolved'
@@ -263,6 +276,8 @@ def sync_latest_state_alert(
             received_at=received_at,
             note="state normalized",
             payload={"source": "worker", "reason": "state_normalized", "state_type": state_type},
+            resolution_source="auto_recovery",
+            resolution_reason="state_normalized",
         )
         return
 
@@ -272,7 +287,10 @@ def sync_latest_state_alert(
 
     rows_to_resolve = db_conn.execute(
         """
-        SELECT id, status, acknowledged_at
+        SELECT id, monitored_object_id, alert_code, source_rule_id, severity, status,
+               acknowledged_at, acknowledged_by_user_id,
+               first_occurred_at, last_occurred_at, repeat_count,
+               latest_message, metadata_json
         FROM alert_instances
         WHERE monitored_object_id = ?
           AND status != 'resolved'
@@ -292,6 +310,8 @@ def sync_latest_state_alert(
             "state_type": state_type,
             "active_alert_code": alert_code,
         },
+        resolution_source="system_cleanup",
+        resolution_reason="superseded",
     )
 
     existing = db_conn.execute(
@@ -381,7 +401,10 @@ def fetch_open_alert_rows_for_rule_ids(*, monitored_object_id: int, rule_ids: li
     placeholders = ", ".join("?" for _ in rule_ids)
     return get_db().execute(
         f"""
-        SELECT id, source_rule_id, status, acknowledged_at
+        SELECT id, monitored_object_id, alert_code, source_rule_id, severity, status,
+               acknowledged_at, acknowledged_by_user_id,
+               first_occurred_at, last_occurred_at, repeat_count,
+               latest_message, metadata_json
         FROM alert_instances
         WHERE monitored_object_id = ?
           AND status != 'resolved'
@@ -488,6 +511,8 @@ def sync_threshold_alerts(
                     "reason": "threshold_cleared",
                     "family_key": list(family_key),
                 },
+                resolution_source="auto_recovery",
+                resolution_reason="threshold_cleared",
             )
 
         if losing_rule_ids:
@@ -505,6 +530,8 @@ def sync_threshold_alerts(
                     "family_key": list(family_key),
                     "winner_rule_id": winner_rule_id,
                 },
+                resolution_source="system_cleanup",
+                resolution_reason="suppressed_by_precedence",
             )
 
         if winner_rule is None or metric_value is None or winner_rule_id is None:

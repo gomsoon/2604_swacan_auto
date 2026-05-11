@@ -102,6 +102,51 @@ def insert_alert_history_archive(
     return int(cursor.lastrowid)
 
 
+def close_alert_instance_with_archive(
+    db_conn,
+    *,
+    alert_row,
+    resolved_at: str,
+    last_occurred_at: str,
+    status_note: str | None,
+    resolution_source: str,
+    resolution_reason: str | None,
+    resolved_by_user_id: int | None,
+) -> int:
+    db_conn.execute(
+        """
+        UPDATE alert_instances
+        SET status = 'resolved',
+            resolved_at = COALESCE(resolved_at, ?),
+            resolved_by_user_id = ?,
+            status_updated_at = ?,
+            status_updated_by_user_id = ?,
+            status_note = ?,
+            updated_at = ?,
+            last_occurred_at = ?
+        WHERE id = ?
+        """,
+        (
+            resolved_at,
+            resolved_by_user_id,
+            resolved_at,
+            resolved_by_user_id,
+            status_note,
+            resolved_at,
+            last_occurred_at,
+            alert_row["id"],
+        ),
+    )
+    return insert_alert_history_archive(
+        db_conn,
+        alert_row=alert_row,
+        resolved_at=resolved_at,
+        resolution_source=resolution_source,
+        resolution_reason=resolution_reason,
+        resolved_by_user_id=resolved_by_user_id,
+    )
+
+
 def serialize_alert_archive_row(row) -> dict[str, Any]:
     payload = {
         "id": row["id"],

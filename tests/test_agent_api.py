@@ -1052,6 +1052,16 @@ def test_specific_threshold_rule_resolves_existing_general_alert_by_precedence(s
             """,
             (initial_general["id"],),
         ).fetchone()
+        archive_row = db_conn.execute(
+            """
+            SELECT source_rule_id, source_rule_key, source_rule_display_name_snapshot,
+                   resolution_source, resolution_reason
+            FROM alert_history_archive
+            WHERE source_rule_id = 1501
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
 
     assert first_result["processed_items"] == 1
     assert second_result["processed_items"] == 1
@@ -1067,6 +1077,11 @@ def test_specific_threshold_rule_resolves_existing_general_alert_by_precedence(s
     assert "88.000" in specific_row["latest_message"]
     assert history_row["note"] == "suppressed by threshold precedence"
     assert json.loads(history_row["payload_json"])["reason"] == "suppressed_by_precedence"
+    assert archive_row["source_rule_id"] == 1501
+    assert archive_row["source_rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
+    assert archive_row["source_rule_display_name_snapshot"] == "Process CPU High"
+    assert archive_row["resolution_source"] == "system_cleanup"
+    assert archive_row["resolution_reason"] == "suppressed_by_precedence"
 
 
 def test_compound_threshold_rule_wins_at_runtime_and_resolves_on_recovery(seeded_app, seeded_client) -> None:
@@ -1195,6 +1210,16 @@ def test_compound_threshold_rule_wins_at_runtime_and_resolves_on_recovery(seeded
             LIMIT 1
             """
         ).fetchone()
+        archive_row = db_conn.execute(
+            """
+            SELECT source_rule_id, source_rule_key, source_rule_display_name_snapshot,
+                   resolution_source, resolution_reason
+            FROM alert_history_archive
+            WHERE source_rule_id = 1902
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
 
     assert first_result["processed_items"] == 1
     assert compound_alert["alert_code"] == "rule.1902"
@@ -1212,6 +1237,11 @@ def test_compound_threshold_rule_wins_at_runtime_and_resolves_on_recovery(seeded
     assert second_result["processed_items"] == 1
     assert resolved_compound["status"] == "resolved"
     assert resolved_compound["resolved_at"] is not None
+    assert archive_row["source_rule_id"] == 1902
+    assert archive_row["source_rule_key"] == "threshold.process.cpu_usage.app-process-cpu-band"
+    assert archive_row["source_rule_display_name_snapshot"] == "App Process CPU Band"
+    assert archive_row["resolution_source"] == "auto_recovery"
+    assert archive_row["resolution_reason"] == "threshold_cleared"
 
 
 def test_grouped_events_merge_at_exact_window_boundary(seeded_app, seeded_client) -> None:

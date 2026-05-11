@@ -7,7 +7,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, g, request
 
-from .alert_archive import insert_alert_history_archive, serialize_alert_archive_row
+from .alert_archive import close_alert_instance_with_archive, insert_alert_history_archive, serialize_alert_archive_row
 from .alert_history import record_alert_history
 from .alert_rule_evaluator import (
     alert_rule_candidate_identity as shared_alert_rule_candidate_identity,
@@ -406,33 +406,12 @@ def resolve_alert_instance(
         return None, error_response("invalid_state", "alert is already resolved", 409)
 
     timestamp = now_iso()
-    db_conn.execute(
-        """
-        UPDATE alert_instances
-        SET status = 'resolved',
-            status_updated_at = ?,
-            status_updated_by_user_id = ?,
-            status_note = ?,
-            resolved_at = ?,
-            resolved_by_user_id = ?,
-            updated_at = ?
-        WHERE id = ?
-        """,
-        (
-            timestamp,
-            resolved_by_user_id,
-            resolution_reason,
-            timestamp,
-            resolved_by_user_id,
-            timestamp,
-            alert_id,
-        ),
-    )
-
-    archive_id = insert_alert_history_archive(
+    archive_id = close_alert_instance_with_archive(
         db_conn,
         alert_row=existing,
         resolved_at=timestamp,
+        last_occurred_at=existing["last_occurred_at"],
+        status_note=resolution_reason,
         resolution_source=resolution_source,
         resolution_reason=resolution_reason,
         resolved_by_user_id=resolved_by_user_id,
