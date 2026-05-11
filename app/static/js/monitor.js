@@ -422,6 +422,7 @@ function defaultRuntimeHistory() {
             raw_event_count: 0,
             latest_event_at: null,
         },
+        alert_archive: [],
         alert_history: [],
         raw_events: [],
     };
@@ -468,8 +469,9 @@ function renderRuntimeHistorySection(monitoredObjectId) {
         { label: "최근 이벤트 시각", value: formatTimestamp(history.summary.latest_event_at) },
     ];
 
+    const alertArchiveItems = history.alert_archive || history.alert_history || [];
     const alertHistoryHtml = renderHistoryCards(
-        history.alert_history.slice(0, 3),
+        alertArchiveItems.slice(0, 3),
         "최근 해결 이력이 없습니다.",
         (item) => `
             <article class="selection-summary-card">

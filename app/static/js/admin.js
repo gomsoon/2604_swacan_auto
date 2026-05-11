@@ -4063,7 +4063,7 @@ async function loadAlerts() {
 }
 
 async function loadAlertHistoryArchive() {
-    const payload = await apiFetch("/api/admin/alert-history?limit=10");
+    const payload = await apiFetch("/api/admin/alert-archive?limit=10");
     renderAlertHistoryArchive(payload.items);
 }
 

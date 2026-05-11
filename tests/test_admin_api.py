@@ -931,7 +931,7 @@ def test_admin_alert_history_archive_accepts_boundary_limits_and_filters(seeded_
     zero_response = seeded_client.get("/api/admin/alert-history?limit=0")
     over_response = seeded_client.get("/api/admin/alert-history?limit=101")
     invalid_response = seeded_client.get("/api/admin/alert-history?limit=abc")
-    filtered_response = seeded_client.get("/api/admin/alert-history?limit=10&resolution_source=manual_operator")
+    filtered_response = seeded_client.get("/api/admin/alert-archive?limit=10&resolution_source=manual_operator")
 
     assert low_response.status_code == 200
     assert high_response.status_code == 200
@@ -942,6 +942,22 @@ def test_admin_alert_history_archive_accepts_boundary_limits_and_filters(seeded_
     assert invalid_response.status_code == 400
     assert filtered_response.status_code == 200
     assert filtered_response.get_json()["items"][0]["resolution_source"] == "manual_operator"
+
+
+def test_admin_alert_archive_alias_supports_legacy_history_route(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    login(seeded_client)
+    seeded_client.post(
+        "/api/admin/alerts/1/resolve",
+        json={"resolution_reason": "operator manual resolve"},
+    )
+
+    response = seeded_client.get("/api/admin/alert-history?limit=10")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["resolution_reason"] == "manual_resolved"
 
 
 def test_admin_alerts_support_active_and_resolved_status_filters(seeded_app, seeded_client) -> None:

@@ -89,6 +89,10 @@ Keep the current boundary explicit:
 The next slice should avoid turning `alert_history` into a second archive
 summary table.
 
+Near-term API/UI cleanup should prefer `alert_archive` naming for resolved
+lifecycle summaries, while `alert_history` remains the action-log concept and
+legacy payload alias only.
+
 ### Phase 5. Small Implementation Slices
 
 Recommended implementation order:

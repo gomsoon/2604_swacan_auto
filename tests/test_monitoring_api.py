@@ -541,11 +541,12 @@ def test_runtime_object_slice_returns_alert_history_archive_summary(seeded_app, 
     payload = response.get_json()
     assert payload["history"]["summary"]["resolved_alert_count"] == 1
     assert payload["history"]["summary"]["latest_resolved_at"] == "2026-04-10T10:25:00.000+09:00"
-    assert payload["history"]["alert_history"][0]["resolution_source"] == "manual_operator"
+    assert payload["history"]["alert_archive"][0]["resolution_source"] == "manual_operator"
+    assert payload["history"]["alert_archive"][0]["resolution_reason"] == "manual_resolved"
+    assert payload["history"]["alert_archive"][0]["resolution_note"] == "resolved from monitoring view test"
+    assert payload["history"]["alert_archive"][0]["source_rule_key"] is None
+    assert payload["history"]["alert_archive"][0]["source_rule_display_name_snapshot"] is None
     assert payload["history"]["alert_history"][0]["resolution_reason"] == "manual_resolved"
-    assert payload["history"]["alert_history"][0]["resolution_note"] == "resolved from monitoring view test"
-    assert payload["history"]["alert_history"][0]["source_rule_key"] is None
-    assert payload["history"]["alert_history"][0]["source_rule_display_name_snapshot"] is None
 
 
 def test_runtime_object_slice_prefers_binding_when_active_target_id_changes(seeded_app, seeded_client) -> None:

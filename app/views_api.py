@@ -449,6 +449,9 @@ def build_runtime_object_history(monitored_object_id: int, *, limit: int) -> dic
             "raw_event_count": summary_row["raw_event_count"],
             "latest_event_at": summary_row["latest_event_at"],
         },
+        # `alert_archive` is the canonical resolved-lifecycle summary payload.
+        # Keep `alert_history` as a compatibility alias for existing clients.
+        "alert_archive": [serialize_alert_archive_row(row) for row in archive_rows],
         "alert_history": [serialize_alert_archive_row(row) for row in archive_rows],
         "raw_events": [serialize_raw_event(row) for row in raw_event_rows],
     }

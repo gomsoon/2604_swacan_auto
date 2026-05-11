@@ -1977,6 +1977,7 @@ def get_alert_history(alert_id: int):
 
 
 @bp.get("/alert-history")
+@bp.get("/alert-archive")
 @admin_required
 def list_alert_history_archive():
     limit, error = parse_limit()
