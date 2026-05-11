@@ -392,6 +392,8 @@ CREATE TABLE IF NOT EXISTS alert_history_archive (
     monitored_object_id INTEGER NOT NULL,
     alert_code TEXT NOT NULL,
     source_rule_id INTEGER,
+    source_rule_key TEXT,
+    source_rule_display_name_snapshot TEXT,
     opened_at TEXT NOT NULL,
     resolved_at TEXT NOT NULL,
     first_severity TEXT NOT NULL,

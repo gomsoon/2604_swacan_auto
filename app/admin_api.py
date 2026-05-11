@@ -329,7 +329,8 @@ def fetch_alert_archive_row(archive_id: int):
         """
         SELECT archive.id, archive.monitored_object_id, mo.runtime_binding_key, mo.display_name,
                mo.object_type AS semantic_type_code,
-               archive.alert_code, archive.source_rule_id,
+               archive.alert_code, archive.source_rule_id, archive.source_rule_key,
+               archive.source_rule_display_name_snapshot,
                rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
                COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
                archive.opened_at, archive.resolved_at,
@@ -2017,7 +2018,8 @@ def list_alert_history_archive():
     sql = """
         SELECT archive.id, archive.monitored_object_id, mo.runtime_binding_key, mo.display_name,
                mo.object_type AS semantic_type_code,
-               archive.alert_code, archive.source_rule_id,
+               archive.alert_code, archive.source_rule_id, archive.source_rule_key,
+               archive.source_rule_display_name_snapshot,
                rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
                COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
                archive.opened_at, archive.resolved_at,

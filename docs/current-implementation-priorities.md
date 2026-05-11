@@ -1,5 +1,16 @@
 # Current Implementation Priorities
 
+## Current Alert Sequence
+
+Current recommended alert-focused sequence:
+
+1. Alert lifecycle / archive hardening
+2. Event / stale / no-data rule MVP scope
+3. Preview/runtime explainability
+
+This sequence should be treated as the default follow-up order unless a new
+operational blocker changes priorities.
+
 ## Agent Addendum
 
 - See [agent-current-state-backlog.md](C:/2604_swacan_auto/docs/agent-current-state-backlog.md).

@@ -71,6 +71,8 @@ def test_insert_alert_history_archive_persists_acknowledgement_and_resolution(se
         ).fetchone()
 
         assert row["final_status"] == "resolved"
+        assert row["source_rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
+        assert row["source_rule_display_name_snapshot"] == "Process CPU High"
         assert row["was_acknowledged"] == 1
         assert row["last_acknowledged_by_user_id"] == 1
         assert row["resolution_source"] == "manual_operator"
@@ -87,6 +89,8 @@ def test_serialize_alert_archive_row_handles_metadata_json_and_invalid_json() ->
             "semantic_type_code": "SoftwareProcess",
             "alert_code": "rule.1501",
             "source_rule_id": 1501,
+            "source_rule_key": "threshold.process.cpu_usage.process-cpu-high",
+            "source_rule_display_name_snapshot": "Process CPU High",
             "source_rule_metric_key": "cpu_usage",
             "source_rule_scope_type": "object_type",
             "source_rule_target_label": "SoftwareProcess",
@@ -120,6 +124,8 @@ def test_serialize_alert_archive_row_handles_metadata_json_and_invalid_json() ->
             "semantic_type_code": "MonitoringAgent",
             "alert_code": "rule.1502",
             "source_rule_id": 1502,
+            "source_rule_key": "threshold.agent.outbox_queue_depth.agent-queue-high",
+            "source_rule_display_name_snapshot": "Agent Queue High",
             "source_rule_metric_key": "outbox_queue_depth",
             "source_rule_scope_type": "object_type",
             "source_rule_target_label": "MonitoringAgent",
@@ -146,6 +152,10 @@ def test_serialize_alert_archive_row_handles_metadata_json_and_invalid_json() ->
     )
 
     assert valid_payload["was_acknowledged"] is True
+    assert valid_payload["source_rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
+    assert valid_payload["source_rule_display_name_snapshot"] == "Process CPU High"
     assert valid_payload["metadata"] == {"metric_key": "cpu_usage"}
     assert invalid_payload["was_acknowledged"] is False
+    assert invalid_payload["source_rule_key"] == "threshold.agent.outbox_queue_depth.agent-queue-high"
+    assert invalid_payload["source_rule_display_name_snapshot"] == "Agent Queue High"
     assert invalid_payload["metadata"] == "{invalid-json}"

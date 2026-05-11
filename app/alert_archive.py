@@ -12,6 +12,27 @@ RESOLUTION_SOURCES = {
 }
 
 
+def _resolve_archive_rule_snapshot(db_conn, alert_row) -> tuple[str | None, str | None]:
+    source_rule_key = alert_row["source_rule_key"] if "source_rule_key" in alert_row.keys() else None
+    source_rule_display_name_snapshot = (
+        alert_row["source_rule_display_name_snapshot"]
+        if "source_rule_display_name_snapshot" in alert_row.keys()
+        else None
+    )
+    source_rule_id = alert_row["source_rule_id"] if "source_rule_id" in alert_row.keys() else None
+
+    if (source_rule_key or source_rule_display_name_snapshot) or source_rule_id is None:
+        return source_rule_key, source_rule_display_name_snapshot
+
+    row = db_conn.execute(
+        "SELECT rule_key, display_name FROM alert_rules WHERE id = ?",
+        (source_rule_id,),
+    ).fetchone()
+    if row is None:
+        return None, None
+    return row["rule_key"], row["display_name"]
+
+
 def insert_alert_history_archive(
     db_conn,
     *,
@@ -24,12 +45,16 @@ def insert_alert_history_archive(
     if resolution_source not in RESOLUTION_SOURCES:
         raise ValueError("invalid resolution_source")
 
+    source_rule_key, source_rule_display_name_snapshot = _resolve_archive_rule_snapshot(db_conn, alert_row)
+
     cursor = db_conn.execute(
         """
         INSERT INTO alert_history_archive (
             monitored_object_id,
             alert_code,
             source_rule_id,
+            source_rule_key,
+            source_rule_display_name_snapshot,
             opened_at,
             resolved_at,
             first_severity,
@@ -47,12 +72,14 @@ def insert_alert_history_archive(
             metadata_json,
             created_at,
             updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             alert_row["monitored_object_id"],
             alert_row["alert_code"],
             alert_row["source_rule_id"],
+            source_rule_key,
+            source_rule_display_name_snapshot,
             alert_row["first_occurred_at"],
             resolved_at,
             alert_row["severity"],
@@ -84,6 +111,8 @@ def serialize_alert_archive_row(row) -> dict[str, Any]:
         "semantic_type_code": row["semantic_type_code"],
         "alert_code": row["alert_code"],
         "source_rule_id": row["source_rule_id"],
+        "source_rule_key": row["source_rule_key"],
+        "source_rule_display_name_snapshot": row["source_rule_display_name_snapshot"],
         "source_rule_metric_key": row["source_rule_metric_key"],
         "source_rule_scope_type": row["source_rule_scope_type"],
         "source_rule_target_label": row["source_rule_target_label"],

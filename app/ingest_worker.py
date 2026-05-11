@@ -396,6 +396,8 @@ def build_threshold_alert_metadata(rule, metric_value: float, level: str, family
     return json.dumps(
         {
             "rule_id": rule["id"],
+            "rule_key": rule.get("rule_key"),
+            "display_name": rule.get("display_name"),
             "metric_key": rule["metric_key"],
             "metric_value": metric_value,
             "comparison": rule["comparison"],

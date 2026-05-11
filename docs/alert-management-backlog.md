@@ -1,5 +1,18 @@
 # Alert Management Backlog
 
+## Current Sequencing Note
+
+Current recommended order after compound publish enablement:
+
+1. Alert lifecycle / archive hardening
+2. Event / stale / no-data rule MVP scope
+3. Preview/runtime explainability
+4. Family-level alert identity review
+5. Monitoring alert operations follow-up
+
+This note is intentionally short so the next implementation discussion can
+resume from the same order without re-deriving priorities.
+
 버전: Draft 0.3  
 작성일: 2026-04-18
 

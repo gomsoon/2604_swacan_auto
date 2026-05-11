@@ -172,5 +172,38 @@ def ensure_alert_rule_lifecycle_schema(db_conn: sqlite3.Connection) -> None:
     db_conn.commit()
 
 
+def ensure_alert_history_archive_schema(db_conn: sqlite3.Connection) -> None:
+    if not _table_exists(db_conn, "alert_history_archive"):
+        return
+
+    columns = _table_columns(db_conn, "alert_history_archive")
+    if "source_rule_key" not in columns:
+        db_conn.execute("ALTER TABLE alert_history_archive ADD COLUMN source_rule_key TEXT")
+    if "source_rule_display_name_snapshot" not in columns:
+        db_conn.execute("ALTER TABLE alert_history_archive ADD COLUMN source_rule_display_name_snapshot TEXT")
+
+    if _table_exists(db_conn, "alert_rules"):
+        db_conn.execute(
+            """
+            UPDATE alert_history_archive
+            SET source_rule_key = COALESCE(
+                    source_rule_key,
+                    (SELECT rule_key FROM alert_rules WHERE id = alert_history_archive.source_rule_id)
+                ),
+                source_rule_display_name_snapshot = COALESCE(
+                    source_rule_display_name_snapshot,
+                    (SELECT display_name FROM alert_rules WHERE id = alert_history_archive.source_rule_id)
+                )
+            WHERE source_rule_id IS NOT NULL
+              AND (
+                    source_rule_key IS NULL
+                 OR source_rule_display_name_snapshot IS NULL
+              )
+            """
+        )
+    db_conn.commit()
+
+
 def ensure_runtime_schema(db_conn: sqlite3.Connection) -> None:
     ensure_alert_rule_lifecycle_schema(db_conn)
+    ensure_alert_history_archive_schema(db_conn)

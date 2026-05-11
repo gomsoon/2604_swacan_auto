@@ -1,5 +1,110 @@
 # Alert Lifecycle Redesign Draft
 
+## Current Workstream
+
+This document is now the primary planning document for the next alert slice.
+The immediate goal is to harden:
+
+1. current-vs-archive role separation
+2. resolution_source / resolution_reason semantics
+3. precedence-driven closure reporting
+4. rule snapshot expectations for archive rows
+5. a small implementation path before larger lifecycle refactors
+
+## Near-Term Implementation Plan
+
+The next lifecycle/archive slice should stay narrow and implementation-first.
+
+### Phase 1. Archive Contract Hardening
+
+Clarify the minimum archive row contract for every closure path:
+
+- `source_rule_id`
+- `source_rule_key`
+- `source_rule_display_name_snapshot`
+- `resolution_source`
+- `resolution_reason`
+- `latest_message`
+- `metadata_json`
+
+`metadata_json` should remain the place for evolving runtime evidence such as:
+
+- `family_key`
+- `cond_mode`
+- normalized condition snapshots
+- `winning_condition_trace`
+
+This lets current/archive reporting improve without widening schema too early.
+
+### Phase 2. Unified Closure Paths
+
+Every alert closure path should flow through the same archive helper contract.
+The main paths are:
+
+1. manual operator resolve from admin/API
+2. status-based resolve from admin/API
+3. runtime auto recovery
+4. runtime precedence suppression (`suppressed_by_precedence`)
+5. runtime cleanup / timeout follow-ups
+
+The goal is not to make every path identical internally, but to make the
+archive output shape identical.
+
+### Phase 3. Resolution Vocabulary Tightening
+
+Keep `resolution_source` as the typed lifecycle category:
+
+- `manual_operator`
+- `auto_recovery`
+- `auto_policy_timeout`
+- `system_cleanup`
+
+Use `resolution_reason` as the stable path/result explanation. Near-term values
+should be short, repeatable strings rather than ad-hoc prose whenever possible.
+Examples:
+
+- `manual_resolved`
+- `resolved_from_status_api`
+- `threshold_cleared`
+- `suppressed_by_precedence`
+
+Free-form operator notes can continue to live in history/action metadata rather
+than replacing the stable reason.
+
+### Phase 4. History vs Archive Boundary
+
+Keep the current boundary explicit:
+
+- `alert_instances`
+  - current alert state
+- `alert_history`
+  - append-only action log for operator and state transitions
+- `alert_history_archive`
+  - one lifecycle summary row per resolved alert
+
+The next slice should avoid turning `alert_history` into a second archive
+summary table.
+
+### Phase 5. Small Implementation Slices
+
+Recommended implementation order:
+
+1. archive serialization/insert contract review
+2. snapshot field completion (`source_rule_key`, display name snapshot, metadata)
+3. worker closure-path unification for runtime reasons
+4. admin/API closure-path unification for manual reasons
+5. archive regression coverage for each closure path
+
+### Regression Expectations
+
+Lifecycle/archive work should add regression tests for at least:
+
+- manual resolve archive row
+- status API resolve archive row
+- runtime threshold clear archive row
+- precedence suppression archive row
+- archive list/detail serialization of rule snapshots and resolution fields
+
 ## 1. 목적
 
 이 문서는 현재 구현된 `alert_instances + alert_history skeleton` 구조를 검토하고, 운영 관점에서 더 적절한 alert lifecycle 저장 모델을 제안하기 위한 초안이다.

@@ -853,13 +853,16 @@ def test_admin_manual_resolve_archives_alert_and_returns_summary(seeded_app, see
     assert payload["archive"]["alert_code"] == "agent.warning"
     assert payload["archive"]["resolution_source"] == "manual_operator"
     assert payload["archive"]["resolution_reason"] == "운영자가 수동 종료"
+    assert payload["archive"]["source_rule_key"] is None
+    assert payload["archive"]["source_rule_display_name_snapshot"] is None
     assert payload["archive"]["was_acknowledged"] is False
 
     with seeded_app.app_context():
         db_conn = get_db()
         archive_rows = db_conn.execute(
             """
-            SELECT resolution_source, resolution_reason, final_status
+            SELECT resolution_source, resolution_reason, final_status,
+                   source_rule_key, source_rule_display_name_snapshot
             FROM alert_history_archive
             ORDER BY id DESC
             """
@@ -868,6 +871,8 @@ def test_admin_manual_resolve_archives_alert_and_returns_summary(seeded_app, see
         assert archive_rows[0]["resolution_source"] == "manual_operator"
         assert archive_rows[0]["resolution_reason"] == "운영자가 수동 종료"
         assert archive_rows[0]["final_status"] == "resolved"
+        assert archive_rows[0]["source_rule_key"] is None
+        assert archive_rows[0]["source_rule_display_name_snapshot"] is None
 
 
 def test_admin_manual_resolve_accepts_and_rejects_boundary_reason_lengths(seeded_app, seeded_client) -> None:

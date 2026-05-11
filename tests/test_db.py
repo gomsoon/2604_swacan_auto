@@ -4,6 +4,7 @@ import sqlite3
 
 from app.db import (
     ensure_alert_rule_lifecycle_schema,
+    ensure_alert_history_archive_schema,
     get_db,
     slugify_rule_key_part,
     suggest_alert_rule_display_name,
@@ -266,3 +267,44 @@ def test_ensure_alert_rule_lifecycle_schema_rewrites_invalid_rule_key_to_legacy_
     assert row["display_name"] == "Legacy Agent Outbox Queue Depth Threshold 2"
     assert row["status"] == "published"
     assert row["cond_mode"] == "scalar"
+
+
+def test_ensure_alert_history_archive_schema_adds_snapshot_columns_and_backfills() -> None:
+    db_conn = sqlite3.connect(":memory:")
+    db_conn.row_factory = sqlite3.Row
+    db_conn.execute(
+        """
+        CREATE TABLE alert_rules (
+            id INTEGER PRIMARY KEY,
+            rule_key TEXT,
+            display_name TEXT
+        )
+        """
+    )
+    db_conn.execute(
+        """
+        CREATE TABLE alert_history_archive (
+            id INTEGER PRIMARY KEY,
+            source_rule_id INTEGER,
+            resolution_source TEXT,
+            resolution_reason TEXT
+        )
+        """
+    )
+    db_conn.execute(
+        "INSERT INTO alert_rules (id, rule_key, display_name) VALUES (1501, 'threshold.process.cpu_usage.process-cpu-high', 'Process CPU High')"
+    )
+    db_conn.execute(
+        "INSERT INTO alert_history_archive (id, source_rule_id, resolution_source, resolution_reason) VALUES (1, 1501, 'manual_operator', 'resolved')"
+    )
+
+    ensure_alert_history_archive_schema(db_conn)
+
+    columns = {row["name"] for row in db_conn.execute("PRAGMA table_info(alert_history_archive)").fetchall()}
+    row = db_conn.execute(
+        "SELECT source_rule_key, source_rule_display_name_snapshot FROM alert_history_archive WHERE id = 1"
+    ).fetchone()
+
+    assert {"source_rule_key", "source_rule_display_name_snapshot"} <= columns
+    assert row["source_rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
+    assert row["source_rule_display_name_snapshot"] == "Process CPU High"
