@@ -71,6 +71,10 @@ Examples:
 Free-form operator notes can continue to live in history/action metadata rather
 than replacing the stable reason.
 
+Near-term API cleanup should treat operator-entered text as `resolution_note`
+while keeping `resolution_reason` reserved for the stable lifecycle code stored
+in archive rows.
+
 ### Phase 4. History vs Archive Boundary
 
 Keep the current boundary explicit:

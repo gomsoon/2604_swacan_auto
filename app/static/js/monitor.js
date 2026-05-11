@@ -1,4 +1,11 @@
-﻿import { apiFetch, clearBanner, formatTimestamp, showBanner } from "./common.js";
+﻿import {
+    apiFetch,
+    clearBanner,
+    formatAlertResolutionReason,
+    formatAlertResolutionSource,
+    formatTimestamp,
+    showBanner,
+} from "./common.js";
 import { renderDiagram } from "./diagram.js";
 import { loadMetamodelRegistry } from "./metamodel.js";
 const POLL_INTERVAL_MS = 5000;
@@ -468,9 +475,9 @@ function renderRuntimeHistorySection(monitoredObjectId) {
             <article class="selection-summary-card">
                 <h4>${escapeHtml(item.alert_code)}</h4>
                 <p>${escapeHtml(item.latest_message || "메시지 없음")}</p>
-                <p>${escapeHtml(item.final_severity)} | ${escapeHtml(item.resolution_source || "-")} | 반복 ${escapeHtml(item.repeat_count ?? 1)}회</p>
+                <p>${escapeHtml(item.final_severity)} | ${escapeHtml(formatAlertResolutionSource(item.resolution_source))} | 반복 ${escapeHtml(item.repeat_count ?? 1)}회</p>
                 <p>${escapeHtml(formatTimestamp(item.resolved_at))}</p>
-                ${item.resolution_reason ? `<p>해결 사유: ${escapeHtml(item.resolution_reason)}</p>` : ""}
+                <p>해결 사유: ${escapeHtml(formatAlertResolutionReason(item))}</p>
             </article>
         `
     );
@@ -1152,7 +1159,7 @@ async function performAlertAction(action, alertId, monitoredObjectId) {
         await apiFetch(`/api/admin/alerts/${alertId}/resolve`, {
             method: "POST",
             body: {
-                resolution_reason: "Monitoring View에서 수동 해결",
+                resolution_note: "Monitoring View에서 수동 해결",
             },
         });
         showBanner("Alert를 해결 처리했습니다.", "success");

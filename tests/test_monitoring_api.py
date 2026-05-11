@@ -528,7 +528,8 @@ def test_runtime_object_slice_returns_alert_history_archive_summary(seeded_app, 
             alert_row=alert_row,
             resolved_at="2026-04-10T10:25:00.000+09:00",
             resolution_source="manual_operator",
-            resolution_reason="resolved from monitoring view test",
+            resolution_reason="manual_resolved",
+            resolution_note="resolved from monitoring view test",
             resolved_by_user_id=1,
         )
         db_conn.commit()
@@ -541,7 +542,8 @@ def test_runtime_object_slice_returns_alert_history_archive_summary(seeded_app, 
     assert payload["history"]["summary"]["resolved_alert_count"] == 1
     assert payload["history"]["summary"]["latest_resolved_at"] == "2026-04-10T10:25:00.000+09:00"
     assert payload["history"]["alert_history"][0]["resolution_source"] == "manual_operator"
-    assert payload["history"]["alert_history"][0]["resolution_reason"] == "resolved from monitoring view test"
+    assert payload["history"]["alert_history"][0]["resolution_reason"] == "manual_resolved"
+    assert payload["history"]["alert_history"][0]["resolution_note"] == "resolved from monitoring view test"
     assert payload["history"]["alert_history"][0]["source_rule_key"] is None
     assert payload["history"]["alert_history"][0]["source_rule_display_name_snapshot"] is None
 

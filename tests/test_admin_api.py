@@ -606,7 +606,7 @@ def test_admin_alerts_returns_open_alerts(seeded_app, seeded_client) -> None:
                 1502,
                 "2026-04-12T11:04:30.000+09:00",
                 1,
-                "운영자가 확인함",
+                "operator ack note",
                 "2026-04-12T11:04:30.000+09:00",
                 1303,
             ),
@@ -626,7 +626,7 @@ def test_admin_alerts_returns_open_alerts(seeded_app, seeded_client) -> None:
     assert payload["items"][0]["source_rule_metric_key"] == "outbox_queue_depth"
     assert payload["items"][0]["source_rule_target_label"] == "MonitoringAgent"
     assert payload["items"][0]["is_acknowledged"] is True
-    assert payload["items"][0]["ack_note"] == "운영자가 확인함"
+    assert payload["items"][0]["ack_note"] == "operator ack note"
 
 
 def test_admin_alerts_reject_invalid_status_filter(seeded_client) -> None:
@@ -651,7 +651,7 @@ def test_admin_alerts_support_acknowledged_filter(seeded_app, seeded_client) -> 
             (
                 "2026-04-12T11:04:30.000+09:00",
                 1,
-                "점검 예정",
+                "planned maintenance",
                 "2026-04-12T11:04:30.000+09:00",
                 1303,
             ),
@@ -739,7 +739,7 @@ def test_admin_acknowledge_alert_rejects_resolved_alert(seeded_app, seeded_clien
 
     response = seeded_client.patch(
         "/api/admin/alerts/1",
-        json={"acknowledged": True, "ack_note": "늦게 확인"},
+        json={"acknowledged": True, "ack_note": "late acknowledgement"},
     )
 
     assert response.status_code == 409
@@ -759,7 +759,7 @@ def test_admin_unacknowledge_alert_clears_ack_fields(seeded_app, seeded_client) 
             (
                 "2026-04-12T11:04:30.000+09:00",
                 1,
-                "기존 메모",
+                "existing note",
                 "2026-04-12T11:04:30.000+09:00",
             ),
         )
@@ -785,11 +785,11 @@ def test_admin_alert_history_tracks_ack_and_status_changes(seeded_app, seeded_cl
 
     ack_response = seeded_client.patch(
         "/api/admin/alerts/1",
-        json={"acknowledged": True, "ack_note": "운영자가 확인함"},
+        json={"acknowledged": True, "ack_note": "operator ack note"},
     )
     status_response = seeded_client.patch(
         "/api/admin/alerts/1/status",
-        json={"status": "in_progress", "status_note": "조사중"},
+        json={"status": "in_progress", "status_note": "investigating"},
     )
     history_response = seeded_client.get("/api/admin/alerts/1/history?limit=10")
 
@@ -803,11 +803,11 @@ def test_admin_alert_history_tracks_ack_and_status_changes(seeded_app, seeded_cl
     assert payload["items"][0]["previous_status"] == "open"
     assert payload["items"][0]["new_status"] == "in_progress"
     assert payload["items"][0]["performed_by_username"] == "admin"
-    assert payload["items"][0]["note"] == "조사중"
+    assert payload["items"][0]["note"] == "investigating"
     assert payload["items"][1]["action_type"] == "acknowledged"
     assert payload["items"][1]["previous_acknowledged"] is False
     assert payload["items"][1]["new_acknowledged"] is True
-    assert payload["items"][1]["note"] == "운영자가 확인함"
+    assert payload["items"][1]["note"] == "operator ack note"
     assert payload["items"][1]["payload"]["source"] == "admin"
 
 
@@ -816,7 +816,7 @@ def test_admin_alert_history_accepts_boundary_limits_and_rejects_invalid_values(
     login(seeded_client)
     seeded_client.patch(
         "/api/admin/alerts/1",
-        json={"acknowledged": True, "ack_note": "운영자가 확인함"},
+        json={"acknowledged": True, "ack_note": "operator ack note"},
     )
 
     low_response = seeded_client.get("/api/admin/alerts/1/history?limit=1")
@@ -843,7 +843,7 @@ def test_admin_manual_resolve_archives_alert_and_returns_summary(seeded_app, see
 
     response = seeded_client.post(
         "/api/admin/alerts/1/resolve",
-        json={"resolution_reason": "운영자가 수동 종료"},
+        json={"resolution_reason": "operator manual resolve"},
     )
 
     assert response.status_code == 200
@@ -852,7 +852,8 @@ def test_admin_manual_resolve_archives_alert_and_returns_summary(seeded_app, see
     assert payload["alert"]["resolved_by_username"] == "admin"
     assert payload["archive"]["alert_code"] == "agent.warning"
     assert payload["archive"]["resolution_source"] == "manual_operator"
-    assert payload["archive"]["resolution_reason"] == "운영자가 수동 종료"
+    assert payload["archive"]["resolution_reason"] == "manual_resolved"
+    assert payload["archive"]["resolution_note"]
     assert payload["archive"]["source_rule_key"] is None
     assert payload["archive"]["source_rule_display_name_snapshot"] is None
     assert payload["archive"]["was_acknowledged"] is False
@@ -869,7 +870,7 @@ def test_admin_manual_resolve_archives_alert_and_returns_summary(seeded_app, see
         ).fetchall()
         assert len(archive_rows) == 1
         assert archive_rows[0]["resolution_source"] == "manual_operator"
-        assert archive_rows[0]["resolution_reason"] == "운영자가 수동 종료"
+        assert archive_rows[0]["resolution_reason"] == "manual_resolved"
         assert archive_rows[0]["final_status"] == "resolved"
         assert archive_rows[0]["source_rule_key"] is None
         assert archive_rows[0]["source_rule_display_name_snapshot"] is None
@@ -881,11 +882,11 @@ def test_admin_manual_resolve_accepts_and_rejects_boundary_reason_lengths(seeded
 
     ok_response = seeded_client.post(
         "/api/admin/alerts/1/resolve",
-        json={"resolution_reason": "a" * 500},
+        json={"resolution_note": "a" * 500},
     )
     too_long_response = seeded_client.post(
         "/api/admin/alerts/1/resolve",
-        json={"resolution_reason": "a" * 501},
+        json={"resolution_note": "a" * 501},
     )
 
     assert ok_response.status_code == 200
@@ -903,11 +904,11 @@ def test_admin_manual_resolve_rejects_missing_reason_and_already_resolved(seeded
     )
     first_resolve_response = seeded_client.post(
         "/api/admin/alerts/1/resolve",
-        json={"resolution_reason": "1차 수동 종료"},
+        json={"resolution_reason": "first manual resolve"},
     )
     second_resolve_response = seeded_client.post(
         "/api/admin/alerts/1/resolve",
-        json={"resolution_reason": "2차 수동 종료"},
+        json={"resolution_reason": "second manual resolve"},
     )
 
     assert missing_reason_response.status_code == 400
@@ -922,7 +923,7 @@ def test_admin_alert_history_archive_accepts_boundary_limits_and_filters(seeded_
     login(seeded_client)
     seeded_client.post(
         "/api/admin/alerts/1/resolve",
-        json={"resolution_reason": "운영자가 수동 종료"},
+        json={"resolution_reason": "operator manual resolve"},
     )
 
     low_response = seeded_client.get("/api/admin/alert-history?limit=1")
@@ -1051,10 +1052,13 @@ def test_admin_update_alert_status_resolves_and_reopens_alert(seeded_app, seeded
     )
 
     assert resolve_response.status_code == 200
+    resolve_archive = resolve_response.get_json()["archive"]
     resolved_payload = resolve_response.get_json()["alert"]
     assert resolved_payload["status"] == "resolved"
     assert resolved_payload["resolved_by_username"] == "admin"
     assert resolved_payload["resolved_at"] is not None
+    assert resolve_archive["resolution_reason"] == "resolved_from_status_api"
+    assert resolve_archive["resolution_note"] == "done"
 
     assert reopen_response.status_code == 200
     reopened_payload = reopen_response.get_json()["alert"]
@@ -1845,7 +1849,7 @@ def test_admin_create_alert_rule_accepts_valid_object_type_rule(seeded_client) -
             "warning_threshold": 1024,
             "critical_threshold": 2048,
             "is_enabled": True,
-            "description": "RSS 임계치",
+            "description": "RSS threshold",
         },
     )
 
@@ -1971,7 +1975,7 @@ def test_admin_update_alert_rule_rejects_semantic_edit_for_published_rule(seeded
     response = seeded_client.patch(
         "/api/admin/alert-rules/1501",
         json={
-            "description": "프로세스 CPU 경계값 수정",
+            "description": "Process CPU threshold update",
             "critical_threshold": 96,
         },
     )
@@ -2354,3 +2358,4 @@ def test_admin_alert_rule_rejects_invalid_threshold_order_for_gte_and_lte(seeded
     assert lte_response.status_code == 400
     assert gte_response.get_json()["error"]["code"] == "validation_error"
     assert lte_response.get_json()["error"]["code"] == "validation_error"
+

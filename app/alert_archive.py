@@ -11,6 +11,13 @@ RESOLUTION_SOURCES = {
     "system_cleanup",
 }
 
+RESOLUTION_REASON_MANUAL_RESOLVED = "manual_resolved"
+RESOLUTION_REASON_STATUS_API = "resolved_from_status_api"
+RESOLUTION_REASON_THRESHOLD_CLEARED = "threshold_cleared"
+RESOLUTION_REASON_SUPPRESSED_BY_PRECEDENCE = "suppressed_by_precedence"
+RESOLUTION_REASON_STATE_NORMALIZED = "state_normalized"
+RESOLUTION_REASON_SUPERSEDED = "superseded"
+
 
 def _resolve_archive_rule_snapshot(db_conn, alert_row) -> tuple[str | None, str | None]:
     source_rule_key = alert_row["source_rule_key"] if "source_rule_key" in alert_row.keys() else None
@@ -33,6 +40,22 @@ def _resolve_archive_rule_snapshot(db_conn, alert_row) -> tuple[str | None, str 
     return row["rule_key"], row["display_name"]
 
 
+def _merge_archive_metadata_json(raw_metadata_json: str | None, resolution_note: str | None) -> str | None:
+    if not resolution_note:
+        return raw_metadata_json
+    if not raw_metadata_json:
+        return json.dumps({"resolution_note": resolution_note})
+    try:
+        payload = json.loads(raw_metadata_json)
+    except json.JSONDecodeError:
+        return raw_metadata_json
+    if not isinstance(payload, dict):
+        return raw_metadata_json
+    merged = dict(payload)
+    merged["resolution_note"] = resolution_note
+    return json.dumps(merged)
+
+
 def insert_alert_history_archive(
     db_conn,
     *,
@@ -40,12 +63,14 @@ def insert_alert_history_archive(
     resolved_at: str,
     resolution_source: str,
     resolution_reason: str | None,
+    resolution_note: str | None = None,
     resolved_by_user_id: int | None,
 ) -> int:
     if resolution_source not in RESOLUTION_SOURCES:
         raise ValueError("invalid resolution_source")
 
     source_rule_key, source_rule_display_name_snapshot = _resolve_archive_rule_snapshot(db_conn, alert_row)
+    metadata_json = _merge_archive_metadata_json(alert_row["metadata_json"], resolution_note)
 
     cursor = db_conn.execute(
         """
@@ -94,7 +119,7 @@ def insert_alert_history_archive(
             resolution_reason,
             resolved_by_user_id,
             alert_row["latest_message"],
-            alert_row["metadata_json"],
+            metadata_json,
             resolved_at,
             resolved_at,
         ),
@@ -111,6 +136,7 @@ def close_alert_instance_with_archive(
     status_note: str | None,
     resolution_source: str,
     resolution_reason: str | None,
+    resolution_note: str | None = None,
     resolved_by_user_id: int | None,
 ) -> int:
     db_conn.execute(
@@ -143,6 +169,7 @@ def close_alert_instance_with_archive(
         resolved_at=resolved_at,
         resolution_source=resolution_source,
         resolution_reason=resolution_reason,
+        resolution_note=resolution_note,
         resolved_by_user_id=resolved_by_user_id,
     )
 
@@ -185,4 +212,8 @@ def serialize_alert_archive_row(row) -> dict[str, Any]:
             payload["metadata"] = json.loads(row["metadata_json"])
         except json.JSONDecodeError:
             payload["metadata"] = row["metadata_json"]
+    if isinstance(payload.get("metadata"), dict):
+        resolution_note = payload["metadata"].get("resolution_note")
+        if isinstance(resolution_note, str) and resolution_note:
+            payload["resolution_note"] = resolution_note
     return payload

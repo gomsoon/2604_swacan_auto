@@ -7,7 +7,13 @@ from typing import Any
 
 from flask import Blueprint, current_app, g, request
 
-from .alert_archive import close_alert_instance_with_archive, insert_alert_history_archive, serialize_alert_archive_row
+from .alert_archive import (
+    RESOLUTION_REASON_MANUAL_RESOLVED,
+    RESOLUTION_REASON_STATUS_API,
+    close_alert_instance_with_archive,
+    insert_alert_history_archive,
+    serialize_alert_archive_row,
+)
 from .alert_history import record_alert_history
 from .alert_rule_evaluator import (
     alert_rule_candidate_identity as shared_alert_rule_candidate_identity,
@@ -387,6 +393,8 @@ def resolve_alert_instance(
     resolution_reason: str,
     resolved_by_user_id: int,
     resolution_source: str = "manual_operator",
+    resolution_note: str | None = None,
+    history_source: str = "admin_resolve",
 ):
     existing = db_conn.execute(
         """
@@ -411,9 +419,10 @@ def resolve_alert_instance(
         alert_row=existing,
         resolved_at=timestamp,
         last_occurred_at=existing["last_occurred_at"],
-        status_note=resolution_reason,
+        status_note=resolution_note,
         resolution_source=resolution_source,
         resolution_reason=resolution_reason,
+        resolution_note=resolution_note,
         resolved_by_user_id=resolved_by_user_id,
     )
     record_alert_history(
@@ -424,10 +433,12 @@ def resolve_alert_instance(
         performed_by_user_id=resolved_by_user_id,
         previous_status=existing["status"],
         new_status="resolved",
-        note=resolution_reason,
+        note=resolution_note,
         payload={
-            "source": "admin_resolve",
+            "source": history_source,
             "resolution_source": resolution_source,
+            "resolution_reason": resolution_reason,
+            "resolution_note": resolution_note,
             "archive_id": archive_id,
         },
     )
@@ -2102,7 +2113,12 @@ def update_alert_instance(alert_id: int):
 def resolve_alert(alert_id: int):
     data = request.get_json(silent=True) or {}
     try:
-        resolution_reason = parse_optional_string(
+        resolution_note = parse_optional_string(
+            data.get("resolution_note"),
+            field_name="resolution_note",
+            max_length=500,
+        )
+        legacy_resolution_reason = parse_optional_string(
             data.get("resolution_reason"),
             field_name="resolution_reason",
             max_length=500,
@@ -2110,15 +2126,17 @@ def resolve_alert(alert_id: int):
     except ValueError as exc:
         return error_response("validation_error", str(exc), 400)
 
-    if not resolution_reason:
-        return error_response("validation_error", "resolution_reason is required", 400)
+    resolution_note = resolution_note or legacy_resolution_reason
+    if not resolution_note:
+        return error_response("validation_error", "resolution_note is required", 400)
 
     db_conn = get_db()
     payload, error = resolve_alert_instance(
         db_conn,
         alert_id=alert_id,
-        resolution_reason=resolution_reason,
+        resolution_reason=RESOLUTION_REASON_MANUAL_RESOLVED,
         resolved_by_user_id=g.user["id"],
+        resolution_note=resolution_note,
     )
     if error:
         return error
@@ -2153,12 +2171,13 @@ def update_alert_status(alert_id: int):
         return error_response("validation_error", str(exc), 400)
 
     if next_status == "resolved":
-        resolution_reason = status_note or "resolved from status API"
         payload, error = resolve_alert_instance(
             db_conn,
             alert_id=alert_id,
-            resolution_reason=resolution_reason,
+            resolution_reason=RESOLUTION_REASON_STATUS_API,
             resolved_by_user_id=g.user["id"],
+            resolution_note=status_note,
+            history_source="status_api_resolve",
         )
         if error:
             return error

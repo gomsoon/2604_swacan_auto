@@ -1,4 +1,11 @@
-﻿import { apiFetch, clearBanner, formatTimestamp, showBanner } from "./common.js";
+﻿import {
+    apiFetch,
+    clearBanner,
+    formatAlertResolutionReason,
+    formatAlertResolutionSource,
+    formatTimestamp,
+    showBanner,
+} from "./common.js";
 
 const adminApp = document.getElementById("admin-app");
 const summaryCards = document.getElementById("admin-summary-cards");
@@ -1490,13 +1497,13 @@ function renderAlertHistoryArchive(items) {
                         <div class="toolbar-inline">
                             <span class="meta-pill">${escapeHtml(item.alert_code)}</span>
                             <span class="meta-pill">${escapeHtml(item.final_severity)}</span>
-                            <span class="meta-pill">${escapeHtml(item.resolution_source)}</span>
+                            <span class="meta-pill">${escapeHtml(formatAlertResolutionSource(item.resolution_source))}</span>
                         </div>
                     </div>
                     <p class="admin-meta">opened=${escapeHtml(formatTimestamp(item.opened_at))} | resolved=${escapeHtml(formatTimestamp(item.resolved_at))}</p>
                     <p class="admin-meta">repeat ${escapeHtml(item.repeat_count)}회 | ack ${item.was_acknowledged ? "yes" : "no"}</p>
                     <p class="admin-meta">resolved by ${escapeHtml(item.resolved_by_username || "-")} | target ${escapeHtml(item.source_rule_target_label || item.semantic_type_code || "-")}</p>
-                    <p class="admin-meta">${escapeHtml(item.resolution_reason || item.latest_message || "이유 없음")}</p>
+                    <p class="admin-meta">${escapeHtml(formatAlertResolutionReason(item))}</p>
                 </article>
             `
         )
@@ -4926,15 +4933,15 @@ async function updateAlertStatus(alertId, nextStatus, currentNote) {
 }
 
 async function resolveAlert(alertId, currentReason) {
-    const resolutionReason = window.prompt("해결 사유를 입력하세요.", currentReason || "");
-    if (resolutionReason === null) {
+    const resolutionNote = window.prompt("해결 메모를 입력하세요.", currentReason || "");
+    if (resolutionNote === null) {
         return;
     }
 
     await apiFetch(`/api/admin/alerts/${alertId}/resolve`, {
         method: "POST",
         body: {
-            resolution_reason: resolutionReason,
+            resolution_note: resolutionNote,
         },
     });
 }

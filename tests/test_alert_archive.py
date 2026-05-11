@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from app.alert_archive import insert_alert_history_archive, serialize_alert_archive_row
+from app.alert_archive import (
+    RESOLUTION_REASON_MANUAL_RESOLVED,
+    insert_alert_history_archive,
+    serialize_alert_archive_row,
+)
 from app.db import get_db
 
 
@@ -56,7 +60,8 @@ def test_insert_alert_history_archive_persists_acknowledgement_and_resolution(se
             },
             resolved_at="2026-04-12T11:06:00.000+09:00",
             resolution_source="manual_operator",
-            resolution_reason="resolved by operator",
+            resolution_reason=RESOLUTION_REASON_MANUAL_RESOLVED,
+            resolution_note="operator note",
             resolved_by_user_id=1,
         )
         db_conn.commit()
@@ -76,7 +81,8 @@ def test_insert_alert_history_archive_persists_acknowledgement_and_resolution(se
         assert row["was_acknowledged"] == 1
         assert row["last_acknowledged_by_user_id"] == 1
         assert row["resolution_source"] == "manual_operator"
-        assert row["resolution_reason"] == "resolved by operator"
+        assert row["resolution_reason"] == RESOLUTION_REASON_MANUAL_RESOLVED
+        assert row["metadata_json"] == "{\"metric_key\": \"cpu_usage\", \"resolution_note\": \"operator note\"}"
 
 
 def test_serialize_alert_archive_row_handles_metadata_json_and_invalid_json() -> None:
@@ -106,11 +112,11 @@ def test_serialize_alert_archive_row_handles_metadata_json_and_invalid_json() ->
             "last_acknowledged_by_user_id": 1,
             "last_acknowledged_by_username": "admin",
             "resolution_source": "manual_operator",
-            "resolution_reason": "resolved",
+            "resolution_reason": RESOLUTION_REASON_MANUAL_RESOLVED,
             "resolved_by_user_id": 1,
             "resolved_by_username": "admin",
             "latest_message": "cpu critical",
-            "metadata_json": "{\"metric_key\":\"cpu_usage\"}",
+            "metadata_json": "{\"metric_key\":\"cpu_usage\",\"resolution_note\":\"operator note\"}",
             "created_at": "2026-04-12T11:06:00.000+09:00",
             "updated_at": "2026-04-12T11:06:00.000+09:00",
         }
@@ -154,7 +160,8 @@ def test_serialize_alert_archive_row_handles_metadata_json_and_invalid_json() ->
     assert valid_payload["was_acknowledged"] is True
     assert valid_payload["source_rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
     assert valid_payload["source_rule_display_name_snapshot"] == "Process CPU High"
-    assert valid_payload["metadata"] == {"metric_key": "cpu_usage"}
+    assert valid_payload["metadata"] == {"metric_key": "cpu_usage", "resolution_note": "operator note"}
+    assert valid_payload["resolution_note"] == "operator note"
     assert invalid_payload["was_acknowledged"] is False
     assert invalid_payload["source_rule_key"] == "threshold.agent.outbox_queue_depth.agent-queue-high"
     assert invalid_payload["source_rule_display_name_snapshot"] == "Agent Queue High"
