@@ -2155,7 +2155,7 @@ def test_admin_publish_alert_rule_accepts_warnings_but_publishes_draft(seeded_cl
     assert len(payload["validation"]["warnings"]) == 2
 
 
-def test_admin_publish_alert_rule_blocks_compound_draft(seeded_client) -> None:
+def test_admin_publish_alert_rule_allows_valid_compound_draft(seeded_client) -> None:
     login(seeded_client)
 
     create_response = seeded_client.post(
@@ -2191,8 +2191,48 @@ def test_admin_publish_alert_rule_blocks_compound_draft(seeded_client) -> None:
 
     publish_response = seeded_client.post(f"/api/admin/alert-rules/{rule_id}/publish")
 
-    assert publish_response.status_code == 400
-    assert publish_response.get_json()["error"]["message"] == "compound threshold publish is not enabled yet"
+    assert publish_response.status_code == 200
+    payload = publish_response.get_json()
+    assert payload["rule"]["status"] == "published"
+    assert payload["rule"]["condition_mode"] == "compound"
+    assert payload["validation"] == {"errors": [], "warnings": []}
+
+
+def test_admin_publish_alert_rule_accepts_compound_warnings(seeded_client) -> None:
+    login(seeded_client)
+
+    create_response = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "cpu_usage",
+            "comparison": "gte",
+            "condition_mode": "compound",
+            "warning_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "lte", "value": 20},
+                    {"comparison": "gte", "value": 80},
+                ],
+            },
+            "critical_condition": None,
+            "display_name": "CPU Band (Copy)",
+            "rule_key": "threshold.process.cpu_usage.cpu-band-publish-copy",
+            "is_enabled": True,
+        },
+    )
+    assert create_response.status_code == 201
+    rule_id = create_response.get_json()["rule"]["id"]
+
+    publish_response = seeded_client.post(f"/api/admin/alert-rules/{rule_id}/publish")
+
+    assert publish_response.status_code == 200
+    payload = publish_response.get_json()
+    assert payload["rule"]["status"] == "published"
+    assert payload["validation"]["errors"] == []
+    assert len(payload["validation"]["warnings"]) == 2
 
 
 def test_admin_alert_rule_rejects_duplicate_rule_key(seeded_client) -> None:

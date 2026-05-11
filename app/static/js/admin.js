@@ -3121,7 +3121,7 @@ function renderAlertRuleEditorStatus(rule = null) {
     const statusMessage =
         rule.status === "draft"
             ? isCompoundDraft
-                ? "현재 rule은 compound draft입니다. draft 저장과 preview는 가능하지만, publish는 아직 지원하지 않습니다."
+                ? "현재 rule은 compound draft입니다. draft 저장과 preview, publish를 같은 흐름으로 진행할 수 있습니다."
                 : "현재 rule은 draft입니다. selector, threshold, 이름을 편집한 뒤 publish 할 수 있습니다."
             : "현재 rule은 published라서 읽기 전용입니다. 조건을 바꾸려면 Clone으로 새 draft를 만든 뒤 수정하세요.";
     const toggleMessage =
@@ -3593,13 +3593,6 @@ function getAlertRulePublishReadiness(rule, options = {}) {
             message: "미저장 draft 변경이 있습니다. 먼저 저장하세요.",
         };
     }
-    if (rule.condition_mode === "compound") {
-        return {
-            state: "blocked",
-            label: "blocked compound draft",
-            message: "compound threshold는 아직 publish를 지원하지 않습니다. draft 저장과 preview만 가능합니다.",
-        };
-    }
     return {
         state: "ready",
         label: "ready",
@@ -3968,7 +3961,7 @@ function renderAlertRulePreviewPanel() {
             <p class="admin-meta">critical condition: ${escapeHtml(formatAlertRuleConditionGroup(rule.critical_condition))}</p>
             ${
                 rule.condition_mode === "compound"
-                    ? '<p class="section-copy">compound threshold는 현재 draft 저장과 preview를 지원합니다. publish는 아직 scalar rule만 지원합니다.</p>'
+                    ? '<p class="section-copy">compound threshold는 현재 draft 저장, preview, publish를 지원합니다. publish 후에는 runtime precedence 규칙으로 scalar rule과 함께 평가됩니다.</p>'
                     : ""
             }
         </section>

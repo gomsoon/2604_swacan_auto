@@ -46,12 +46,13 @@ Examples of publish warnings that remain allowed:
 The implementation order stays narrow:
 
 1. runtime enablement
-   - worker can evaluate published compound rules
-   - current alert parity is preserved
+   - implemented: worker evaluates published compound rules
+   - implemented: current alert parity is preserved
 2. publish endpoint enablement
-   - remove the hard block for valid compound drafts
+   - implemented: the hard block for valid compound drafts is removed
+   - implemented: warnings-only publish remains allowed
 3. admin UI enablement
-   - publish readiness and success/error wording updated
+   - implemented: publish readiness and success/error wording are updated
 
 ## Runtime Enablement Scope
 

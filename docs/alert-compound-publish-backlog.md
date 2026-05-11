@@ -5,23 +5,22 @@ Updated: 2026-05-11
 
 ## Near-Term Sequence
 
-1. runtime enablement for published compound rules
-2. publish endpoint enablement for valid compound drafts
-3. admin UI publish readiness/message updates
-4. regression and coverage follow-up
+1. regression and coverage follow-up
+2. richer preview/runtime explainability
+3. lifecycle/archive follow-up
+4. deferred identity architecture review
 
-## Backlog After Runtime Enablement
+## Backlog After Initial Publish Enablement
 
 ### Publish Endpoint
 
-- remove the current compound publish hard block
-- reuse preview validation as publish gate
-- allow warnings-only publish
-- add compound publish regression coverage
+- keep preview validation as the publish gate
+- keep warnings-only publish behavior stable
+- expand compound publish regression coverage as new rule types arrive
 
 ### UI Messaging
 
-- replace `compound publish unavailable` copy with validation-driven readiness
+- keep validation-driven publish readiness consistent in list, detail, and preview views
 - keep clear blocked reasons for invalid drafts
 - keep scalar/compound status visibility consistent in list and detail views
 

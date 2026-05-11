@@ -2596,8 +2596,6 @@ def publish_alert_rule(rule_id: int):
     payload, error = validate_alert_rule_payload(dict(existing), partial=False)
     if error:
         return error
-    if payload["condition_mode"] == "compound":
-        return error_response("validation_error", "compound threshold publish is not enabled yet", 400)
     uniqueness_error = ensure_alert_rule_key_unique(payload["rule_key"], exclude_rule_id=rule_id)
     if uniqueness_error:
         return uniqueness_error

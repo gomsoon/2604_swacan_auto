@@ -136,7 +136,7 @@ critical_cl2_val REAL NULL
 - `scalar` draft는 기존 정책대로 publish 가능
 - `compound` draft는 publish 차단
 - 에러 메시지 예시:
-  - `compound threshold publish is not enabled yet`
+- initial implementation note: this draft previously blocked compound publish, but runtime + publish enablement now moved to the dedicated publish draft document
 
 즉 이번 단계는 `save draft`까지이고, runtime/publish는 다음 단계 과제다.
 
