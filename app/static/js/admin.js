@@ -56,7 +56,7 @@ const latestStateList = document.getElementById("admin-latest-state-list");
 const eventsList = document.getElementById("admin-events-list");
 const eventDetailPanel = document.getElementById("admin-event-detail-panel");
 const alertsList = document.getElementById("admin-alerts-list");
-const alertHistoryList = document.getElementById("admin-alert-history-list");
+const alertArchiveList = document.getElementById("admin-alert-history-list");
 const debugList = document.getElementById("admin-debug-list");
 const cleanupList = document.getElementById("admin-cleanup-list");
 
@@ -65,7 +65,7 @@ const refreshIngestButton = document.getElementById("refresh-ingest-button");
 const refreshLatestStateButton = document.getElementById("refresh-latest-state-button");
 const refreshEventsButton = document.getElementById("refresh-admin-events-button");
 const refreshAlertsButton = document.getElementById("refresh-alerts-button");
-const refreshAlertHistoryButton = document.getElementById("refresh-alert-history-button");
+const refreshAlertArchiveButton = document.getElementById("refresh-alert-history-button");
 const refreshDebugButton = document.getElementById("refresh-debug-button");
 const refreshCleanupButton = document.getElementById("refresh-cleanup-button");
 const refreshMetamodelVersionsButton = document.getElementById("refresh-metamodel-versions-button");
@@ -1482,13 +1482,13 @@ function buildAlertStatusButtons(item) {
         .join("");
 }
 
-function renderAlertHistoryArchive(items) {
+function renderAlertArchive(items) {
     if (items.length === 0) {
-        alertHistoryList.innerHTML = '<p class="section-copy">종료된 alert 이력이 없습니다.</p>';
+        alertArchiveList.innerHTML = '<p class="section-copy">종료된 alert archive가 없습니다.</p>';
         return;
     }
 
-    alertHistoryList.innerHTML = items
+    alertArchiveList.innerHTML = items
         .map(
             (item) => `
                 <article class="admin-item compact-admin-item">
@@ -4062,9 +4062,9 @@ async function loadAlerts() {
     renderAlerts(payload.items);
 }
 
-async function loadAlertHistoryArchive() {
+async function loadAlertArchive() {
     const payload = await apiFetch("/api/admin/alert-archive?limit=10");
-    renderAlertHistoryArchive(payload.items);
+    renderAlertArchive(payload.items);
 }
 
 async function loadDebug() {
@@ -4961,7 +4961,7 @@ async function refreshAll() {
             loadLatestStates(),
             loadEvents(),
             loadAlerts(),
-            loadAlertHistoryArchive(),
+            loadAlertArchive(),
             loadDebug(),
             loadCleanupRuns(),
         ]);
@@ -4981,7 +4981,7 @@ refreshIngestButton?.addEventListener("click", loadIngest);
 refreshLatestStateButton?.addEventListener("click", loadLatestStates);
 refreshEventsButton?.addEventListener("click", loadEvents);
 refreshAlertsButton?.addEventListener("click", loadAlerts);
-refreshAlertHistoryButton?.addEventListener("click", loadAlertHistoryArchive);
+refreshAlertArchiveButton?.addEventListener("click", loadAlertArchive);
 refreshDebugButton?.addEventListener("click", loadDebug);
 refreshCleanupButton?.addEventListener("click", loadCleanupRuns);
 refreshMetamodelVersionsButton?.addEventListener("click", loadMetamodelVersions);
@@ -5544,7 +5544,7 @@ alertsList?.addEventListener("click", (event) => {
         const currentNote = ackButton.dataset.ackNote || "";
         updateAlertAcknowledgement(alertId, acknowledged, currentNote)
             .then(async () => {
-                await Promise.all([loadAlerts(), loadAlertHistoryArchive(), loadSummary()]);
+                await Promise.all([loadAlerts(), loadAlertArchive(), loadSummary()]);
                 showBanner(`alert를 ${acknowledged ? "ACK" : "ACK 해제"}했습니다.`, "success");
             })
             .catch((error) => showBanner(error.message, "error"));
@@ -5557,7 +5557,7 @@ alertsList?.addEventListener("click", (event) => {
         const currentReason = resolveButton.dataset.resolutionReason || "";
         resolveAlert(alertId, currentReason)
             .then(async () => {
-                await Promise.all([loadAlerts(), loadAlertHistoryArchive(), loadSummary()]);
+                await Promise.all([loadAlerts(), loadAlertArchive(), loadSummary()]);
                 showBanner("alert를 수동 해결 처리했습니다.", "success");
             })
             .catch((error) => showBanner(error.message, "error"));
@@ -5574,7 +5574,7 @@ alertsList?.addEventListener("click", (event) => {
     const currentNote = statusButton.dataset.statusNote || "";
     updateAlertStatus(alertId, nextStatus, currentNote)
         .then(async () => {
-            await Promise.all([loadAlerts(), loadAlertHistoryArchive(), loadSummary()]);
+            await Promise.all([loadAlerts(), loadAlertArchive(), loadSummary()]);
             showBanner(`alert 상태를 ${nextStatus}(으)로 변경했습니다.`, "success");
         })
         .catch((error) => showBanner(error.message, "error"));

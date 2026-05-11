@@ -119,7 +119,7 @@ Lifecycle/archive work should add regression tests for at least:
 
 핵심 목표는 다음과 같다.
 
-- 현재 살아 있는 alert와 종료된 alert 이력을 분리한다.
+- 현재 살아 있는 alert와 종료된 alert archive를 분리한다.
 - 운영 화면에서는 동일 alert lifecycle을 한 줄로 이해하기 쉽게 표현한다.
 - 수동 resolve와 자동 resolve를 명확히 구분한다.
 - 시간 경과에 따른 자동 escalation / 자동 resolve 정책을 구조적으로 수용한다.

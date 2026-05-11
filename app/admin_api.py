@@ -11,7 +11,6 @@ from .alert_archive import (
     RESOLUTION_REASON_MANUAL_RESOLVED,
     RESOLUTION_REASON_STATUS_API,
     close_alert_instance_with_archive,
-    insert_alert_history_archive,
     serialize_alert_archive_row,
 )
 from .alert_history import record_alert_history
@@ -1979,7 +1978,7 @@ def get_alert_history(alert_id: int):
 @bp.get("/alert-history")
 @bp.get("/alert-archive")
 @admin_required
-def list_alert_history_archive():
+def list_alert_archive():
     limit, error = parse_limit()
     if error:
         return error
