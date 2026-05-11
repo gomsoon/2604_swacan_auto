@@ -77,6 +77,11 @@ def suggest_threshold_rule_key(state_type: str, metric_key: str, display_name: s
     return f"threshold.{state_type}.{metric_key}.{slug}"
 
 
+def suggest_event_rule_key(state_type: str, signal_key: str, display_name: str, *, rule_id: int | None = None) -> str:
+    slug = slugify_rule_key_part(display_name) or (f"legacy-{rule_id}" if rule_id is not None else "rule")
+    return f"event.{state_type}.{signal_key}.{slug}"
+
+
 def suggest_alert_rule_display_name(description: str | None, state_type: str, metric_key: str, *, rule_id: int | None = None) -> str:
     description_value = (description or "").strip()
     if description_value:
@@ -112,6 +117,10 @@ def ensure_alert_rule_lifecycle_schema(db_conn: sqlite3.Connection) -> None:
         db_conn.execute("ALTER TABLE alert_rules ADD COLUMN display_name TEXT")
     if "status" not in columns:
         db_conn.execute("ALTER TABLE alert_rules ADD COLUMN status TEXT")
+    if "signal_type" not in columns:
+        db_conn.execute("ALTER TABLE alert_rules ADD COLUMN signal_type TEXT")
+    if "signal_key" not in columns:
+        db_conn.execute("ALTER TABLE alert_rules ADD COLUMN signal_key TEXT")
     if "cond_mode" not in columns:
         db_conn.execute("ALTER TABLE alert_rules ADD COLUMN cond_mode TEXT")
     if "warning_logical_op" not in columns:
@@ -137,7 +146,7 @@ def ensure_alert_rule_lifecycle_schema(db_conn: sqlite3.Connection) -> None:
 
     rows = db_conn.execute(
         """
-        SELECT id, state_type, metric_key, description, rule_key, display_name, status, cond_mode
+        SELECT id, state_type, metric_key, description, rule_key, display_name, status, signal_type, signal_key, cond_mode
         FROM alert_rules
         ORDER BY id ASC
         """
@@ -156,14 +165,22 @@ def ensure_alert_rule_lifecycle_schema(db_conn: sqlite3.Connection) -> None:
         if not RULE_KEY_ALLOWED_PATTERN.fullmatch(normalized_rule_key):
             normalized_rule_key = f"threshold.{row['state_type']}.{row['metric_key']}.legacy-{row['id']}"
         normalized_status = status or "published"
+        normalized_signal_type = row["signal_type"] or "latest_state_metric"
         normalized_cond_mode = row["cond_mode"] or "scalar"
         db_conn.execute(
             """
             UPDATE alert_rules
-            SET rule_key = ?, display_name = ?, status = ?, cond_mode = ?
+            SET rule_key = ?, display_name = ?, status = ?, signal_type = ?, cond_mode = ?
             WHERE id = ?
             """,
-            (normalized_rule_key, normalized_display_name, normalized_status, normalized_cond_mode, row["id"]),
+            (
+                normalized_rule_key,
+                normalized_display_name,
+                normalized_status,
+                normalized_signal_type,
+                normalized_cond_mode,
+                row["id"],
+            ),
         )
 
     db_conn.execute(

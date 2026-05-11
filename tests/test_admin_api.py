@@ -1880,6 +1880,139 @@ def test_admin_create_alert_rule_accepts_valid_object_type_rule(seeded_client) -
     assert payload["display_name"] is not None
 
 
+def test_admin_create_alert_rule_accepts_valid_grouped_event_rule(seeded_client) -> None:
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "signal_type": "grouped_event_repeat",
+            "signal_key": "process_restarted",
+            "comparison": "gte",
+            "warning_threshold": 2,
+            "critical_threshold": 4,
+            "is_enabled": True,
+            "display_name": "Process Restart Burst",
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.get_json()["rule"]
+    assert payload["status"] == "draft"
+    assert payload["signal_type"] == "grouped_event_repeat"
+    assert payload["signal_key"] == "process_restarted"
+    assert payload["metric_key"] == "process_restarted"
+    assert payload["condition_mode"] == "scalar"
+    assert payload["rule_key"].startswith("event.process.process_restarted.")
+
+
+def test_admin_alert_rule_preview_supports_grouped_event_repeat(seeded_app, seeded_client) -> None:
+    login(seeded_client)
+    current_time = datetime.now().astimezone().isoformat()
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO grouped_events (
+                monitored_object_id, target_id, event_type, severity, first_occurred_at, last_occurred_at,
+                repeat_count, latest_message, latest_event_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1302,
+                "app_main",
+                "process_restarted",
+                "warning",
+                current_time,
+                current_time,
+                4,
+                "process restarted repeatedly",
+                json.dumps({"event_type": "process_restarted", "repeat_count": 4}),
+                current_time,
+                current_time,
+            ),
+        )
+        db_conn.commit()
+
+    response = seeded_client.post(
+        "/api/admin/alert-rules/preview?limit=20",
+        json={
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "signal_type": "grouped_event_repeat",
+            "signal_key": "process_restarted",
+            "comparison": "gte",
+            "warning_threshold": 2,
+            "critical_threshold": 4,
+            "display_name": "Process Restart Burst",
+            "rule_key": "event.process.process_restarted.process-restart-burst",
+            "is_enabled": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["rule"]["signal_type"] == "grouped_event_repeat"
+    assert payload["rule"]["signal_key"] == "process_restarted"
+    assert payload["rule"]["metric_key"] == "process_restarted"
+    assert payload["summary"]["warning_match_count"] == 1
+    assert payload["summary"]["critical_match_count"] == 1
+    assert payload["items"][0]["signal_type"] == "grouped_event_repeat"
+    assert payload["items"][0]["signal_key"] == "process_restarted"
+    assert payload["items"][0]["grouped_event_repeat_count"] == 4
+    assert payload["items"][0]["current_metric_value"] == 4.0
+    assert payload["items"][0]["grouped_event_latest_message"] == "process restarted repeatedly"
+
+
+def test_admin_alert_rule_rejects_invalid_grouped_event_rule_shape(seeded_client) -> None:
+    login(seeded_client)
+
+    comparison_response = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "signal_type": "grouped_event_repeat",
+            "signal_key": "process_restarted",
+            "comparison": "lte",
+            "warning_threshold": 1,
+            "is_enabled": True,
+        },
+    )
+    compound_response = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "signal_type": "grouped_event_repeat",
+            "signal_key": "process_restarted",
+            "comparison": "gte",
+            "condition_mode": "compound",
+            "warning_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "gte", "value": 2},
+                    {"comparison": "gte", "value": 3},
+                ],
+            },
+            "warning_threshold": 2,
+            "is_enabled": True,
+        },
+    )
+
+    assert comparison_response.status_code == 400
+    assert comparison_response.get_json()["error"]["message"] == "event rules currently require comparison=gte"
+    assert compound_response.status_code == 400
+    assert compound_response.get_json()["error"]["message"] == "event rules currently support only scalar condition_mode"
+
+
 def test_admin_create_alert_rule_accepts_compound_draft_rule(seeded_client) -> None:
     login(seeded_client)
 
@@ -2178,6 +2311,38 @@ def test_admin_publish_alert_rule_accepts_warnings_but_publishes_draft(seeded_cl
     assert payload["rule"]["status"] == "published"
     assert payload["validation"]["errors"] == []
     assert len(payload["validation"]["warnings"]) == 2
+
+
+def test_admin_publish_alert_rule_allows_valid_grouped_event_draft(seeded_client) -> None:
+    login(seeded_client)
+
+    create_response = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "signal_type": "grouped_event_repeat",
+            "signal_key": "process_restarted",
+            "comparison": "gte",
+            "warning_threshold": 2,
+            "critical_threshold": 4,
+            "display_name": "Process Restart Burst",
+            "rule_key": "event.process.process_restarted.process-restart-burst",
+            "is_enabled": True,
+        },
+    )
+    assert create_response.status_code == 201
+    rule_id = create_response.get_json()["rule"]["id"]
+
+    publish_response = seeded_client.post(f"/api/admin/alert-rules/{rule_id}/publish")
+
+    assert publish_response.status_code == 200
+    payload = publish_response.get_json()
+    assert payload["rule"]["status"] == "published"
+    assert payload["rule"]["signal_type"] == "grouped_event_repeat"
+    assert payload["rule"]["signal_key"] == "process_restarted"
+    assert payload["validation"] == {"errors": [], "warnings": []}
 
 
 def test_admin_publish_alert_rule_allows_valid_compound_draft(seeded_client) -> None:

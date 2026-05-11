@@ -5,6 +5,8 @@ from typing import Any
 
 THRESHOLD_FIRING_LEVELS = {"warning", "critical"}
 THRESHOLD_SEVERITY_RANK = {"critical": 2, "warning": 1}
+EVENT_SIGNAL_TYPE_GROUPED_REPEAT = "grouped_event_repeat"
+LATEST_STATE_SIGNAL_TYPE = "latest_state_metric"
 
 
 def metric_value_for_state(state: dict[str, Any], metric_key: str) -> float | None:
@@ -25,6 +27,15 @@ def metric_value_for_state(state: dict[str, Any], metric_key: str) -> float | No
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def alert_rule_value_key(rule: dict[str, Any]) -> str | None:
+    signal_type = rule.get("signal_type") or LATEST_STATE_SIGNAL_TYPE
+    if signal_type == EVENT_SIGNAL_TYPE_GROUPED_REPEAT:
+        signal_key = rule.get("signal_key")
+        return signal_key if isinstance(signal_key, str) and signal_key else None
+    metric_key = rule.get("metric_key")
+    return metric_key if isinstance(metric_key, str) and metric_key else None
 
 
 def threshold_clause_matches(metric_value: float, clause: dict[str, Any]) -> bool:
@@ -189,7 +200,7 @@ def alert_rule_candidate_identity(rule: dict[str, Any]) -> str:
     display_name = rule.get("display_name")
     if isinstance(display_name, str) and display_name:
         return f"name:{display_name}"
-    return f"preview:{rule.get('scope_type')}:{rule.get('metric_key')}"
+    return f"preview:{rule.get('scope_type')}:{alert_rule_value_key(rule)}"
 
 
 def threshold_family_key(rule: dict[str, Any]) -> tuple[str, str | None, str | None, str | None]:
@@ -197,6 +208,15 @@ def threshold_family_key(rule: dict[str, Any]) -> tuple[str, str | None, str | N
         "threshold",
         rule.get("state_type"),
         rule.get("metric_key"),
+        rule.get("comparison"),
+    )
+
+
+def event_family_key(rule: dict[str, Any]) -> tuple[str, str | None, str | None, str | None]:
+    return (
+        "event",
+        rule.get("state_type"),
+        rule.get("signal_key"),
         rule.get("comparison"),
     )
 

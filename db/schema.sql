@@ -428,6 +428,8 @@ CREATE TABLE IF NOT EXISTS alert_rules (
     object_type TEXT,
     monitored_object_id INTEGER,
     state_type TEXT NOT NULL CHECK (state_type IN ('process', 'agent', 'host')),
+    signal_type TEXT NOT NULL DEFAULT 'latest_state_metric' CHECK (signal_type IN ('latest_state_metric', 'grouped_event_repeat')),
+    signal_key TEXT,
     metric_key TEXT NOT NULL,
     comparison TEXT NOT NULL CHECK (comparison IN ('gte', 'lte')),
     warning_threshold REAL,

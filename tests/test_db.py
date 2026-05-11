@@ -8,6 +8,7 @@ from app.db import (
     get_db,
     slugify_rule_key_part,
     suggest_alert_rule_display_name,
+    suggest_event_rule_key,
     suggest_threshold_rule_key,
 )
 
@@ -151,6 +152,9 @@ def test_rule_key_helpers_normalize_values() -> None:
     assert suggest_threshold_rule_key("process", "cpu_usage", "", rule_id=7) == (
         "threshold.process.cpu_usage.legacy-7"
     )
+    assert suggest_event_rule_key("process", "process_restarted", "Process Restart Burst") == (
+        "event.process.process_restarted.process-restart-burst"
+    )
     assert suggest_alert_rule_display_name(" Explicit Name ", "process", "cpu_usage") == "Explicit Name"
     assert suggest_alert_rule_display_name(None, "process_group", "cpu_usage", rule_id=7) == (
         "Legacy Process Group Cpu Usage Threshold 7"
@@ -193,7 +197,7 @@ def test_ensure_alert_rule_lifecycle_schema_adds_columns_and_backfills_existing_
     columns = {row["name"] for row in db_conn.execute("PRAGMA table_info(alert_rules)").fetchall()}
     row = db_conn.execute(
         """
-        SELECT rule_key, display_name, status, cond_mode,
+        SELECT rule_key, display_name, status, signal_type, signal_key, cond_mode,
                warning_logical_op, warning_cl1_comp, warning_cl1_val,
                warning_cl2_comp, warning_cl2_val,
                critical_logical_op, critical_cl1_comp, critical_cl1_val,
@@ -207,6 +211,8 @@ def test_ensure_alert_rule_lifecycle_schema_adds_columns_and_backfills_existing_
         "rule_key",
         "display_name",
         "status",
+        "signal_type",
+        "signal_key",
         "cond_mode",
         "warning_logical_op",
         "warning_cl1_comp",
@@ -222,6 +228,8 @@ def test_ensure_alert_rule_lifecycle_schema_adds_columns_and_backfills_existing_
     assert row["rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
     assert row["display_name"] == "Process CPU High"
     assert row["status"] == "published"
+    assert row["signal_type"] == "latest_state_metric"
+    assert row["signal_key"] is None
     assert row["cond_mode"] == "scalar"
     assert row["warning_logical_op"] is None
     assert row["warning_cl1_comp"] is None
@@ -248,6 +256,7 @@ def test_ensure_alert_rule_lifecycle_schema_rewrites_invalid_rule_key_to_legacy_
                 rule_key TEXT,
                 display_name TEXT,
                 status TEXT,
+                signal_type TEXT,
                 cond_mode TEXT
             )
         """
@@ -261,11 +270,14 @@ def test_ensure_alert_rule_lifecycle_schema_rewrites_invalid_rule_key_to_legacy_
 
     ensure_alert_rule_lifecycle_schema(db_conn)
 
-    row = db_conn.execute("SELECT rule_key, display_name, status, cond_mode FROM alert_rules WHERE id = 2").fetchone()
+    row = db_conn.execute(
+        "SELECT rule_key, display_name, status, signal_type, cond_mode FROM alert_rules WHERE id = 2"
+    ).fetchone()
 
     assert row["rule_key"] == "threshold.agent.outbox_queue_depth.legacy-2"
     assert row["display_name"] == "Legacy Agent Outbox Queue Depth Threshold 2"
     assert row["status"] == "published"
+    assert row["signal_type"] == "latest_state_metric"
     assert row["cond_mode"] == "scalar"
 
 

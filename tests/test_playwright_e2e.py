@@ -845,7 +845,7 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     page.get_by_role("button", name="Preview").click()
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("현재 입력 기준")
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("검증 결과")
-    expect(page.locator("#alert-rule-preview-panel")).to_contain_text("Threshold Shape")
+    expect(page.locator("#alert-rule-preview-panel")).to_contain_text("Condition Shape")
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("판정 요약")
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("warning condition: gte 50")
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("single severity level")
@@ -957,3 +957,62 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     expect(page.locator("#admin-ingest-list")).to_contain_text("표시할 ingest batch가 없습니다.")
     expect(page.locator("#admin-latest-state-list")).to_contain_text("조건에 맞는 latest state가 없습니다.")
     expect(page.locator("#admin-cleanup-list")).to_contain_text("최근 cleanup 기록이 없습니다.")
+
+
+def test_playwright_admin_event_alert_rule(page: Page, live_server) -> None:
+    base_url, seeded_app = live_server
+    current_time = datetime.now().astimezone().isoformat()
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO grouped_events (
+                monitored_object_id, target_id, event_type, severity, first_occurred_at, last_occurred_at,
+                repeat_count, latest_message, latest_event_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1302,
+                "app_main",
+                "process_restarted",
+                "warning",
+                current_time,
+                current_time,
+                4,
+                "process restarted repeatedly",
+                json.dumps({"event_type": "process_restarted", "repeat_count": 4}),
+                current_time,
+                current_time,
+            ),
+        )
+        db_conn.commit()
+
+    browser_login(page, base_url)
+    page.goto(f"{base_url}/admin")
+
+    page.locator("#alert-rule-display-name").fill("Process Restart Burst")
+    page.locator("#alert-rule-object-type").fill("SoftwareProcess")
+    page.locator("#alert-rule-signal-type").select_option("grouped_event_repeat")
+    expect(page.locator("#alert-rule-value-key-label")).to_contain_text("Signal Key")
+    expect(page.locator("#alert-rule-preview-condition-mode")).to_have_value("scalar")
+    page.locator("#alert-rule-metric-key").fill("process_restarted")
+    expect(page.locator("#alert-rule-key-suggestion")).to_contain_text("event.process.process_restarted.process-restart-burst")
+    page.get_by_role("button", name="추천 key 적용").click()
+    page.locator("#alert-rule-warning-threshold").fill("2")
+    page.locator("#alert-rule-critical-threshold").fill("4")
+    page.get_by_role("button", name="Preview").click()
+    expect(page.locator("#alert-rule-preview-panel")).to_contain_text("grouped_event_repeat")
+    expect(page.locator("#alert-rule-preview-panel")).to_contain_text("signal=process_restarted")
+    expect(page.locator("#alert-rule-preview-panel")).to_contain_text("warning condition: gte 2")
+    expect(page.locator("#alert-rule-preview-panel")).to_contain_text("critical condition: gte 4")
+    expect(page.locator("#alert-rule-preview-panel")).to_contain_text("repeat_count=4")
+
+    page.locator("#save-alert-rule-button").click()
+    createdRule = page.locator(".admin-item", has_text="event.process.process_restarted.process-restart-burst").first
+    expect(createdRule).to_contain_text("grouped_event_repeat")
+    expect(createdRule).to_contain_text("warning repeat=2")
+    expect(createdRule).to_contain_text("critical repeat=4")
+    createdRule.get_by_role("button", name="Publish").click()
+    expect(page.locator("#banner")).to_contain_text("alert rule을 publish했습니다.")
+    expect(createdRule).to_contain_text("published")

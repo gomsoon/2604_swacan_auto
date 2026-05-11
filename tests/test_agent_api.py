@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 import json
 
 from app.db import get_db
@@ -1242,6 +1243,192 @@ def test_compound_threshold_rule_wins_at_runtime_and_resolves_on_recovery(seeded
     assert archive_row["source_rule_display_name_snapshot"] == "App Process CPU Band"
     assert archive_row["resolution_source"] == "auto_recovery"
     assert archive_row["resolution_reason"] == "threshold_cleared"
+
+
+def test_grouped_event_rule_opens_from_repeat_count_and_resolves_after_window(seeded_app, seeded_client) -> None:
+    seeded_app.config["GROUPED_EVENT_WINDOW_SECONDS"] = 60
+    base_time = datetime.now().astimezone().replace(microsecond=0)
+    first_time = base_time
+    second_time = base_time + timedelta(seconds=5)
+    third_time = base_time + timedelta(seconds=10)
+    recover_time = base_time + timedelta(seconds=20)
+    expired_time = base_time - timedelta(seconds=120)
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO alert_rules (
+                id, rule_key, display_name, status, scope_type, object_type, monitored_object_id,
+                state_type, signal_type, signal_key, metric_key, comparison, warning_threshold, critical_threshold,
+                cond_mode, is_enabled, description, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1903,
+                "event.process.process_restarted.process-restart-burst",
+                "Process Restart Burst",
+                "published",
+                "monitored_object",
+                None,
+                1302,
+                "process",
+                "grouped_event_repeat",
+                "process_restarted",
+                "process_restarted",
+                "gte",
+                2.0,
+                3.0,
+                "scalar",
+                1,
+                "Restart storm alert",
+                "2026-04-10T11:14:00.000+09:00",
+                "2026-04-10T11:14:00.000+09:00",
+            ),
+        )
+        db_conn.commit()
+
+    def event_batch(seq: int, when: datetime) -> dict:
+        return {
+            "agent_id": "agent_local",
+            "boot_id": "boot_event_repeat_runtime",
+            "seq_start": seq,
+            "seq_end": seq,
+            "sent_at": when.isoformat(),
+            "items": [
+                {
+                    "seq": seq,
+                    "payload_type": "process_event",
+                    "occurred_at": when.isoformat(),
+                    "target_id": "app_main",
+                    "payload": {
+                        "event_type": "process_restarted",
+                        "severity": "warning",
+                        "message": "process restarted",
+                    },
+                }
+            ],
+        }
+
+    recover_batch = {
+        "agent_id": "agent_local",
+        "boot_id": "boot_event_repeat_runtime",
+        "seq_start": 90,
+        "seq_end": 90,
+        "sent_at": recover_time.isoformat(),
+        "items": [
+            {
+                "seq": 90,
+                "payload_type": "process_snapshot",
+                "occurred_at": recover_time.isoformat(),
+                "target_id": "app_main",
+                "payload": {
+                    "pid": 1234,
+                    "state": "running",
+                    "cpu_usage": 10.0,
+                    "memory_rss": 4096,
+                },
+            }
+        ],
+    }
+
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=event_batch(87, first_time)).status_code == 202
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=event_batch(88, second_time)).status_code == 202
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=event_batch(89, third_time)).status_code == 202
+
+    with seeded_app.app_context():
+        first_result = process_pending_ingest(limit=1)
+        second_result = process_pending_ingest(limit=1)
+        db_conn = get_db()
+        warning_alert = db_conn.execute(
+            """
+            SELECT alert_code, source_rule_id, severity, status, latest_message, metadata_json
+            FROM alert_instances
+            WHERE monitored_object_id = 1302
+              AND source_rule_id = 1903
+              AND status = 'open'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        warning_metadata = json.loads(warning_alert["metadata_json"])
+
+    with seeded_app.app_context():
+        third_result = process_pending_ingest(limit=1)
+        db_conn = get_db()
+        critical_alert = db_conn.execute(
+            """
+            SELECT severity, status, repeat_count, latest_message, metadata_json
+            FROM alert_instances
+            WHERE monitored_object_id = 1302
+              AND source_rule_id = 1903
+              AND status = 'open'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        critical_metadata = json.loads(critical_alert["metadata_json"])
+        db_conn.execute(
+            """
+            UPDATE grouped_events
+            SET last_occurred_at = ?, updated_at = ?
+            WHERE monitored_object_id = ? AND event_type = ?
+            """,
+            (expired_time.isoformat(), expired_time.isoformat(), 1302, "process_restarted"),
+        )
+        db_conn.commit()
+
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=recover_batch).status_code == 202
+
+    with seeded_app.app_context():
+        fourth_result = process_pending_ingest(limit=1)
+        db_conn = get_db()
+        resolved_alert = db_conn.execute(
+            """
+            SELECT status, resolved_at
+            FROM alert_instances
+            WHERE monitored_object_id = 1302
+              AND source_rule_id = 1903
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        archive_row = db_conn.execute(
+            """
+            SELECT source_rule_id, source_rule_key, source_rule_display_name_snapshot,
+                   resolution_source, resolution_reason
+            FROM alert_history_archive
+            WHERE source_rule_id = 1903
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert first_result["processed_items"] == 1
+    assert second_result["processed_items"] == 1
+    assert warning_alert["alert_code"] == "rule.1903"
+    assert warning_alert["source_rule_id"] == 1903
+    assert warning_alert["severity"] == "warning"
+    assert warning_alert["status"] == "open"
+    assert warning_alert["latest_message"] == "process_restarted repeat_count=2 >= 2"
+    assert warning_metadata["signal_type"] == "grouped_event_repeat"
+    assert warning_metadata["signal_key"] == "process_restarted"
+    assert warning_metadata["family_key"] == ["event", "process", "process_restarted", "gte"]
+    assert third_result["processed_items"] == 1
+    assert critical_alert["severity"] == "critical"
+    assert critical_alert["status"] == "open"
+    assert critical_alert["repeat_count"] == 2
+    assert critical_alert["latest_message"] == "process_restarted repeat_count=3 >= 3"
+    assert critical_metadata["signal_type"] == "grouped_event_repeat"
+    assert critical_metadata["winning_condition_trace"]["severity"] == "critical"
+    assert fourth_result["processed_items"] == 1
+    assert resolved_alert["status"] == "resolved"
+    assert resolved_alert["resolved_at"] is not None
+    assert archive_row["source_rule_id"] == 1903
+    assert archive_row["source_rule_key"] == "event.process.process_restarted.process-restart-burst"
+    assert archive_row["source_rule_display_name_snapshot"] == "Process Restart Burst"
+    assert archive_row["resolution_source"] == "auto_recovery"
+    assert archive_row["resolution_reason"] == "event_window_elapsed"
 
 
 def test_grouped_events_merge_at_exact_window_boundary(seeded_app, seeded_client) -> None:

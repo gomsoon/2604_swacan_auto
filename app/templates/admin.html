@@ -642,6 +642,13 @@
                             <option value="host">host</option>
                         </select>
                     </label>
+                    <label class="field compact-field">
+                        <span>Signal Type</span>
+                        <select id="alert-rule-signal-type">
+                            <option value="latest_state_metric">latest_state_metric</option>
+                            <option value="grouped_event_repeat">grouped_event_repeat</option>
+                        </select>
+                    </label>
                 </div>
                 <div class="field-grid">
                     <label class="field compact-field">
@@ -657,7 +664,7 @@
                 </div>
                 <div class="field-grid">
                     <label class="field compact-field">
-                        <span>Metric Key</span>
+                        <span id="alert-rule-value-key-label">Metric Key</span>
                         <input id="alert-rule-metric-key" type="text" placeholder="예: cpu_usage" required>
                     </label>
                     <label class="field compact-field">
@@ -682,7 +689,7 @@
                     <div class="section-header">
                         <div>
                             <h4>Compound Condition</h4>
-                            <p class="section-copy">compound threshold draft는 저장/복제/preview가 가능합니다. publish는 아직 scalar threshold만 지원합니다.</p>
+                            <p class="section-copy">compound condition은 latest_state_metric threshold rule에서만 사용합니다. grouped_event_repeat rule은 scalar repeat count 조건만 지원합니다.</p>
                         </div>
                         <span class="meta-pill">draft 저장 가능</span>
                     </div>

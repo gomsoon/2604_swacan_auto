@@ -12,7 +12,11 @@ from flask.cli import with_appcontext
 from .alert_archive import close_alert_instance_with_archive
 from .alert_history import record_alert_history
 from .alert_rule_evaluator import (
+    EVENT_SIGNAL_TYPE_GROUPED_REPEAT,
+    LATEST_STATE_SIGNAL_TYPE,
     THRESHOLD_FIRING_LEVELS,
+    alert_rule_value_key,
+    event_family_key,
     evaluate_threshold_candidates,
     evaluate_threshold_rule,
     metric_value_for_state,
@@ -438,6 +442,63 @@ def build_threshold_alert_metadata(rule, metric_value: float, level: str, family
     )
 
 
+def load_recent_grouped_event(*, monitored_object_id: int, signal_key: str, received_at: str) -> dict | None:
+    row = get_db().execute(
+        """
+        SELECT id, event_type, severity, repeat_count, first_occurred_at, last_occurred_at, latest_message
+        FROM grouped_events
+        WHERE monitored_object_id = ?
+          AND event_type = ?
+        ORDER BY last_occurred_at DESC, id DESC
+        LIMIT 1
+        """,
+        (monitored_object_id, signal_key),
+    ).fetchone()
+    if row is None:
+        return None
+
+    try:
+        received_dt = parse_iso(received_at)
+        last_dt = parse_iso(row["last_occurred_at"])
+    except (TypeError, ValueError):
+        return None
+
+    window_seconds = int(current_app.config.get("GROUPED_EVENT_WINDOW_SECONDS", 60))
+    if abs((received_dt - last_dt).total_seconds()) > window_seconds:
+        return None
+    return dict(row)
+
+
+def event_message(rule, repeat_count: float, level: str) -> str:
+    threshold = rule["critical_threshold"] if level == "critical" else rule["warning_threshold"]
+    return f"{rule['signal_key']} repeat_count={repeat_count:.0f} >= {float(threshold):.0f}"
+
+
+def build_event_alert_metadata(rule, grouped_event: dict, level: str, family_key: tuple[str, str | None, str | None, str | None]) -> str:
+    return json.dumps(
+        {
+            "rule_id": rule["id"],
+            "rule_key": rule.get("rule_key"),
+            "display_name": rule.get("display_name"),
+            "signal_type": rule.get("signal_type"),
+            "signal_key": rule.get("signal_key"),
+            "repeat_count": grouped_event["repeat_count"],
+            "first_occurred_at": grouped_event["first_occurred_at"],
+            "last_occurred_at": grouped_event["last_occurred_at"],
+            "latest_message": grouped_event.get("latest_message"),
+            "comparison": rule["comparison"],
+            "warning_threshold": rule["warning_threshold"],
+            "critical_threshold": rule["critical_threshold"],
+            "scope_type": rule["scope_type"],
+            "threshold_level": level,
+            "cond_mode": "scalar",
+            "winning_condition_trace": rule.get("_winning_condition_trace"),
+            "family_key": list(family_key),
+        },
+        ensure_ascii=False,
+    )
+
+
 def sync_threshold_alerts(
     *,
     monitored_object_id: int | None,
@@ -460,7 +521,7 @@ def sync_threshold_alerts(
     rules = db_conn.execute(
         """
         SELECT id, rule_key, display_name, status, scope_type, object_type, monitored_object_id,
-               state_type, metric_key, comparison, warning_threshold, critical_threshold,
+               state_type, signal_type, signal_key, metric_key, comparison, warning_threshold, critical_threshold,
                cond_mode,
                warning_logical_op, warning_cl1_comp, warning_cl1_val, warning_cl2_comp, warning_cl2_val,
                critical_logical_op, critical_cl1_comp, critical_cl1_val, critical_cl2_comp, critical_cl2_val,
@@ -468,6 +529,7 @@ def sync_threshold_alerts(
         FROM alert_rules
         WHERE is_enabled = 1
           AND status = 'published'
+          AND signal_type = ?
           AND state_type = ?
           AND (
                 (scope_type = 'monitored_object' AND monitored_object_id = ?)
@@ -475,7 +537,7 @@ def sync_threshold_alerts(
           )
         ORDER BY id ASC
         """,
-        (state_type, monitored_object_id, object_row["object_type"]),
+        (LATEST_STATE_SIGNAL_TYPE, state_type, monitored_object_id, object_row["object_type"]),
     ).fetchall()
 
     families: dict[tuple[str, str | None, str | None, str | None], list] = {}
@@ -591,6 +653,166 @@ def sync_threshold_alerts(
         )
 
 
+def sync_event_alerts(
+    *,
+    monitored_object_id: int | None,
+    state_type: str,
+    occurred_at: str,
+    received_at: str,
+) -> None:
+    if monitored_object_id is None or state_type != "process":
+        return
+
+    db_conn = get_db()
+    object_row = db_conn.execute(
+        "SELECT object_type FROM monitored_objects WHERE id = ?",
+        (monitored_object_id,),
+    ).fetchone()
+    if object_row is None:
+        return
+
+    rules = db_conn.execute(
+        """
+        SELECT id, rule_key, display_name, status, scope_type, object_type, monitored_object_id,
+               state_type, signal_type, signal_key, metric_key, comparison, warning_threshold, critical_threshold,
+               cond_mode,
+               warning_logical_op, warning_cl1_comp, warning_cl1_val, warning_cl2_comp, warning_cl2_val,
+               critical_logical_op, critical_cl1_comp, critical_cl1_val, critical_cl2_comp, critical_cl2_val,
+               is_enabled, description, created_at, updated_at
+        FROM alert_rules
+        WHERE is_enabled = 1
+          AND status = 'published'
+          AND signal_type = ?
+          AND state_type = ?
+          AND (
+                (scope_type = 'monitored_object' AND monitored_object_id = ?)
+             OR (scope_type = 'object_type' AND object_type = ?)
+          )
+        ORDER BY id ASC
+        """,
+        (EVENT_SIGNAL_TYPE_GROUPED_REPEAT, state_type, monitored_object_id, object_row["object_type"]),
+    ).fetchall()
+    if not rules:
+        return
+
+    families: dict[tuple[str, str | None, str | None, str | None], list] = {}
+    for rule_row in rules:
+        rule = dict(rule_row)
+        families.setdefault(event_family_key(rule), []).append(rule)
+
+    for family_key, family_rules in families.items():
+        grouped_event = load_recent_grouped_event(
+            monitored_object_id=monitored_object_id,
+            signal_key=family_rules[0]["signal_key"],
+            received_at=received_at,
+        )
+        repeat_count = float(grouped_event["repeat_count"]) if grouped_event is not None else None
+        candidates = evaluate_threshold_candidates(repeat_count, [{**dict(rule), "_origin": "runtime_rule"} for rule in family_rules])
+        decision = summarize_threshold_decision(candidates)
+        winner_rule = decision["winner_rule"]
+        firing_rule_ids = [rule_id for rule_id in decision["firing_rule_ids"] if isinstance(rule_id, int)]
+        winner_rule_id = decision["winner_rule_id"] if isinstance(decision["winner_rule_id"], int) else None
+        losing_rule_ids = [rule_id for rule_id in firing_rule_ids if rule_id != winner_rule_id]
+        non_firing_rule_ids = [
+            rule["id"]
+            for rule in family_rules
+            if isinstance(rule["id"], int) and rule["id"] not in firing_rule_ids
+        ]
+
+        if non_firing_rule_ids:
+            resolve_alert_rows(
+                rows=fetch_open_alert_rows_for_rule_ids(
+                    monitored_object_id=monitored_object_id,
+                    rule_ids=non_firing_rule_ids,
+                ),
+                occurred_at=occurred_at,
+                received_at=received_at,
+                note="event repeat window elapsed",
+                payload={
+                    "source": "worker",
+                    "reason": "event_window_elapsed",
+                    "family_key": list(family_key),
+                },
+                resolution_source="auto_recovery",
+                resolution_reason="event_window_elapsed",
+            )
+
+        if losing_rule_ids:
+            resolve_alert_rows(
+                rows=fetch_open_alert_rows_for_rule_ids(
+                    monitored_object_id=monitored_object_id,
+                    rule_ids=losing_rule_ids,
+                ),
+                occurred_at=occurred_at,
+                received_at=received_at,
+                note="suppressed by event precedence",
+                payload={
+                    "source": "worker",
+                    "reason": "suppressed_by_precedence",
+                    "family_key": list(family_key),
+                    "winner_rule_id": winner_rule_id,
+                },
+                resolution_source="system_cleanup",
+                resolution_reason="suppressed_by_precedence",
+            )
+
+        if winner_rule is None or repeat_count is None or grouped_event is None or winner_rule_id is None:
+            continue
+
+        winner_level = winner_rule["_threshold_level"]
+        latest_message = event_message(winner_rule, repeat_count, winner_level)
+        metadata_json = build_event_alert_metadata(winner_rule, grouped_event, winner_level, family_key)
+        alert_code = f"rule.{winner_rule_id}"
+        existing = db_conn.execute(
+            """
+            SELECT id, status
+            FROM alert_instances
+            WHERE monitored_object_id = ?
+              AND source_rule_id = ?
+              AND status != 'resolved'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (monitored_object_id, winner_rule_id),
+        ).fetchone()
+
+        if existing is None:
+            create_alert_instance(
+                monitored_object_id=monitored_object_id,
+                alert_code=alert_code,
+                source_rule_id=winner_rule_id,
+                severity=winner_level,
+                occurred_at=occurred_at,
+                received_at=received_at,
+                latest_message=latest_message,
+                metadata_json=metadata_json,
+            )
+            continue
+
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET source_rule_id = ?,
+                severity = ?,
+                last_occurred_at = ?,
+                repeat_count = repeat_count + 1,
+                latest_message = ?,
+                metadata_json = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                winner_rule_id,
+                winner_level,
+                occurred_at,
+                latest_message,
+                metadata_json,
+                received_at,
+                existing["id"],
+            ),
+        )
+
+
 def upsert_latest_state(*, target_id: str, state_type: str, status: str, severity: str | None, state: dict, occurred_at: str, received_at: str) -> None:
     db_conn = get_db()
     existing = db_conn.execute(
@@ -640,6 +862,12 @@ def upsert_latest_state(*, target_id: str, state_type: str, status: str, severit
             occurred_at=occurred_at,
             received_at=received_at,
         )
+        sync_event_alerts(
+            monitored_object_id=monitored_object_id,
+            state_type=state_type,
+            occurred_at=occurred_at,
+            received_at=received_at,
+        )
         return
 
     db_conn.execute(
@@ -673,6 +901,12 @@ def upsert_latest_state(*, target_id: str, state_type: str, status: str, severit
         monitored_object_id=monitored_object_id,
         state_type=state_type,
         state=state,
+        occurred_at=occurred_at,
+        received_at=received_at,
+    )
+    sync_event_alerts(
+        monitored_object_id=monitored_object_id,
+        state_type=state_type,
         occurred_at=occurred_at,
         received_at=received_at,
     )

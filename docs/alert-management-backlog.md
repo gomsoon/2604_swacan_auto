@@ -13,6 +13,20 @@ Current recommended order after compound publish enablement:
 This note is intentionally short so the next implementation discussion can
 resume from the same order without re-deriving priorities.
 
+Current MVP decision for item 2:
+
+- `stale` should not open as a separate rule engine first.
+- MVP `stale` should be expressed as a threshold-style rule over derived metrics such as `heartbeat_age_seconds`.
+- `event` should be the first genuinely new rule type after threshold/compound threshold.
+- `no-data` should stay on the deferred backlog until lifecycle and baseline timing rules are clearer.
+
+Current implementation note for item 2:
+
+- `grouped_event_repeat` event rule is now enabled as the first post-threshold rule family.
+- event rules currently reuse `alert_rules.signal_type + signal_key` and store `metric_key = signal_key` as a compatibility shadow.
+- event MVP is limited to process events with scalar `gte` repeat-count thresholds.
+- `stale` and `no-data` are still deferred from separate rule-family implementation.
+
 버전: Draft 0.3  
 작성일: 2026-04-18
 

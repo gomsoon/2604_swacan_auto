@@ -740,6 +740,34 @@ MVP에서는 다음 둘을 모두 허용하는 것이 적절하다.
 
 다만 자유식 expression 전체를 허용하기보다, 구조화된 `condition group`으로 제한하는 편이 적절하다.
 
+### 5.6 Event / Stale / No-data MVP sequencing
+
+Threshold / compound threshold 이후의 다음 단계는 세 rule type을 같은 무게로 여는 것보다,
+현재 구현이 이미 가진 runtime signal을 최대한 재사용하는 방향이 적절하다.
+
+권장 MVP 순서는 다음과 같다.
+
+- `stale`
+  - 별도 신규 rule engine으로 열지 않는다.
+  - 기존 threshold evaluator를 재사용하는 `derived metric threshold` 형태로 먼저 연다.
+  - 초기 대상은 `agent.heartbeat_age_seconds` 같은 derived metric이 적절하다.
+- `event`
+  - threshold 다음의 첫 번째 신규 rule type으로 연다.
+  - 초기 signal source는 raw event보다 `grouped_events`가 적절하다.
+  - 초기 범위는 `process_started`, `process_stopped`, `process_restarted` 같은 process event가 적절하다.
+- `no-data`
+  - MVP 즉시 구현 범위에서는 제외하고 backlog로 유지한다.
+  - first-seen grace period, baseline 시각, rematch/reset policy가 더 정리된 뒤 여는 편이 안전하다.
+
+즉 MVP 구현 관점에서의 결론은 다음과 같다.
+
+- `stale = threshold-style reuse`
+- `event = first new rule family`
+- `no-data = deferred`
+
+이 판단을 따르면 preview/runtime precedence, publish policy, archive contract를 이미 만들어 둔
+threshold 계열과 더 자연스럽게 연결할 수 있다.
+
 권장 방향:
 - severity마다 독립된 condition group
 - condition group은

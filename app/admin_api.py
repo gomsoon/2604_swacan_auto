@@ -15,8 +15,12 @@ from .alert_archive import (
 )
 from .alert_history import record_alert_history
 from .alert_rule_evaluator import (
+    EVENT_SIGNAL_TYPE_GROUPED_REPEAT,
+    LATEST_STATE_SIGNAL_TYPE,
     alert_rule_candidate_identity as shared_alert_rule_candidate_identity,
     alert_rule_specificity_rank as shared_alert_rule_specificity_rank,
+    alert_rule_value_key,
+    event_family_key,
     evaluate_condition_group as shared_evaluate_condition_group,
     evaluate_threshold_candidates,
     evaluate_threshold_rule,
@@ -30,6 +34,7 @@ from .db import (
     get_db,
     slugify_rule_key_part,
     suggest_alert_rule_display_name,
+    suggest_event_rule_key,
     suggest_threshold_rule_key,
 )
 from .runtime_state import derive_latest_state
@@ -43,6 +48,8 @@ ALLOWED_DEBUG_DIRECTIONS = {"request", "response"}
 ALLOWED_STATE_TYPES = {"agent", "host", "process"}
 ALLOWED_STATE_STATUSES = {"up", "warning", "down"}
 ALLOWED_ALERT_SCOPE_TYPES = {"object_type", "monitored_object"}
+ALLOWED_ALERT_SIGNAL_TYPES = {LATEST_STATE_SIGNAL_TYPE, EVENT_SIGNAL_TYPE_GROUPED_REPEAT}
+ALLOWED_EVENT_RULE_SIGNAL_KEYS = {"process_started", "process_stopped", "process_restarted"}
 ALLOWED_ALERT_COMPARISONS = {"gte", "lte"}
 ALLOWED_ALERT_CONDITION_COMPARISONS = {"gt", "gte", "lt", "lte"}
 ALLOWED_ALERT_RULE_STATUSES = {"draft", "published", "deprecated"}
@@ -56,6 +63,8 @@ ALERT_RULE_DRAFT_ONLY_FIELDS = {
     "object_type",
     "monitored_object_id",
     "state_type",
+    "signal_type",
+    "signal_key",
     "metric_key",
     "comparison",
     "warning_threshold",
@@ -76,6 +85,8 @@ ALERT_RULE_SELECT_SQL = """
         rules.object_type,
         rules.monitored_object_id,
         rules.state_type,
+        rules.signal_type,
+        rules.signal_key,
         rules.metric_key,
         rules.comparison,
         rules.warning_threshold,
@@ -462,6 +473,8 @@ def serialize_alert_rule(row) -> dict[str, Any]:
         "target_display_name": row["target_display_name"],
         "target_runtime_binding_key": row["target_runtime_binding_key"],
         "state_type": row["state_type"],
+        "signal_type": row["signal_type"],
+        "signal_key": row["signal_key"],
         "metric_key": row["metric_key"],
         "comparison": row["comparison"],
         "warning_threshold": row["warning_threshold"],
@@ -525,16 +538,29 @@ def suggest_clone_display_name(display_name: str) -> str:
     return f"{normalized} (Copy)"
 
 
+def normalize_alert_rule_signal_type(rule: dict[str, Any]) -> str:
+    signal_type = rule.get("signal_type") or LATEST_STATE_SIGNAL_TYPE
+    return signal_type if signal_type in ALLOWED_ALERT_SIGNAL_TYPES else LATEST_STATE_SIGNAL_TYPE
+
+
+def alert_rule_signal_label(rule: dict[str, Any]) -> str:
+    value_key = alert_rule_value_key(rule)
+    return value_key or "-"
+
+
 def build_default_alert_rule_display_name(payload: dict[str, Any]) -> str:
     return suggest_alert_rule_display_name(
         payload.get("description"),
         payload["state_type"],
-        payload["metric_key"],
+        payload.get("metric_key") or payload.get("signal_key") or "rule",
     )
 
 
 def build_default_alert_rule_key(payload: dict[str, Any]) -> str:
     display_name = payload.get("display_name") or build_default_alert_rule_display_name(payload)
+    signal_type = normalize_alert_rule_signal_type(payload)
+    if signal_type == EVENT_SIGNAL_TYPE_GROUPED_REPEAT:
+        return suggest_event_rule_key(payload["state_type"], payload["signal_key"], display_name)
     return suggest_threshold_rule_key(payload["state_type"], payload["metric_key"], display_name)
 
 
@@ -759,6 +785,8 @@ def serialize_alert_rule_preview_input(
         "target_display_name": target_display_name,
         "target_runtime_binding_key": target_runtime_binding_key,
         "state_type": rule.get("state_type") or "process",
+        "signal_type": normalize_alert_rule_signal_type(rule),
+        "signal_key": rule.get("signal_key"),
         "metric_key": rule.get("metric_key"),
         "comparison": rule.get("comparison") or "gte",
         "warning_threshold": rule.get("warning_threshold"),
@@ -808,13 +836,20 @@ def load_alert_rule_preview_competing_rules(
     monitored_object_id: int,
     object_type: str,
 ) -> list[dict[str, Any]]:
+    signal_type = normalize_alert_rule_signal_type(rule)
     params: list[Any] = [
+        signal_type,
         rule["state_type"],
-        rule["metric_key"],
-        rule["comparison"],
         monitored_object_id,
         object_type,
     ]
+    family_clause = "AND rules.metric_key = ?"
+    family_value = rule["metric_key"]
+    if signal_type == EVENT_SIGNAL_TYPE_GROUPED_REPEAT:
+        family_clause = "AND rules.signal_key = ?"
+        family_value = rule["signal_key"]
+    params.insert(2, family_value)
+    params.insert(3, rule["comparison"])
     exclude_clause = ""
     if isinstance(rule.get("id"), int):
         exclude_clause = "AND rules.id != ?"
@@ -825,8 +860,9 @@ def load_alert_rule_preview_competing_rules(
         {ALERT_RULE_SELECT_SQL}
         WHERE rules.is_enabled = 1
           AND rules.status = 'published'
+          AND rules.signal_type = ?
           AND rules.state_type = ?
-          AND rules.metric_key = ?
+          {family_clause}
           AND rules.comparison = ?
           AND (
                 (rules.scope_type = 'monitored_object' AND rules.monitored_object_id = ?)
@@ -958,7 +994,11 @@ def build_alert_rule_target_preview(
         state = parse_json_or_text(preview_row["latest_state_json"])
         if not isinstance(state, dict):
             state = {}
-        current_metric_value = preview_metric_value(state, rule["metric_key"])
+        current_metric_value, grouped_event_row = preview_rule_current_value(
+            state,
+            rule=rule,
+            monitored_object_id=preview_row["monitored_object_id"],
+        )
         threshold_evaluation = preview_threshold_evaluation(current_metric_value, rule)
         threshold_level = threshold_evaluation["threshold_level"]
         competing_rules = load_alert_rule_preview_competing_rules(
@@ -1001,7 +1041,13 @@ def build_alert_rule_target_preview(
                 "latest_state_status": preview_row["latest_state_status"],
                 "latest_state_severity": preview_row["latest_state_severity"],
                 "latest_received_at": preview_row["latest_received_at"],
+                "signal_type": normalize_alert_rule_signal_type(rule),
+                "signal_key": rule.get("signal_key"),
                 "current_metric_value": current_metric_value,
+                "grouped_event_repeat_count": grouped_event_row["repeat_count"] if grouped_event_row else None,
+                "grouped_event_first_occurred_at": grouped_event_row["first_occurred_at"] if grouped_event_row else None,
+                "grouped_event_last_occurred_at": grouped_event_row["last_occurred_at"] if grouped_event_row else None,
+                "grouped_event_latest_message": grouped_event_row["latest_message"] if grouped_event_row else None,
                 "threshold_level": threshold_level,
                 "winning_condition_trace": threshold_evaluation["winning_condition_trace"],
                 **decision,
@@ -1065,6 +1111,47 @@ def serialize_monitored_object(row) -> dict[str, Any]:
 
 def preview_metric_value(state: dict[str, Any], metric_key: str) -> float | None:
     return metric_value_for_state(state, metric_key)
+
+
+def preview_grouped_event_row(monitored_object_id: int, signal_key: str) -> dict[str, Any] | None:
+    row = get_db().execute(
+        """
+        SELECT id, event_type, severity, repeat_count, first_occurred_at, last_occurred_at, latest_message
+        FROM grouped_events
+        WHERE monitored_object_id = ?
+          AND event_type = ?
+        ORDER BY last_occurred_at DESC, id DESC
+        LIMIT 1
+        """,
+        (monitored_object_id, signal_key),
+    ).fetchone()
+    if row is None:
+        return None
+
+    try:
+        last_dt = datetime.fromisoformat(row["last_occurred_at"])
+    except (TypeError, ValueError):
+        return None
+
+    current_dt = datetime.now().astimezone()
+    window_seconds = int(current_app.config.get("GROUPED_EVENT_WINDOW_SECONDS", 60))
+    if (current_dt - last_dt.astimezone()).total_seconds() > window_seconds:
+        return None
+    return dict(row)
+
+
+def preview_rule_current_value(
+    state: dict[str, Any],
+    *,
+    rule: dict[str, Any],
+    monitored_object_id: int,
+) -> tuple[float | None, dict[str, Any] | None]:
+    if normalize_alert_rule_signal_type(rule) == EVENT_SIGNAL_TYPE_GROUPED_REPEAT:
+        grouped_row = preview_grouped_event_row(monitored_object_id, rule["signal_key"])
+        if grouped_row is None:
+            return None, None
+        return float(grouped_row["repeat_count"]), grouped_row
+    return preview_metric_value(state, rule["metric_key"]), None
 
 
 def preview_threshold_clause_matches(metric_value: float, clause: dict[str, Any]) -> bool:
@@ -1462,6 +1549,23 @@ def validate_alert_rule_payload(
         if state_type not in ALLOWED_STATE_TYPES:
             return None, error_response("validation_error", "state_type is invalid", 400)
 
+    if not partial or "signal_type" in payload:
+        signal_type = payload.get("signal_type") or LATEST_STATE_SIGNAL_TYPE
+        if signal_type not in ALLOWED_ALERT_SIGNAL_TYPES:
+            return None, error_response("validation_error", "signal_type is invalid", 400)
+        payload["signal_type"] = signal_type
+    else:
+        payload["signal_type"] = normalize_alert_rule_signal_type(payload)
+
+    if not partial or "signal_key" in payload:
+        signal_key = payload.get("signal_key")
+        if signal_key in (None, ""):
+            payload["signal_key"] = None
+        elif not isinstance(signal_key, str) or not signal_key.strip():
+            return None, error_response("validation_error", "signal_key is invalid", 400)
+        else:
+            payload["signal_key"] = signal_key.strip()
+
     if not partial or "comparison" in payload:
         comparison = payload.get("comparison")
         if comparison not in ALLOWED_ALERT_COMPARISONS:
@@ -1475,11 +1579,25 @@ def validate_alert_rule_payload(
     else:
         payload["condition_mode"] = normalize_alert_rule_condition_mode(payload)
 
-    if not partial or "metric_key" in payload:
-        metric_key = payload.get("metric_key")
-        if not isinstance(metric_key, str) or not metric_key.strip():
-            return None, error_response("validation_error", "metric_key is required", 400)
-        payload["metric_key"] = metric_key.strip()
+    signal_type = payload["signal_type"]
+    if signal_type == EVENT_SIGNAL_TYPE_GROUPED_REPEAT:
+        signal_key = payload.get("signal_key")
+        if payload.get("state_type") != "process":
+            return None, error_response("validation_error", "event rules currently require state_type=process", 400)
+        if signal_key not in ALLOWED_EVENT_RULE_SIGNAL_KEYS:
+            return None, error_response("validation_error", "signal_key is invalid for event rules", 400)
+        if payload.get("comparison") != "gte":
+            return None, error_response("validation_error", "event rules currently require comparison=gte", 400)
+        if payload.get("condition_mode") != "scalar":
+            return None, error_response("validation_error", "event rules currently support only scalar condition_mode", 400)
+        payload["metric_key"] = signal_key
+    else:
+        payload["signal_key"] = None
+        if not partial or "metric_key" in payload:
+            metric_key = payload.get("metric_key")
+            if not isinstance(metric_key, str) or not metric_key.strip():
+                return None, error_response("validation_error", "metric_key is required", 400)
+            payload["metric_key"] = metric_key.strip()
 
     try:
         if "warning_threshold" in payload:
@@ -1520,7 +1638,12 @@ def validate_alert_rule_payload(
     condition_mode = payload["condition_mode"]
     warning_threshold = payload.get("warning_threshold")
     critical_threshold = payload.get("critical_threshold")
-    if condition_mode == "compound":
+    if signal_type == EVENT_SIGNAL_TYPE_GROUPED_REPEAT:
+        if warning_threshold is None and critical_threshold is None:
+            return None, error_response("validation_error", "at least one threshold is required", 400)
+        payload["warning_condition"] = None
+        payload["critical_condition"] = None
+    elif condition_mode == "compound":
         raw_rule = dict(payload)
         if raw_rule.get("warning_condition") is None:
             raw_rule["warning_condition"] = build_alert_rule_condition_group_from_columns(raw_rule, severity="warning")
@@ -2465,12 +2588,12 @@ def create_alert_rule():
     cursor = db_conn.execute(
         """
         INSERT INTO alert_rules (
-            rule_key, display_name, status, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
+            rule_key, display_name, status, scope_type, object_type, monitored_object_id, state_type, signal_type, signal_key, metric_key, comparison,
             warning_threshold, critical_threshold,
             cond_mode, warning_logical_op, warning_cl1_comp, warning_cl1_val, warning_cl2_comp, warning_cl2_val,
             critical_logical_op, critical_cl1_comp, critical_cl1_val, critical_cl2_comp, critical_cl2_val,
             is_enabled, description, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             payload["rule_key"],
@@ -2480,6 +2603,8 @@ def create_alert_rule():
             payload.get("object_type"),
             payload.get("monitored_object_id"),
             payload["state_type"],
+            payload["signal_type"],
+            payload.get("signal_key"),
             payload["metric_key"],
             payload["comparison"],
             payload.get("warning_threshold"),
@@ -2542,7 +2667,7 @@ def update_alert_rule(rule_id: int):
     db_conn.execute(
         """
         UPDATE alert_rules
-        SET rule_key = ?, display_name = ?, scope_type = ?, object_type = ?, monitored_object_id = ?, state_type = ?, metric_key = ?,
+        SET rule_key = ?, display_name = ?, scope_type = ?, object_type = ?, monitored_object_id = ?, state_type = ?, signal_type = ?, signal_key = ?, metric_key = ?,
             comparison = ?, warning_threshold = ?, critical_threshold = ?,
             cond_mode = ?, warning_logical_op = ?, warning_cl1_comp = ?, warning_cl1_val = ?, warning_cl2_comp = ?, warning_cl2_val = ?,
             critical_logical_op = ?, critical_cl1_comp = ?, critical_cl1_val = ?, critical_cl2_comp = ?, critical_cl2_val = ?,
@@ -2557,6 +2682,8 @@ def update_alert_rule(rule_id: int):
             payload.get("object_type"),
             payload.get("monitored_object_id"),
             payload["state_type"],
+            payload["signal_type"],
+            payload.get("signal_key"),
             payload["metric_key"],
             payload["comparison"],
             payload.get("warning_threshold"),
@@ -2631,12 +2758,12 @@ def clone_alert_rule(rule_id: int):
     cursor = db_conn.execute(
         """
         INSERT INTO alert_rules (
-            rule_key, display_name, status, scope_type, object_type, monitored_object_id, state_type, metric_key, comparison,
+            rule_key, display_name, status, scope_type, object_type, monitored_object_id, state_type, signal_type, signal_key, metric_key, comparison,
             warning_threshold, critical_threshold,
             cond_mode, warning_logical_op, warning_cl1_comp, warning_cl1_val, warning_cl2_comp, warning_cl2_val,
             critical_logical_op, critical_cl1_comp, critical_cl1_val, critical_cl2_comp, critical_cl2_val,
             is_enabled, description, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             cloned_rule_key,
@@ -2646,6 +2773,8 @@ def clone_alert_rule(rule_id: int):
             existing["object_type"],
             existing["monitored_object_id"],
             existing["state_type"],
+            existing["signal_type"],
+            existing["signal_key"],
             existing["metric_key"],
             existing["comparison"],
             existing["warning_threshold"],

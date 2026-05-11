@@ -11,6 +11,21 @@ Current recommended alert-focused sequence:
 This sequence should be treated as the default follow-up order unless a new
 operational blocker changes priorities.
 
+Current scope decision for item 2:
+
+- `stale` first reuses the threshold evaluator over derived runtime metrics.
+- `event` becomes the first new post-threshold rule family.
+- `no-data` remains deferred until baseline timing, first-seen grace period, and rematch/reset policy are hardened.
+
+Current implementation note for item 2:
+
+- `grouped_event_repeat` event rules are now available in draft/save/preview/publish/runtime.
+- event MVP is intentionally narrow:
+  - `state_type = process`
+  - `signal_key = process_started | process_stopped | process_restarted`
+  - scalar `gte` repeat-count thresholds only
+- the next priority after this MVP remains lifecycle/archive clarity and later explainability expansion.
+
 ## Agent Addendum
 
 - See [agent-current-state-backlog.md](C:/2604_swacan_auto/docs/agent-current-state-backlog.md).

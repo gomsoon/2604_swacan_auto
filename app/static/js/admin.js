@@ -174,8 +174,10 @@ const alertRuleKeySuggestion = document.getElementById("alert-rule-key-suggestio
 const alertRuleApplySuggestionButton = document.getElementById("alert-rule-apply-suggestion-button");
 const alertRuleScopeTypeSelect = document.getElementById("alert-rule-scope-type");
 const alertRuleStateTypeSelect = document.getElementById("alert-rule-state-type");
+const alertRuleSignalTypeSelect = document.getElementById("alert-rule-signal-type");
 const alertRuleObjectTypeInput = document.getElementById("alert-rule-object-type");
 const alertRuleMonitoredObjectIdInput = document.getElementById("alert-rule-monitored-object-id");
+const alertRuleValueKeyLabel = document.getElementById("alert-rule-value-key-label");
 const alertRuleMetricKeyInput = document.getElementById("alert-rule-metric-key");
 const alertRuleComparisonSelect = document.getElementById("alert-rule-comparison");
 const alertRuleWarningThresholdInput = document.getElementById("alert-rule-warning-threshold");
@@ -2967,11 +2969,49 @@ function toggleAlertRuleScopeFields() {
     alertRuleMonitoredObjectIdInput.disabled = !isEditable || isObjectType;
 }
 
+function getAlertRuleSignalTypeValue(rule = null) {
+    return rule?.signal_type || alertRuleSignalTypeSelect?.value || "latest_state_metric";
+}
+
+function isEventAlertRule(rule = null) {
+    return getAlertRuleSignalTypeValue(rule) === "grouped_event_repeat";
+}
+
+function getAlertRuleValueKeyLabel(rule = null) {
+    return isEventAlertRule(rule) ? "Signal Key" : "Metric Key";
+}
+
+function getAlertRuleValueKeyValue(rule = null) {
+    if (rule) {
+        return isEventAlertRule(rule) ? rule.signal_key || rule.metric_key || null : rule.metric_key || null;
+    }
+    return alertRuleMetricKeyInput?.value?.trim() || null;
+}
+
 function toggleAlertRuleCompoundPreviewFields() {
     if (!alertRulePreviewConditionModeSelect || !alertRuleCompoundPreviewFields) {
         return;
     }
-    alertRuleCompoundPreviewFields.hidden = alertRulePreviewConditionModeSelect.value !== "compound";
+    const eventRule = isEventAlertRule();
+    if (alertRuleValueKeyLabel) {
+        alertRuleValueKeyLabel.textContent = eventRule ? "Signal Key" : "Metric Key";
+    }
+    if (alertRuleMetricKeyInput) {
+        alertRuleMetricKeyInput.placeholder = eventRule ? "예: process_restarted" : "예: cpu_usage";
+    }
+    if (alertRuleComparisonSelect) {
+        if (eventRule) {
+            alertRuleComparisonSelect.value = "gte";
+            alertRuleComparisonSelect.disabled = true;
+        } else if (alertRuleForm?.dataset.isEditable !== "false") {
+            alertRuleComparisonSelect.disabled = false;
+        }
+    }
+    if (eventRule && alertRulePreviewConditionModeSelect.value === "compound") {
+        alertRulePreviewConditionModeSelect.value = "scalar";
+    }
+    alertRulePreviewConditionModeSelect.disabled = eventRule || alertRuleForm?.dataset.isEditable === "false";
+    alertRuleCompoundPreviewFields.hidden = eventRule || alertRulePreviewConditionModeSelect.value !== "compound";
 }
 
 function buildAlertRuleConditionGroupFromInputs(prefix) {
@@ -3061,19 +3101,20 @@ function slugifyAlertRuleKeyPart(value) {
 
 function suggestAlertRuleKeyFromForm() {
     const stateType = alertRuleStateTypeSelect.value?.trim();
-    const metricKey = alertRuleMetricKeyInput.value
+    const valueKey = alertRuleMetricKeyInput.value
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9_]+/g, "_")
         .replace(/_{2,}/g, "_")
         .replace(/^_+|_+$/g, "");
-    if (!stateType || !metricKey) {
+    if (!stateType || !valueKey) {
         return null;
     }
 
     const displayName = alertRuleDisplayNameInput.value.trim() || alertRuleDescriptionInput.value.trim() || "rule";
     const slug = slugifyAlertRuleKeyPart(displayName) || "rule";
-    return `threshold.${stateType}.${metricKey}.${slug}`;
+    const family = isEventAlertRule() ? "event" : "threshold";
+    return `${family}.${stateType}.${valueKey}.${slug}`;
 }
 
 function renderAlertRuleKeySuggestion() {
@@ -3087,7 +3128,8 @@ function renderAlertRuleKeySuggestion() {
     alertRuleApplySuggestionButton.disabled = !isEditable || !suggested || currentValue === suggested;
 
     if (!suggested) {
-        alertRuleKeySuggestion.textContent = "display_name과 metric_key를 입력하면 추천 rule_key를 생성합니다. 비워두면 저장 시 자동 생성됩니다.";
+        alertRuleKeySuggestion.textContent =
+            "display_name과 value key를 입력하면 추천 rule_key를 생성합니다. 비워두면 저장 시 자동 생성됩니다.";
         return;
     }
 
@@ -3115,6 +3157,7 @@ function renderAlertRuleEditorStatus(rule = null) {
             <p class="section-copy">새 draft rule을 생성하는 모드입니다. rule_key와 display_name은 비워둘 수 있고, 저장 시 기본값이 자동 제안됩니다.</p>
             <div class="toolbar-inline">
                 <span class="meta-pill">draft</span>
+                <span class="meta-pill">latest_state_metric</span>
                 <span class="meta-pill">scalar</span>
                 <span class="meta-pill">편집 가능</span>
             </div>
@@ -3129,13 +3172,17 @@ function renderAlertRuleEditorStatus(rule = null) {
         rule.status === "draft"
             ? isCompoundDraft
                 ? "현재 rule은 compound draft입니다. draft 저장과 preview, publish를 같은 흐름으로 진행할 수 있습니다."
-                : "현재 rule은 draft입니다. selector, threshold, 이름을 편집한 뒤 publish 할 수 있습니다."
+                : isEventAlertRule(rule)
+                  ? "현재 rule은 event draft입니다. selector, repeat threshold, 이름을 편집한 뒤 publish 할 수 있습니다."
+                  : "현재 rule은 draft입니다. selector, threshold, 이름을 편집한 뒤 publish 할 수 있습니다."
             : "현재 rule은 published라서 읽기 전용입니다. 조건을 바꾸려면 Clone으로 새 draft를 만든 뒤 수정하세요.";
     const toggleMessage =
         rule.status === "draft"
             ? isCompoundDraft
                 ? "compound draft에서는 condition group을 저장하고, 다시 열어도 같은 shape로 복원됩니다."
-                : "draft에서는 활성화 토글과 조건 편집을 함께 저장합니다."
+                : isEventAlertRule(rule)
+                  ? "event draft에서는 signal key와 repeat threshold를 저장하고, 다시 열어도 같은 shape로 복원됩니다."
+                  : "draft에서는 활성화 토글과 조건 편집을 함께 저장합니다."
             : "published rule에서는 활성화 상태만 저장할 수 있습니다.";
     const warningBlock =
         warnings.length > 0
@@ -3198,8 +3245,7 @@ function setAlertRuleActionButtonState(rule = null) {
     if (publishCurrentAlertRuleButton) {
         const publishReadiness = getAlertRulePublishReadiness(rule, { hasUnsavedChanges: alertRuleDraftDirty });
         publishCurrentAlertRuleButton.hidden = !rule || rule.status !== "draft";
-        publishCurrentAlertRuleButton.disabled =
-            !rule || rule.status !== "draft" || alertRuleDraftDirty || rule.condition_mode === "compound";
+        publishCurrentAlertRuleButton.disabled = !rule || rule.status !== "draft" || alertRuleDraftDirty;
         publishCurrentAlertRuleButton.title = !rule || rule.status !== "draft" ? "" : publishReadiness.message;
     }
     if (cloneCurrentAlertRuleButton) {
@@ -3216,6 +3262,7 @@ function setAlertRuleFormEditableState(rule = null) {
         alertRuleDisplayNameInput,
         alertRuleScopeTypeSelect,
         alertRuleStateTypeSelect,
+        alertRuleSignalTypeSelect,
         alertRuleObjectTypeInput,
         alertRuleMonitoredObjectIdInput,
         alertRuleMetricKeyInput,
@@ -3255,26 +3302,29 @@ function setAlertRuleFormEditableState(rule = null) {
 
 function buildAlertRuleSnapshotFromRule(rule) {
     const conditionMode = rule?.condition_mode || "scalar";
+    const signalType = rule?.signal_type || "latest_state_metric";
     return {
         rule_key: rule?.rule_key || null,
         display_name: rule?.display_name || null,
         scope_type: rule?.scope_type || "object_type",
         state_type: rule?.state_type || "process",
+        signal_type: signalType,
+        signal_key: signalType === "grouped_event_repeat" ? rule?.signal_key || rule?.metric_key || null : null,
         object_type: rule?.object_type || null,
         monitored_object_id: rule?.monitored_object_id ?? null,
-        metric_key: rule?.metric_key || null,
+        metric_key: signalType === "grouped_event_repeat" ? null : rule?.metric_key || null,
         condition_mode: conditionMode,
         comparison: rule?.comparison || "gte",
         warning_threshold: rule?.warning_threshold ?? null,
         critical_threshold: rule?.critical_threshold ?? null,
         warning_condition:
-            conditionMode === "compound"
+            conditionMode === "compound" && signalType !== "grouped_event_repeat"
                 ? normalizeAlertRuleConditionGroup(rule?.warning_condition, {
                       condition_mode: "compound",
                   })
                 : null,
         critical_condition:
-            conditionMode === "compound"
+            conditionMode === "compound" && signalType !== "grouped_event_repeat"
                 ? normalizeAlertRuleConditionGroup(rule?.critical_condition, {
                       condition_mode: "compound",
                   })
@@ -3286,20 +3336,29 @@ function buildAlertRuleSnapshotFromRule(rule) {
 
 function buildAlertRuleSnapshotFromForm() {
     const conditionMode = alertRulePreviewConditionModeSelect?.value || "scalar";
+    const signalType = getAlertRuleSignalTypeValue();
     return {
         rule_key: alertRuleRuleKeyInput.value.trim() || null,
         display_name: alertRuleDisplayNameInput.value.trim() || null,
         scope_type: alertRuleScopeTypeSelect.value,
         state_type: alertRuleStateTypeSelect.value,
+        signal_type: signalType,
+        signal_key: signalType === "grouped_event_repeat" ? alertRuleMetricKeyInput.value.trim() || null : null,
         object_type: alertRuleObjectTypeInput.value.trim() || null,
         monitored_object_id: toOptionalNumberValue(alertRuleMonitoredObjectIdInput.value),
-        metric_key: alertRuleMetricKeyInput.value.trim() || null,
-        condition_mode: conditionMode,
+        metric_key: signalType === "grouped_event_repeat" ? null : alertRuleMetricKeyInput.value.trim() || null,
+        condition_mode: signalType === "grouped_event_repeat" ? "scalar" : conditionMode,
         comparison: alertRuleComparisonSelect.value,
         warning_threshold: toOptionalNumberValue(alertRuleWarningThresholdInput.value),
         critical_threshold: toOptionalNumberValue(alertRuleCriticalThresholdInput.value),
-        warning_condition: conditionMode === "compound" ? buildAlertRuleConditionGroupSnapshot("warning") : null,
-        critical_condition: conditionMode === "compound" ? buildAlertRuleConditionGroupSnapshot("critical") : null,
+        warning_condition:
+            signalType !== "grouped_event_repeat" && conditionMode === "compound"
+                ? buildAlertRuleConditionGroupSnapshot("warning")
+                : null,
+        critical_condition:
+            signalType !== "grouped_event_repeat" && conditionMode === "compound"
+                ? buildAlertRuleConditionGroupSnapshot("critical")
+                : null,
         description: alertRuleDescriptionInput.value.trim() || null,
         is_enabled: alertRuleEnabledInput.checked,
     };
@@ -3340,6 +3399,9 @@ function resetAlertRuleForm() {
     alertRuleDisplayNameInput.value = "";
     alertRuleScopeTypeSelect.value = "object_type";
     alertRuleStateTypeSelect.value = "process";
+    if (alertRuleSignalTypeSelect) {
+        alertRuleSignalTypeSelect.value = "latest_state_metric";
+    }
     alertRuleComparisonSelect.value = "gte";
     alertRuleEnabledInput.checked = true;
     alertRuleFormTitle.textContent = "Alert Rule 생성";
@@ -3350,6 +3412,7 @@ function resetAlertRuleForm() {
     selectedAlertRuleSnapshot = null;
     alertRuleDraftDirty = false;
     resetAlertRuleCompoundPreviewInputs();
+    toggleAlertRuleCompoundPreviewFields();
     setAlertRuleFormEditableState(null);
     setAlertRuleActionButtonState(null);
     renderMonitoredObjectOptions();
@@ -3364,9 +3427,12 @@ function fillAlertRuleForm(rule) {
     alertRuleDisplayNameInput.value = rule.display_name || "";
     alertRuleScopeTypeSelect.value = rule.scope_type;
     alertRuleStateTypeSelect.value = rule.state_type;
+    if (alertRuleSignalTypeSelect) {
+        alertRuleSignalTypeSelect.value = getAlertRuleSignalTypeValue(rule);
+    }
     alertRuleObjectTypeInput.value = rule.object_type || "";
     renderMonitoredObjectOptions(rule.monitored_object_id ?? "");
-    alertRuleMetricKeyInput.value = rule.metric_key || "";
+    alertRuleMetricKeyInput.value = getAlertRuleValueKeyValue(rule) || "";
     alertRuleComparisonSelect.value = rule.comparison;
     alertRuleWarningThresholdInput.value = rule.warning_threshold ?? "";
     alertRuleCriticalThresholdInput.value = rule.critical_threshold ?? "";
@@ -3403,20 +3469,21 @@ function renderAlertRules(items) {
         .map(
             (rule) => {
                 const publishReadiness = getAlertRulePublishReadiness(rule);
+                const valueAxis = formatAlertRuleRuleAxis(rule);
                 const conditionSummary =
                     rule.condition_mode === "compound"
                         ? `
                             <p class="admin-meta">warning condition: ${escapeHtml(formatAlertRuleConditionGroup(rule.warning_condition))}</p>
                             <p class="admin-meta">critical condition: ${escapeHtml(formatAlertRuleConditionGroup(rule.critical_condition))}</p>
                         `
-                        : `<p class="admin-meta">warning=${escapeHtml(rule.warning_threshold ?? "-")} | critical=${escapeHtml(rule.critical_threshold ?? "-")} | comparison=${escapeHtml(rule.comparison)}</p>`;
+                        : `<p class="admin-meta">${formatAlertRuleScalarSummary(rule)}</p>`;
                 return `
                 <article class="admin-item ${rule.is_enabled ? "" : "is-disabled"}">
                     <div class="section-header">
                         <div>
-                            <h3>${escapeHtml(rule.display_name || rule.metric_key)}</h3>
+                            <h3>${escapeHtml(rule.display_name || getAlertRuleValueKeyValue(rule) || "-")}</h3>
                             <p class="admin-meta">${escapeHtml(rule.rule_key || "-")}</p>
-                            <p class="admin-meta">${escapeHtml(rule.scope_type)} | ${escapeHtml(rule.state_type)} | ${escapeHtml(rule.condition_mode || "scalar")}</p>
+                            <p class="admin-meta">${escapeHtml(rule.scope_type)} | ${escapeHtml(rule.state_type)} | ${escapeHtml(getAlertRuleSignalTypeValue(rule))} | ${escapeHtml(rule.condition_mode || "scalar")}</p>
                         </div>
                         <div class="toolbar-inline">
                             <span class="meta-pill">${escapeHtml(rule.status || "-")}</span>
@@ -3440,6 +3507,7 @@ function renderAlertRules(items) {
                         </div>
                     </div>
                     ${conditionSummary}
+                    <p class="admin-meta">${escapeHtml(valueAxis)}</p>
                     <p class="admin-meta">target=${escapeHtml(rule.target_display_name || rule.object_type || "-")} | binding=${escapeHtml(rule.target_runtime_binding_key || "-")} | monitored_object_id=${escapeHtml(rule.monitored_object_id ?? "-")}</p>
                     <p class="admin-meta">${escapeHtml(rule.description || "설명 없음")}</p>
                 </article>
@@ -3463,7 +3531,7 @@ function getAlertRuleThresholdLevelLabel(level) {
     if (level === "normal") {
         return "normal";
     }
-    return "metric 없음";
+    return "value 없음";
 }
 
 function getAlertRuleThresholdTone(level) {
@@ -3477,6 +3545,22 @@ function getAlertRuleThresholdTone(level) {
         return "normal";
     }
     return "unknown";
+}
+
+function isLatestStateMetricAlertRule(rule) {
+    return getAlertRuleSignalTypeValue(rule) === "latest_state_metric";
+}
+
+function formatAlertRuleRuleAxis(rule) {
+    const valueKey = getAlertRuleValueKeyValue(rule) || "-";
+    return isEventAlertRule(rule) ? `signal=${valueKey}` : `metric=${valueKey}`;
+}
+
+function formatAlertRuleScalarSummary(rule) {
+    if (isEventAlertRule(rule)) {
+        return `warning repeat=${escapeHtml(rule.warning_threshold ?? "-")} | critical repeat=${escapeHtml(rule.critical_threshold ?? "-")} | comparison=${escapeHtml(rule.comparison)}`;
+    }
+    return `warning=${escapeHtml(rule.warning_threshold ?? "-")} | critical=${escapeHtml(rule.critical_threshold ?? "-")} | comparison=${escapeHtml(rule.comparison)}`;
 }
 
 function formatAlertRuleWinningConditionTrace(trace) {
@@ -3505,11 +3589,13 @@ function buildAlertRulePreviewSummaryNarrative(summary, rule) {
     const warningMatchCount = Number(summary?.warning_match_count || 0);
     const criticalMatchCount = Number(summary?.critical_match_count || 0);
     const metricAvailableCount = Number(summary?.metric_available_count || 0);
+    const valueKey = getAlertRuleValueKeyValue(rule) || "-";
+    const valueNoun = isEventAlertRule(rule) ? `${valueKey} grouped event repeat` : `${valueKey} metric`;
     if (matchedObjectCount === 0) {
         return "현재 selector 기준으로 매칭되는 monitored object가 없습니다.";
     }
     if (metricAvailableCount === 0) {
-        return `매칭 객체 ${matchedObjectCount}개는 확인됐지만, 현재 ${rule.metric_key} metric 값을 읽을 수 있는 객체는 없습니다.`;
+        return `매칭 객체 ${matchedObjectCount}개는 확인됐지만, 현재 ${valueNoun} 값을 읽을 수 있는 객체는 없습니다.`;
     }
     if (criticalMatchCount > 0) {
         return `현재 기준으로 critical ${criticalMatchCount}건, warning ${warningMatchCount - criticalMatchCount}건이 예상됩니다.`;
@@ -3517,7 +3603,7 @@ function buildAlertRulePreviewSummaryNarrative(summary, rule) {
     if (warningMatchCount > 0) {
         return `현재 기준으로 warning ${warningMatchCount}건이 예상되고, critical 매칭은 없습니다.`;
     }
-    return `metric 값을 읽을 수 있는 객체 ${metricAvailableCount}개 모두 현재 threshold 안에 있습니다.`;
+    return `${valueNoun} 값을 읽을 수 있는 객체 ${metricAvailableCount}개 모두 현재 조건 안에 있습니다.`;
 }
 
 function buildAlertRuleDecisionSummaryNarrative(decisionSummary) {
@@ -3622,7 +3708,7 @@ function renderAlertRulePreviewSummaryBlock(summary, decisionSummary, rule, publ
                     ["active node", summary?.active_node_count ?? 0],
                     ["열린 alert", summary?.open_alert_count ?? 0],
                     ["이 rule alert", summary?.source_rule_open_alert_count ?? 0],
-                    ["metric 확인 가능", summary?.metric_available_count ?? 0],
+                    ["value 확인 가능", summary?.metric_available_count ?? 0],
                     ["warning 매칭", summary?.warning_match_count ?? 0],
                     ["critical 매칭", summary?.critical_match_count ?? 0],
                     ["candidate rules", decisionSummary?.candidate_rule_count ?? 0],
@@ -3648,12 +3734,28 @@ function renderAlertRulePreviewItem(item, rule) {
     const tone = getAlertRuleThresholdTone(item.threshold_level);
     const metricValueLabel =
         item.current_metric_value === null || item.current_metric_value === undefined ? "-" : item.current_metric_value;
+    const valueKey = getAlertRuleValueKeyValue(rule) || "-";
+    const eventRule = isEventAlertRule(rule);
     const resultMessage =
         item.threshold_level === "unknown"
-            ? `${rule.metric_key} 값을 읽지 못해 threshold 판단을 아직 할 수 없습니다.`
+            ? eventRule
+                ? `${valueKey} grouped event repeat 값을 아직 읽지 못해 event 판단을 할 수 없습니다.`
+                : `${valueKey} 값을 읽지 못해 threshold 판단을 아직 할 수 없습니다.`
             : item.threshold_level === "normal"
-              ? `${rule.metric_key}=${metricValueLabel} 이 현재 threshold 안에 있습니다.`
-              : `${rule.metric_key}=${metricValueLabel} 이 ${item.threshold_level} 조건에 매칭됩니다.`;
+              ? eventRule
+                  ? `${valueKey} repeat_count=${metricValueLabel} 이 현재 repeat threshold 안에 있습니다.`
+                  : `${valueKey}=${metricValueLabel} 이 현재 threshold 안에 있습니다.`
+              : eventRule
+                ? `${valueKey} repeat_count=${metricValueLabel} 이 ${item.threshold_level} 조건에 매칭됩니다.`
+                : `${valueKey}=${metricValueLabel} 이 ${item.threshold_level} 조건에 매칭됩니다.`;
+    const runtimeDetail = eventRule
+        ? `
+                    <p class="admin-meta">현재 repeat ${escapeHtml(valueKey)}=${escapeHtml(metricValueLabel)}</p>
+                    <p class="admin-meta">first event ${escapeHtml(formatTimestamp(item.grouped_event_first_occurred_at))}</p>
+                    <p class="admin-meta">last event ${escapeHtml(formatTimestamp(item.grouped_event_last_occurred_at))}</p>
+                    <p class="admin-meta">latest event message=${escapeHtml(item.grouped_event_latest_message || "-")}</p>
+                `
+        : `<p class="admin-meta">현재 metric ${escapeHtml(valueKey)}=${escapeHtml(metricValueLabel)}</p>`;
 
     return `
         <article class="admin-item compact-admin-item alert-rule-preview-item">
@@ -3688,7 +3790,7 @@ function renderAlertRulePreviewItem(item, rule) {
                     <h5>실시간 상태</h5>
                     <p class="admin-meta">latest state ${escapeHtml(item.latest_state_status || "-")} | latest severity ${escapeHtml(item.latest_state_severity || "-")}</p>
                     <p class="admin-meta">수신 ${escapeHtml(formatTimestamp(item.latest_received_at))}</p>
-                    <p class="admin-meta">현재 metric ${escapeHtml(rule.metric_key)}=${escapeHtml(metricValueLabel)}</p>
+                    ${runtimeDetail}
                 </section>
                 <section class="alert-rule-preview-item-block">
                     <h5>운영 영향</h5>
@@ -3732,7 +3834,10 @@ function buildAlertRulePublishBannerMessage(validation = null) {
 }
 
 function buildAlertRulePreviewRequestBody() {
-    const conditionMode = alertRulePreviewConditionModeSelect?.value || "scalar";
+    const signalType = getAlertRuleSignalTypeValue();
+    const eventRule = signalType === "grouped_event_repeat";
+    const conditionMode = eventRule ? "scalar" : alertRulePreviewConditionModeSelect?.value || "scalar";
+    const valueKey = alertRuleMetricKeyInput.value.trim();
     const payload = {
         rule_id: alertRuleIdInput.value ? Number(alertRuleIdInput.value) : null,
         status: alertRuleForm?.dataset.ruleStatus || "draft",
@@ -3740,9 +3845,11 @@ function buildAlertRulePreviewRequestBody() {
         display_name: alertRuleDisplayNameInput.value.trim() || null,
         scope_type: alertRuleScopeTypeSelect.value,
         state_type: alertRuleStateTypeSelect.value,
+        signal_type: signalType,
+        signal_key: eventRule ? valueKey || null : null,
         object_type: alertRuleObjectTypeInput.value.trim() || null,
         monitored_object_id: toOptionalNumberValue(alertRuleMonitoredObjectIdInput.value),
-        metric_key: alertRuleMetricKeyInput.value.trim(),
+        metric_key: eventRule ? null : valueKey,
         comparison: alertRuleComparisonSelect.value,
         warning_threshold: toOptionalNumberValue(alertRuleWarningThresholdInput.value),
         critical_threshold: toOptionalNumberValue(alertRuleCriticalThresholdInput.value),
@@ -3750,7 +3857,7 @@ function buildAlertRulePreviewRequestBody() {
         is_enabled: alertRuleEnabledInput.checked,
     };
     payload.condition_mode = conditionMode;
-    if (conditionMode === "compound") {
+    if (!eventRule && conditionMode === "compound") {
         payload.warning_condition = buildAlertRuleConditionGroupFromInputs("warning");
         payload.critical_condition = buildAlertRuleConditionGroupFromInputs("critical");
     }
@@ -3761,6 +3868,11 @@ function buildAlertRuleEditableRequestBody() {
     const payload = buildAlertRulePreviewRequestBody();
     delete payload.rule_id;
     delete payload.status;
+    if (payload.signal_type === "grouped_event_repeat") {
+        payload.warning_condition = null;
+        payload.critical_condition = null;
+        return payload;
+    }
     if (payload.condition_mode === "compound") {
         payload.warning_threshold = null;
         payload.critical_threshold = null;
@@ -3940,13 +4052,14 @@ function renderAlertRulePreviewPanel() {
     });
     const header = `
         <div class="section-header">
-            <h3>${escapeHtml(rule.display_name || rule.metric_key)}</h3>
+            <h3>${escapeHtml(rule.display_name || getAlertRuleValueKeyValue(rule) || "-")}</h3>
             <div class="toolbar-inline">
                 <span class="meta-pill">${escapeHtml(previewSourceLabel)}</span>
                 <span class="meta-pill">${escapeHtml(rule.rule_key || "-")}</span>
                 <span class="meta-pill">${escapeHtml(rule.status || "-")}</span>
                 <span class="meta-pill">${escapeHtml(rule.scope_type)}</span>
                 <span class="meta-pill">${escapeHtml(rule.state_type)}</span>
+                <span class="meta-pill">${escapeHtml(getAlertRuleSignalTypeValue(rule))}</span>
                 <span class="meta-pill">${escapeHtml(rule.condition_mode || "scalar")}</span>
                 <span class="meta-pill">${rule.is_enabled ? "활성" : "비활성"}</span>
                 ${
@@ -3956,18 +4069,20 @@ function renderAlertRulePreviewPanel() {
                 }
             </div>
         </div>
-        <p class="admin-meta">warning=${escapeHtml(rule.warning_threshold ?? "-")} | critical=${escapeHtml(rule.critical_threshold ?? "-")} | comparison=${escapeHtml(rule.comparison)}</p>
+        <p class="admin-meta">${formatAlertRuleRuleAxis(rule)} | ${formatAlertRuleScalarSummary(rule)}</p>
     `;
     const conditionBlock = `
         <section class="alert-rule-preview-conditions">
             <div class="section-header">
-                <h4>Threshold Shape</h4>
+                <h4>Condition Shape</h4>
                 <span class="meta-pill">${escapeHtml(rule.condition_mode || "scalar")}</span>
             </div>
             <p class="admin-meta">warning condition: ${escapeHtml(formatAlertRuleConditionGroup(rule.warning_condition))}</p>
             <p class="admin-meta">critical condition: ${escapeHtml(formatAlertRuleConditionGroup(rule.critical_condition))}</p>
             ${
-                rule.condition_mode === "compound"
+                isEventAlertRule(rule)
+                    ? '<p class="section-copy">grouped_event_repeat rule은 grouped event repeat count를 기준으로 평가합니다. 현재 MVP에서는 scalar repeat threshold만 지원합니다.</p>'
+                    : rule.condition_mode === "compound"
                     ? '<p class="section-copy">compound threshold는 현재 draft 저장, preview, publish를 지원합니다. publish 후에는 runtime precedence 규칙으로 scalar rule과 함께 평가됩니다.</p>'
                     : ""
             }
@@ -5021,6 +5136,10 @@ alertRuleDisplayNameInput?.addEventListener("input", handleAlertRuleFormInputCha
 alertRuleRuleKeyInput?.addEventListener("input", handleAlertRuleFormInputChange);
 alertRuleMetricKeyInput?.addEventListener("input", handleAlertRuleFormInputChange);
 alertRuleStateTypeSelect?.addEventListener("change", handleAlertRuleFormInputChange);
+alertRuleSignalTypeSelect?.addEventListener("change", () => {
+    toggleAlertRuleCompoundPreviewFields();
+    handleAlertRuleFormInputChange();
+});
 alertRuleDescriptionInput?.addEventListener("input", handleAlertRuleFormInputChange);
 alertRuleWarningThresholdInput?.addEventListener("input", handleAlertRuleFormInputChange);
 alertRuleCriticalThresholdInput?.addEventListener("input", handleAlertRuleFormInputChange);
