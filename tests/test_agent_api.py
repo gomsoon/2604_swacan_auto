@@ -1069,6 +1069,151 @@ def test_specific_threshold_rule_resolves_existing_general_alert_by_precedence(s
     assert json.loads(history_row["payload_json"])["reason"] == "suppressed_by_precedence"
 
 
+def test_compound_threshold_rule_wins_at_runtime_and_resolves_on_recovery(seeded_app, seeded_client) -> None:
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO alert_rules (
+                id, rule_key, display_name, status, scope_type, object_type, monitored_object_id,
+                state_type, metric_key, comparison, warning_threshold, critical_threshold,
+                cond_mode, warning_logical_op, warning_cl1_comp, warning_cl1_val, warning_cl2_comp, warning_cl2_val,
+                critical_logical_op, critical_cl1_comp, critical_cl1_val, critical_cl2_comp, critical_cl2_val,
+                is_enabled, description, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1902,
+                "threshold.process.cpu_usage.app-process-cpu-band",
+                "App Process CPU Band",
+                "published",
+                "monitored_object",
+                None,
+                1302,
+                "process",
+                "cpu_usage",
+                "gte",
+                None,
+                None,
+                "compound",
+                "or",
+                "lte",
+                20.0,
+                "gte",
+                80.0,
+                "or",
+                "lte",
+                10.0,
+                "gte",
+                90.0,
+                1,
+                "Specific compound override for App Process",
+                "2026-04-10T11:13:00.000+09:00",
+                "2026-04-10T11:13:00.000+09:00",
+            ),
+        )
+        db_conn.commit()
+
+    warning_batch = {
+        "agent_id": "agent_local",
+        "boot_id": "boot_threshold_compound_runtime",
+        "seq_start": 85,
+        "seq_end": 85,
+        "sent_at": "2026-04-10T11:13:00.150+09:00",
+        "items": [
+            {
+                "seq": 85,
+                "payload_type": "process_snapshot",
+                "occurred_at": "2026-04-10T11:13:00.100+09:00",
+                "target_id": "app_main",
+                "payload": {
+                    "pid": 1234,
+                    "state": "running",
+                    "cpu_usage": 97.0,
+                    "memory_rss": 4096,
+                },
+            }
+        ],
+    }
+    recover_batch = {
+        **warning_batch,
+        "seq_start": 86,
+        "seq_end": 86,
+        "items": [
+            {
+                **warning_batch["items"][0],
+                "seq": 86,
+                "occurred_at": "2026-04-10T11:13:05.100+09:00",
+                "payload": {
+                    "pid": 1234,
+                    "state": "running",
+                    "cpu_usage": 50.0,
+                    "memory_rss": 4096,
+                },
+            }
+        ],
+    }
+
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=warning_batch).status_code == 202
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=recover_batch).status_code == 202
+
+    with seeded_app.app_context():
+        first_result = process_pending_ingest(limit=1)
+        db_conn = get_db()
+        compound_alert = db_conn.execute(
+            """
+            SELECT alert_code, source_rule_id, severity, status, latest_message, metadata_json
+            FROM alert_instances
+            WHERE monitored_object_id = 1302
+              AND source_rule_id = 1902
+              AND status = 'open'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        general_open_count = db_conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM alert_instances
+            WHERE monitored_object_id = 1302
+              AND source_rule_id = 1501
+              AND status = 'open'
+            """
+        ).fetchone()["count"]
+        compound_metadata = json.loads(compound_alert["metadata_json"])
+
+    with seeded_app.app_context():
+        second_result = process_pending_ingest(limit=1)
+        db_conn = get_db()
+        resolved_compound = db_conn.execute(
+            """
+            SELECT status, resolved_at
+            FROM alert_instances
+            WHERE monitored_object_id = 1302
+              AND source_rule_id = 1902
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert first_result["processed_items"] == 1
+    assert compound_alert["alert_code"] == "rule.1902"
+    assert compound_alert["severity"] == "critical"
+    assert compound_alert["status"] == "open"
+    assert "matched critical condition" in compound_alert["latest_message"]
+    assert general_open_count == 0
+    assert compound_metadata["cond_mode"] == "compound"
+    assert compound_metadata["winning_condition_trace"] == {
+        "severity": "critical",
+        "condition_mode": "compound",
+        "logical_operator": "or",
+        "matched_clause_indexes": [1],
+    }
+    assert second_result["processed_items"] == 1
+    assert resolved_compound["status"] == "resolved"
+    assert resolved_compound["resolved_at"] is not None
+
+
 def test_grouped_events_merge_at_exact_window_boundary(seeded_app, seeded_client) -> None:
     seeded_app.config["GROUPED_EVENT_WINDOW_SECONDS"] = 60
     first_batch = {

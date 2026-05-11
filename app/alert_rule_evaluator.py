@@ -59,10 +59,35 @@ def _build_scalar_condition_group(rule: dict[str, Any], field_prefix: str) -> di
     }
 
 
+def _build_compound_condition_group_from_columns(rule: dict[str, Any], prefix: str) -> dict[str, Any] | None:
+    clause1_comp = rule.get(f"{prefix}_cl1_comp")
+    clause1_val = rule.get(f"{prefix}_cl1_val")
+    clause2_comp = rule.get(f"{prefix}_cl2_comp")
+    clause2_val = rule.get(f"{prefix}_cl2_val")
+    clauses: list[dict[str, Any]] = []
+
+    if clause1_comp is not None and clause1_val is not None:
+        clauses.append({"comparison": clause1_comp, "value": float(clause1_val)})
+    if clause2_comp is not None and clause2_val is not None:
+        clauses.append({"comparison": clause2_comp, "value": float(clause2_val)})
+    if not clauses:
+        return None
+
+    logical_operator = rule.get(f"{prefix}_logical_op") if len(clauses) > 1 else None
+    return {
+        "logical_operator": logical_operator,
+        "clauses": clauses,
+    }
+
+
 def normalize_rule_conditions(rule: dict[str, Any]) -> tuple[str, dict[str, Any] | None, dict[str, Any] | None]:
     condition_mode = rule.get("condition_mode") or rule.get("cond_mode") or "scalar"
     if condition_mode == "compound":
-        return condition_mode, rule.get("warning_condition"), rule.get("critical_condition")
+        return (
+            condition_mode,
+            rule.get("warning_condition") or _build_compound_condition_group_from_columns(rule, "warning"),
+            rule.get("critical_condition") or _build_compound_condition_group_from_columns(rule, "critical"),
+        )
     return (
         "scalar",
         rule.get("warning_condition") or _build_scalar_condition_group(rule, "warning_threshold"),

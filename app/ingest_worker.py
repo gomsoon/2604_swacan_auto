@@ -15,6 +15,7 @@ from .alert_rule_evaluator import (
     evaluate_threshold_candidates,
     evaluate_threshold_rule,
     metric_value_for_state,
+    normalize_rule_conditions,
     summarize_threshold_decision,
     threshold_family_key,
 )
@@ -350,6 +351,24 @@ def threshold_level(metric_value: float | None, rule) -> str | None:
 
 
 def threshold_message(rule, metric_value: float, level: str) -> str:
+    condition_mode = rule.get("condition_mode") or rule.get("cond_mode") or "scalar"
+    if condition_mode == "compound":
+        trace = rule.get("_winning_condition_trace") or {}
+        logical_operator = trace.get("logical_operator")
+        matched_clause_indexes = trace.get("matched_clause_indexes") or []
+        if logical_operator == "and":
+            clause_label = ", ".join(str(index + 1) for index in matched_clause_indexes) or "1"
+            return (
+                f"{rule['metric_key']}={metric_value:.3f} matched {level} condition "
+                f"(and, clauses {clause_label})"
+            )
+        clause_index = matched_clause_indexes[0] + 1 if matched_clause_indexes else 1
+        operator_label = logical_operator or "single"
+        return (
+            f"{rule['metric_key']}={metric_value:.3f} matched {level} condition "
+            f"({operator_label}, clause {clause_index})"
+        )
+
     threshold = rule["critical_threshold"] if level == "critical" else rule["warning_threshold"]
     operator = ">=" if rule["comparison"] == "gte" else "<="
     return f"{rule['metric_key']}={metric_value:.3f} {operator} {threshold:.3f}"
@@ -373,6 +392,7 @@ def fetch_open_alert_rows_for_rule_ids(*, monitored_object_id: int, rule_ids: li
 
 
 def build_threshold_alert_metadata(rule, metric_value: float, level: str, family_key: tuple[str, str | None, str | None, str | None]) -> str:
+    cond_mode, warning_condition, critical_condition = normalize_rule_conditions(rule)
     return json.dumps(
         {
             "rule_id": rule["id"],
@@ -383,6 +403,10 @@ def build_threshold_alert_metadata(rule, metric_value: float, level: str, family
             "critical_threshold": rule["critical_threshold"],
             "scope_type": rule["scope_type"],
             "threshold_level": level,
+            "cond_mode": cond_mode,
+            "warning_condition": warning_condition,
+            "critical_condition": critical_condition,
+            "winning_condition_trace": rule.get("_winning_condition_trace"),
             "family_key": list(family_key),
         },
         ensure_ascii=False,
@@ -412,11 +436,13 @@ def sync_threshold_alerts(
         """
         SELECT id, rule_key, display_name, status, scope_type, object_type, monitored_object_id,
                state_type, metric_key, comparison, warning_threshold, critical_threshold,
-               cond_mode, is_enabled, description, created_at, updated_at
+               cond_mode,
+               warning_logical_op, warning_cl1_comp, warning_cl1_val, warning_cl2_comp, warning_cl2_val,
+               critical_logical_op, critical_cl1_comp, critical_cl1_val, critical_cl2_comp, critical_cl2_val,
+               is_enabled, description, created_at, updated_at
         FROM alert_rules
         WHERE is_enabled = 1
           AND status = 'published'
-          AND cond_mode = 'scalar'
           AND state_type = ?
           AND (
                 (scope_type = 'monitored_object' AND monitored_object_id = ?)
