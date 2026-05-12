@@ -1235,6 +1235,24 @@ def test_compound_threshold_rule_wins_at_runtime_and_resolves_on_recovery(seeded
         "logical_operator": "or",
         "matched_clause_indexes": [1],
     }
+    assert compound_metadata["explanation"] == {
+        "rule_key": "threshold.process.cpu_usage.app-process-cpu-band",
+        "display_name": "App Process CPU Band",
+        "signal_type": "latest_state_metric",
+        "value_key": "cpu_usage",
+        "threshold_level": "critical",
+        "reason": "cpu_usage=97.000 matched critical condition (or, clause 2)",
+        "winning_condition_trace": {
+            "severity": "critical",
+            "condition_mode": "compound",
+            "logical_operator": "or",
+            "matched_clause_indexes": [1],
+        },
+        "family_key": ["threshold", "process", "cpu_usage", "gte"],
+        "winner_rule_key": "threshold.process.cpu_usage.app-process-cpu-band",
+        "suppressed_rule_keys": ["threshold.process.cpu_usage.process-cpu-high"],
+        "resolution_reason": None,
+    }
     assert second_result["processed_items"] == 1
     assert resolved_compound["status"] == "resolved"
     assert resolved_compound["resolved_at"] is not None
@@ -1414,6 +1432,8 @@ def test_grouped_event_rule_opens_from_repeat_count_and_resolves_after_window(se
     assert warning_metadata["signal_type"] == "grouped_event_repeat"
     assert warning_metadata["signal_key"] == "process_restarted"
     assert warning_metadata["family_key"] == ["event", "process", "process_restarted", "gte"]
+    assert warning_metadata["explanation"]["reason"] == "process_restarted repeat_count=2 >= 2"
+    assert warning_metadata["explanation"]["winner_rule_key"] == "event.process.process_restarted.process-restart-burst"
     assert third_result["processed_items"] == 1
     assert critical_alert["severity"] == "critical"
     assert critical_alert["status"] == "open"
@@ -1421,6 +1441,8 @@ def test_grouped_event_rule_opens_from_repeat_count_and_resolves_after_window(se
     assert critical_alert["latest_message"] == "process_restarted repeat_count=3 >= 3"
     assert critical_metadata["signal_type"] == "grouped_event_repeat"
     assert critical_metadata["winning_condition_trace"]["severity"] == "critical"
+    assert critical_metadata["explanation"]["threshold_level"] == "critical"
+    assert critical_metadata["explanation"]["reason"] == "process_restarted repeat_count=3 >= 3"
     assert fourth_result["processed_items"] == 1
     assert resolved_alert["status"] == "resolved"
     assert resolved_alert["resolved_at"] is not None

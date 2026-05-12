@@ -13,10 +13,16 @@ from .alert_archive import (
     close_alert_instance_with_archive,
     serialize_alert_archive_row,
 )
+from .alert_explainability import (
+    build_alert_explanation_from_metadata,
+    build_alert_rule_explanation,
+    build_alert_rule_reason,
+)
 from .alert_history import record_alert_history
 from .alert_rule_evaluator import (
     EVENT_SIGNAL_TYPE_GROUPED_REPEAT,
     LATEST_STATE_SIGNAL_TYPE,
+    alert_rule_family_key,
     alert_rule_candidate_identity as shared_alert_rule_candidate_identity,
     alert_rule_specificity_rank as shared_alert_rule_specificity_rank,
     alert_rule_value_key,
@@ -316,8 +322,17 @@ def serialize_alert_instance(row) -> dict[str, Any]:
         "repeat_count": row["repeat_count"],
         "latest_message": row["latest_message"],
     }
+    metadata = None
     if row["metadata_json"]:
-        payload["metadata"] = parse_json_or_text(row["metadata_json"])
+        metadata = parse_json_or_text(row["metadata_json"])
+        payload["metadata"] = metadata
+    explanation = build_alert_explanation_from_metadata(
+        metadata,
+        fallback_reason=row["latest_message"],
+        resolution_reason=None,
+    )
+    if explanation is not None:
+        payload["explanation"] = explanation
     return payload
 
 
@@ -893,7 +908,9 @@ def evaluate_alert_rule_preview_decision(
             "winner_scope_type": None,
             "winner_rule_origin": None,
             "winner_threshold_level": None,
+            "winner_rule": None,
             "suppressed_rule_count": 0,
+            "suppressed_rule_keys": [],
             "suppressed_rule_display_names": [],
         }
 
@@ -909,7 +926,9 @@ def evaluate_alert_rule_preview_decision(
         "winner_scope_type": decision["winner_scope_type"],
         "winner_rule_origin": decision["winner_rule_origin"],
         "winner_threshold_level": decision["winner_threshold_level"],
+        "winner_rule": decision["winner_rule"],
         "suppressed_rule_count": decision["suppressed_rule_count"],
+        "suppressed_rule_keys": decision["suppressed_rule_keys"],
         "suppressed_rule_display_names": decision["suppressed_rule_display_names"],
     }
 
@@ -1012,6 +1031,29 @@ def build_alert_rule_target_preview(
             metric_value=current_metric_value,
             competing_rules=competing_rules,
         )
+        winner_rule = decision.get("winner_rule")
+        winner_reason = build_alert_rule_reason(
+            winner_rule,
+            threshold_level=decision.get("winner_threshold_level"),
+            metric_value=current_metric_value,
+            grouped_event=grouped_event_row,
+        )
+        explanation = build_alert_rule_explanation(
+            winner_rule or rule,
+            threshold_level=decision.get("winner_threshold_level"),
+            reason=winner_reason,
+            winning_condition_trace=(winner_rule or {}).get("_winning_condition_trace")
+            or threshold_evaluation["winning_condition_trace"],
+            family_key=alert_rule_family_key(winner_rule or rule),
+            winner_rule_key=decision.get("winner_rule_key"),
+            suppressed_rule_keys=decision.get("suppressed_rule_keys"),
+            resolution_reason=None,
+        )
+        decision_payload = {
+            key: value
+            for key, value in decision.items()
+            if key != "winner_rule"
+        }
         unique_candidate_rule_ids.add(alert_rule_preview_candidate_identity(rule))
         unique_candidate_rule_ids.update(alert_rule_preview_candidate_identity(item) for item in competing_rules)
         unique_published_competing_rule_ids.update(
@@ -1049,8 +1091,10 @@ def build_alert_rule_target_preview(
                 "grouped_event_last_occurred_at": grouped_event_row["last_occurred_at"] if grouped_event_row else None,
                 "grouped_event_latest_message": grouped_event_row["latest_message"] if grouped_event_row else None,
                 "threshold_level": threshold_level,
+                "reason": winner_reason,
                 "winning_condition_trace": threshold_evaluation["winning_condition_trace"],
-                **decision,
+                "explanation": explanation,
+                **decision_payload,
             }
         )
 

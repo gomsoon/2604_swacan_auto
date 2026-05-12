@@ -162,7 +162,33 @@ def test_serialize_alert_archive_row_handles_metadata_json_and_invalid_json() ->
     assert valid_payload["source_rule_display_name_snapshot"] == "Process CPU High"
     assert valid_payload["metadata"] == {"metric_key": "cpu_usage", "resolution_note": "operator note"}
     assert valid_payload["resolution_note"] == "operator note"
+    assert valid_payload["explanation"] == {
+        "rule_key": "threshold.process.cpu_usage.process-cpu-high",
+        "display_name": "Process CPU High",
+        "signal_type": "latest_state_metric",
+        "value_key": "cpu_usage",
+        "threshold_level": None,
+        "reason": "cpu critical",
+        "winning_condition_trace": None,
+        "family_key": None,
+        "winner_rule_key": "threshold.process.cpu_usage.process-cpu-high",
+        "suppressed_rule_keys": [],
+        "resolution_reason": RESOLUTION_REASON_MANUAL_RESOLVED,
+    }
     assert invalid_payload["was_acknowledged"] is False
     assert invalid_payload["source_rule_key"] == "threshold.agent.outbox_queue_depth.agent-queue-high"
     assert invalid_payload["source_rule_display_name_snapshot"] == "Agent Queue High"
     assert invalid_payload["metadata"] == "{invalid-json}"
+    assert invalid_payload["explanation"] == {
+        "rule_key": "threshold.agent.outbox_queue_depth.agent-queue-high",
+        "display_name": "Agent Queue High",
+        "signal_type": "latest_state_metric",
+        "value_key": None,
+        "threshold_level": None,
+        "reason": "recovered",
+        "winning_condition_trace": None,
+        "family_key": None,
+        "winner_rule_key": "threshold.agent.outbox_queue_depth.agent-queue-high",
+        "suppressed_rule_keys": [],
+        "resolution_reason": None,
+    }

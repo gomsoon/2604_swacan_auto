@@ -10,6 +10,10 @@ from flask import current_app
 from flask.cli import with_appcontext
 
 from .alert_archive import close_alert_instance_with_archive
+from .alert_explainability import (
+    build_alert_rule_explanation,
+    build_alert_rule_reason,
+)
 from .alert_history import record_alert_history
 from .alert_rule_evaluator import (
     EVENT_SIGNAL_TYPE_GROUPED_REPEAT,
@@ -375,27 +379,11 @@ def threshold_level(metric_value: float | None, rule) -> str | None:
 
 
 def threshold_message(rule, metric_value: float, level: str) -> str:
-    condition_mode = rule.get("condition_mode") or rule.get("cond_mode") or "scalar"
-    if condition_mode == "compound":
-        trace = rule.get("_winning_condition_trace") or {}
-        logical_operator = trace.get("logical_operator")
-        matched_clause_indexes = trace.get("matched_clause_indexes") or []
-        if logical_operator == "and":
-            clause_label = ", ".join(str(index + 1) for index in matched_clause_indexes) or "1"
-            return (
-                f"{rule['metric_key']}={metric_value:.3f} matched {level} condition "
-                f"(and, clauses {clause_label})"
-            )
-        clause_index = matched_clause_indexes[0] + 1 if matched_clause_indexes else 1
-        operator_label = logical_operator or "single"
-        return (
-            f"{rule['metric_key']}={metric_value:.3f} matched {level} condition "
-            f"({operator_label}, clause {clause_index})"
-        )
-
-    threshold = rule["critical_threshold"] if level == "critical" else rule["warning_threshold"]
-    operator = ">=" if rule["comparison"] == "gte" else "<="
-    return f"{rule['metric_key']}={metric_value:.3f} {operator} {threshold:.3f}"
+    return build_alert_rule_reason(
+        rule,
+        threshold_level=level,
+        metric_value=metric_value,
+    ) or "-"
 
 
 def fetch_open_alert_rows_for_rule_ids(*, monitored_object_id: int, rule_ids: list[int]):
@@ -420,6 +408,21 @@ def fetch_open_alert_rows_for_rule_ids(*, monitored_object_id: int, rule_ids: li
 
 def build_threshold_alert_metadata(rule, metric_value: float, level: str, family_key: tuple[str, str | None, str | None, str | None]) -> str:
     cond_mode, warning_condition, critical_condition = normalize_rule_conditions(rule)
+    reason = build_alert_rule_reason(
+        rule,
+        threshold_level=level,
+        metric_value=metric_value,
+    )
+    explanation = build_alert_rule_explanation(
+        rule,
+        threshold_level=level,
+        reason=reason,
+        winning_condition_trace=rule.get("_winning_condition_trace"),
+        family_key=family_key,
+        winner_rule_key=rule.get("rule_key"),
+        suppressed_rule_keys=rule.get("_suppressed_rule_keys"),
+        resolution_reason=None,
+    )
     return json.dumps(
         {
             "rule_id": rule["id"],
@@ -435,8 +438,12 @@ def build_threshold_alert_metadata(rule, metric_value: float, level: str, family
             "cond_mode": cond_mode,
             "warning_condition": warning_condition,
             "critical_condition": critical_condition,
+            "reason": reason,
             "winning_condition_trace": rule.get("_winning_condition_trace"),
+            "winner_rule_key": rule.get("rule_key"),
+            "suppressed_rule_keys": rule.get("_suppressed_rule_keys") or [],
             "family_key": list(family_key),
+            "explanation": explanation,
         },
         ensure_ascii=False,
     )
@@ -470,11 +477,29 @@ def load_recent_grouped_event(*, monitored_object_id: int, signal_key: str, rece
 
 
 def event_message(rule, repeat_count: float, level: str) -> str:
-    threshold = rule["critical_threshold"] if level == "critical" else rule["warning_threshold"]
-    return f"{rule['signal_key']} repeat_count={repeat_count:.0f} >= {float(threshold):.0f}"
+    return build_alert_rule_reason(
+        rule,
+        threshold_level=level,
+        metric_value=repeat_count,
+    ) or "-"
 
 
 def build_event_alert_metadata(rule, grouped_event: dict, level: str, family_key: tuple[str, str | None, str | None, str | None]) -> str:
+    reason = build_alert_rule_reason(
+        rule,
+        threshold_level=level,
+        grouped_event=grouped_event,
+    )
+    explanation = build_alert_rule_explanation(
+        rule,
+        threshold_level=level,
+        reason=reason,
+        winning_condition_trace=rule.get("_winning_condition_trace"),
+        family_key=family_key,
+        winner_rule_key=rule.get("rule_key"),
+        suppressed_rule_keys=rule.get("_suppressed_rule_keys"),
+        resolution_reason=None,
+    )
     return json.dumps(
         {
             "rule_id": rule["id"],
@@ -492,8 +517,12 @@ def build_event_alert_metadata(rule, grouped_event: dict, level: str, family_key
             "scope_type": rule["scope_type"],
             "threshold_level": level,
             "cond_mode": "scalar",
+            "reason": reason,
             "winning_condition_trace": rule.get("_winning_condition_trace"),
+            "winner_rule_key": rule.get("rule_key"),
+            "suppressed_rule_keys": rule.get("_suppressed_rule_keys") or [],
             "family_key": list(family_key),
+            "explanation": explanation,
         },
         ensure_ascii=False,
     )
@@ -600,6 +629,7 @@ def sync_threshold_alerts(
             continue
 
         winner_level = winner_rule["_threshold_level"]
+        winner_rule["_suppressed_rule_keys"] = decision["suppressed_rule_keys"]
         latest_message = threshold_message(winner_rule, metric_value, winner_level)
         metadata_json = build_threshold_alert_metadata(winner_rule, metric_value, winner_level, family_key)
         alert_code = f"rule.{winner_rule_id}"
@@ -760,6 +790,7 @@ def sync_event_alerts(
             continue
 
         winner_level = winner_rule["_threshold_level"]
+        winner_rule["_suppressed_rule_keys"] = decision["suppressed_rule_keys"]
         latest_message = event_message(winner_rule, repeat_count, winner_level)
         metadata_json = build_event_alert_metadata(winner_rule, grouped_event, winner_level, family_key)
         alert_code = f"rule.{winner_rule_id}"

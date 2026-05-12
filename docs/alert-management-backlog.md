@@ -27,6 +27,13 @@ Current implementation note for item 2:
 - event MVP is limited to process events with scalar `gte` repeat-count thresholds.
 - `stale` and `no-data` are still deferred from separate rule-family implementation.
 
+Current scope note for item 3:
+
+- first align preview/current/archive around a shared `explanation` object
+- keep this slice winner-centric and contract-first
+- defer full candidate trace trees, family-level identity, and `reason_code`
+  expansion to later backlog slices
+
 버전: Draft 0.3  
 작성일: 2026-04-18
 

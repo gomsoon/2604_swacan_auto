@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .alert_explainability import build_alert_explanation_from_metadata
+
 
 RESOLUTION_SOURCES = {
     "auto_recovery",
@@ -207,13 +209,25 @@ def serialize_alert_archive_row(row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+    metadata = None
     if row["metadata_json"]:
         try:
-            payload["metadata"] = json.loads(row["metadata_json"])
+            metadata = json.loads(row["metadata_json"])
+            payload["metadata"] = metadata
         except json.JSONDecodeError:
-            payload["metadata"] = row["metadata_json"]
+            metadata = row["metadata_json"]
+            payload["metadata"] = metadata
     if isinstance(payload.get("metadata"), dict):
         resolution_note = payload["metadata"].get("resolution_note")
         if isinstance(resolution_note, str) and resolution_note:
             payload["resolution_note"] = resolution_note
+    explanation = build_alert_explanation_from_metadata(
+        metadata,
+        fallback_rule_key=row["source_rule_key"],
+        fallback_display_name=row["source_rule_display_name_snapshot"],
+        fallback_reason=row["latest_message"],
+        resolution_reason=row["resolution_reason"],
+    )
+    if explanation is not None:
+        payload["explanation"] = explanation
     return payload

@@ -221,6 +221,13 @@ def event_family_key(rule: dict[str, Any]) -> tuple[str, str | None, str | None,
     )
 
 
+def alert_rule_family_key(rule: dict[str, Any]) -> tuple[str, str | None, str | None, str | None]:
+    signal_type = rule.get("signal_type") or LATEST_STATE_SIGNAL_TYPE
+    if signal_type == EVENT_SIGNAL_TYPE_GROUPED_REPEAT:
+        return event_family_key(rule)
+    return threshold_family_key(rule)
+
+
 def evaluate_threshold_candidates(
     metric_value: float | None,
     rules: list[dict[str, Any]],
@@ -269,6 +276,7 @@ def summarize_threshold_decision(candidates: list[dict[str, Any]]) -> dict[str, 
         "winner_rule": None,
         "suppressed_rule_count": 0,
         "suppressed_rule_ids": [],
+        "suppressed_rule_keys": [],
         "suppressed_rule_display_names": [],
         "suppressed_rules": [],
         "firing_rule_ids": [],
@@ -304,6 +312,10 @@ def summarize_threshold_decision(candidates: list[dict[str, Any]]) -> dict[str, 
             "suppressed_rule_count": len(suppressed_rules),
             "suppressed_rule_ids": [
                 item.get("id") for item in suppressed_rules if isinstance(item.get("id"), int)
+            ],
+            "suppressed_rule_keys": [
+                alert_rule_candidate_identity(item)
+                for item in suppressed_rules
             ],
             "suppressed_rule_display_names": [
                 item.get("display_name") or item.get("rule_key") or "unnamed rule"

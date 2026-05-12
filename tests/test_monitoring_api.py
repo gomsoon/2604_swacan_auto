@@ -546,6 +546,8 @@ def test_runtime_object_slice_returns_alert_history_archive_summary(seeded_app, 
     assert payload["history"]["alert_archive"][0]["resolution_note"] == "resolved from monitoring view test"
     assert payload["history"]["alert_archive"][0]["source_rule_key"] is None
     assert payload["history"]["alert_archive"][0]["source_rule_display_name_snapshot"] is None
+    assert payload["history"]["alert_archive"][0]["explanation"]["reason"] == "process not found"
+    assert payload["history"]["alert_archive"][0]["explanation"]["resolution_reason"] == "manual_resolved"
     assert payload["history"]["alert_history"][0]["resolution_reason"] == "manual_resolved"
 
 

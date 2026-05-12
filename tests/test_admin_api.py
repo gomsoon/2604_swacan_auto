@@ -627,6 +627,19 @@ def test_admin_alerts_returns_open_alerts(seeded_app, seeded_client) -> None:
     assert payload["items"][0]["source_rule_target_label"] == "MonitoringAgent"
     assert payload["items"][0]["is_acknowledged"] is True
     assert payload["items"][0]["ack_note"] == "operator ack note"
+    assert payload["items"][0]["explanation"] == {
+        "rule_key": None,
+        "display_name": None,
+        "signal_type": "latest_state_metric",
+        "value_key": None,
+        "threshold_level": None,
+        "reason": "heartbeat delayed",
+        "winning_condition_trace": None,
+        "family_key": None,
+        "winner_rule_key": None,
+        "suppressed_rule_keys": [],
+        "resolution_reason": None,
+    }
 
 
 def test_admin_alerts_reject_invalid_status_filter(seeded_client) -> None:
@@ -1457,7 +1470,26 @@ def test_admin_alert_rule_preview_returns_compound_or_winning_trace(seeded_app, 
     assert payload["items"][0]["winner_rule_origin"] == "current_preview"
     assert payload["items"][0]["winner_threshold_level"] == "critical"
     assert payload["items"][0]["suppressed_rule_count"] == 1
+    assert payload["items"][0]["suppressed_rule_keys"] == ["threshold.process.cpu_usage.process-cpu-high"]
     assert payload["items"][0]["suppressed_rule_display_names"] == ["Process CPU High"]
+    assert payload["items"][0]["explanation"] == {
+        "rule_key": "threshold.process.cpu_usage.preview-cpu-band",
+        "display_name": "Preview CPU Band",
+        "signal_type": "latest_state_metric",
+        "value_key": "cpu_usage",
+        "threshold_level": "critical",
+        "reason": "cpu_usage=97.000 matched critical condition (or, clause 2)",
+        "winning_condition_trace": {
+            "severity": "critical",
+            "condition_mode": "compound",
+            "logical_operator": "or",
+            "matched_clause_indexes": [1],
+        },
+        "family_key": ["threshold", "process", "cpu_usage", "gte"],
+        "winner_rule_key": "threshold.process.cpu_usage.preview-cpu-band",
+        "suppressed_rule_keys": ["threshold.process.cpu_usage.process-cpu-high"],
+        "resolution_reason": None,
+    }
 
 
 def test_admin_alert_rule_preview_returns_compound_and_winning_trace(seeded_app, seeded_client) -> None:
@@ -1529,6 +1561,9 @@ def test_admin_alert_rule_preview_returns_compound_and_winning_trace(seeded_app,
     assert payload["items"][0]["winner_rule_origin"] == "current_preview"
     assert payload["items"][0]["winner_threshold_level"] == "warning"
     assert payload["items"][0]["suppressed_rule_count"] == 0
+    assert payload["items"][0]["explanation"]["reason"] == "cpu_usage=52.000 matched warning condition (and, clauses 1, 2)"
+    assert payload["items"][0]["explanation"]["winner_rule_key"] == "threshold.process.cpu_usage.preview-cpu-window"
+    assert payload["items"][0]["explanation"]["suppressed_rule_keys"] == []
 
 
 def test_admin_alert_rule_preview_rejects_invalid_compound_shape_without_failing_request(seeded_client) -> None:
@@ -1967,6 +2002,24 @@ def test_admin_alert_rule_preview_supports_grouped_event_repeat(seeded_app, seed
     assert payload["items"][0]["grouped_event_repeat_count"] == 4
     assert payload["items"][0]["current_metric_value"] == 4.0
     assert payload["items"][0]["grouped_event_latest_message"] == "process restarted repeatedly"
+    assert payload["items"][0]["explanation"] == {
+        "rule_key": "event.process.process_restarted.process-restart-burst",
+        "display_name": "Process Restart Burst",
+        "signal_type": "grouped_event_repeat",
+        "value_key": "process_restarted",
+        "threshold_level": "critical",
+        "reason": "process_restarted repeat_count=4 >= 4",
+        "winning_condition_trace": {
+            "severity": "critical",
+            "condition_mode": "scalar",
+            "logical_operator": None,
+            "matched_clause_indexes": [0],
+        },
+        "family_key": ["event", "process", "process_restarted", "gte"],
+        "winner_rule_key": "event.process.process_restarted.process-restart-burst",
+        "suppressed_rule_keys": [],
+        "resolution_reason": None,
+    }
 
 
 def test_admin_alert_rule_rejects_invalid_grouped_event_rule_shape(seeded_client) -> None:

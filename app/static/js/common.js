@@ -71,6 +71,7 @@ const ALERT_RESOLUTION_REASON_LABELS = {
     manual_resolved: "운영자가 수동으로 해결함",
     resolved_from_status_api: "상태 API로 해결 처리됨",
     threshold_cleared: "threshold가 해소됨",
+    event_window_elapsed: "이벤트 반복 창이 종료됨",
     suppressed_by_precedence: "우선순위 규칙에 의해 정리됨",
     state_normalized: "상태가 정상화됨",
     superseded: "새 상태 평가로 대체됨",

@@ -26,6 +26,13 @@ Current implementation note for item 2:
   - scalar `gte` repeat-count thresholds only
 - the next priority after this MVP remains lifecycle/archive clarity and later explainability expansion.
 
+Current scope note for item 3:
+
+- start with a shared explanation contract across preview/current/archive
+- keep the phase narrow and contract-oriented before larger UI work
+- leave deep candidate traces, family-level identity, and structured reason
+  codes on the deferred backlog
+
 ## Agent Addendum
 
 - See [agent-current-state-backlog.md](C:/2604_swacan_auto/docs/agent-current-state-backlog.md).

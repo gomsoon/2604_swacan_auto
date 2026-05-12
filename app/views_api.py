@@ -8,6 +8,7 @@ from typing import Any
 from flask import Blueprint, Response, current_app, g, request, stream_with_context
 
 from .alert_archive import serialize_alert_archive_row
+from .alert_explainability import build_alert_explanation_from_metadata
 from .auth import error_response, login_required
 from .db import close_db, get_db
 from .runtime_state import derive_latest_state
@@ -158,8 +159,17 @@ def serialize_alert_instance(alert_row) -> dict[str, Any]:
         "repeat_count": alert_row["repeat_count"],
         "latest_message": alert_row["latest_message"],
     }
+    metadata = None
     if alert_row["metadata_json"]:
-        payload["metadata"] = json.loads(alert_row["metadata_json"])
+        metadata = json.loads(alert_row["metadata_json"])
+        payload["metadata"] = metadata
+    explanation = build_alert_explanation_from_metadata(
+        metadata,
+        fallback_reason=alert_row["latest_message"],
+        resolution_reason=None,
+    )
+    if explanation is not None:
+        payload["explanation"] = explanation
     return payload
 
 
