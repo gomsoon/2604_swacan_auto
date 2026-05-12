@@ -25,6 +25,8 @@ Current implementation note for item 2:
 - `grouped_event_repeat` event rule is now enabled as the first post-threshold rule family.
 - event rules currently reuse `alert_rules.signal_type + signal_key` and store `metric_key = signal_key` as a compatibility shadow.
 - event MVP is limited to process events with scalar `gte` repeat-count thresholds.
+- `stale` is now enabled through threshold-style reuse for published `agent.heartbeat_age_seconds` rules.
+- preview and runtime both evaluate the same derived heartbeat metric, and the worker periodically re-evaluates it even without new agent payloads.
 - `stale` and `no-data` are still deferred from separate rule-family implementation.
 
 Current scope note for item 3:

@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from .runtime_state import derive_agent_heartbeat_state
+
 THRESHOLD_FIRING_LEVELS = {"warning", "critical"}
 THRESHOLD_SEVERITY_RANK = {"critical": 2, "warning": 1}
 EVENT_SIGNAL_TYPE_GROUPED_REPEAT = "grouped_event_repeat"
@@ -10,6 +12,9 @@ LATEST_STATE_SIGNAL_TYPE = "latest_state_metric"
 
 
 def metric_value_for_state(state: dict[str, Any], metric_key: str) -> float | None:
+    if metric_key in {"heartbeat_age_seconds", "heartbeat_warning_seconds", "heartbeat_down_seconds"}:
+        state = derive_agent_heartbeat_state(state)
+
     if metric_key == "memory_used_ratio":
         total = state.get("memory_total")
         used = state.get("memory_used")

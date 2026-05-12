@@ -39,6 +39,7 @@ VALID_EVENT_TYPES = {
 ALERT_OPEN_STATUSES = {"warning", "down"}
 ALERT_OPEN_SEVERITIES = {"warning", "critical"}
 ALERT_ACTIVE_STATUSES = {"open", "in_progress", "suppressed"}
+TIME_DERIVED_THRESHOLD_METRIC_KEYS = {"heartbeat_age_seconds"}
 
 
 @dataclass(frozen=True)
@@ -70,7 +71,7 @@ class RetentionCleanupSummary:
 
 
 def now_iso() -> str:
-    return datetime.now().astimezone().isoformat(timespec="milliseconds")
+    return now_dt().isoformat(timespec="milliseconds")
 
 
 def now_dt() -> datetime:
@@ -535,6 +536,8 @@ def sync_threshold_alerts(
     state: dict,
     occurred_at: str,
     received_at: str,
+    allowed_metric_keys: set[str] | None = None,
+    increment_repeat_count: bool = True,
 ) -> None:
     if monitored_object_id is None:
         return
@@ -572,6 +575,9 @@ def sync_threshold_alerts(
     families: dict[tuple[str, str | None, str | None, str | None], list] = {}
     for rule_row in rules:
         rule = dict(rule_row)
+        metric_key = rule.get("metric_key")
+        if allowed_metric_keys is not None and metric_key not in allowed_metric_keys:
+            continue
         families.setdefault(threshold_family_key(rule), []).append(rule)
 
     for family_key, family_rules in families.items():
@@ -635,7 +641,7 @@ def sync_threshold_alerts(
         alert_code = f"rule.{winner_rule_id}"
         existing = db_conn.execute(
             """
-            SELECT id, status
+            SELECT id, status, severity, last_occurred_at, latest_message, metadata_json
             FROM alert_instances
             WHERE monitored_object_id = ?
               AND source_rule_id = ?
@@ -659,13 +665,42 @@ def sync_threshold_alerts(
             )
             continue
 
+        if increment_repeat_count:
+            db_conn.execute(
+                """
+                UPDATE alert_instances
+                SET source_rule_id = ?,
+                    severity = ?,
+                    last_occurred_at = ?,
+                    repeat_count = repeat_count + 1,
+                    latest_message = ?,
+                    metadata_json = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    winner_rule_id,
+                    winner_level,
+                    occurred_at,
+                    latest_message,
+                    metadata_json,
+                    received_at,
+                    existing["id"],
+                ),
+            )
+            continue
+
+        should_refresh_last_occurred = (
+            existing["severity"] != winner_level
+            or existing["latest_message"] != latest_message
+            or existing["metadata_json"] != metadata_json
+        )
         db_conn.execute(
             """
             UPDATE alert_instances
             SET source_rule_id = ?,
                 severity = ?,
                 last_occurred_at = ?,
-                repeat_count = repeat_count + 1,
                 latest_message = ?,
                 metadata_json = ?,
                 updated_at = ?
@@ -674,12 +709,56 @@ def sync_threshold_alerts(
             (
                 winner_rule_id,
                 winner_level,
-                occurred_at,
+                occurred_at if should_refresh_last_occurred else existing["last_occurred_at"],
                 latest_message,
                 metadata_json,
                 received_at,
                 existing["id"],
             ),
+        )
+
+
+def reevaluate_time_derived_threshold_alerts(*, received_at: str) -> None:
+    db_conn = get_db()
+    placeholders = ", ".join("?" for _ in TIME_DERIVED_THRESHOLD_METRIC_KEYS)
+    rows = db_conn.execute(
+        f"""
+        SELECT DISTINCT
+            ls.monitored_object_id,
+            ls.state_type,
+            ls.state_json
+        FROM latest_states AS ls
+        JOIN monitored_objects AS mo ON mo.id = ls.monitored_object_id
+        JOIN alert_rules AS rules
+          ON rules.is_enabled = 1
+         AND rules.status = 'published'
+         AND rules.signal_type = ?
+         AND rules.state_type = ls.state_type
+         AND rules.metric_key IN ({placeholders})
+         AND (
+               (rules.scope_type = 'monitored_object' AND rules.monitored_object_id = ls.monitored_object_id)
+            OR (rules.scope_type = 'object_type' AND rules.object_type = mo.object_type)
+         )
+        WHERE ls.state_type = 'agent'
+        """,
+        (LATEST_STATE_SIGNAL_TYPE, *TIME_DERIVED_THRESHOLD_METRIC_KEYS),
+    ).fetchall()
+
+    for row in rows:
+        try:
+            state = json.loads(row["state_json"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(state, dict):
+            continue
+        sync_threshold_alerts(
+            monitored_object_id=row["monitored_object_id"],
+            state_type=row["state_type"],
+            state=state,
+            occurred_at=received_at,
+            received_at=received_at,
+            allowed_metric_keys=TIME_DERIVED_THRESHOLD_METRIC_KEYS,
+            increment_repeat_count=False,
         )
 
 
@@ -1243,6 +1322,9 @@ def process_pending_ingest(limit: int = 100) -> dict[str, int]:
             )
             db_conn.commit()
             failed_batches += 1
+
+    reevaluate_time_derived_threshold_alerts(received_at=now_iso())
+    db_conn.commit()
 
     return {
         "processed_batches": processed_batches,

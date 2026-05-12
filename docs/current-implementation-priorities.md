@@ -24,6 +24,7 @@ Current implementation note for item 2:
   - `state_type = process`
   - `signal_key = process_started | process_stopped | process_restarted`
   - scalar `gte` repeat-count thresholds only
+- `stale` threshold-style reuse is now available for published `agent.heartbeat_age_seconds` rules, including periodic runtime re-evaluation without new agent payloads.
 - the next priority after this MVP remains lifecycle/archive clarity and later explainability expansion.
 
 Current scope note for item 3:

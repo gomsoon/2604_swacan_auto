@@ -2022,6 +2022,93 @@ def test_admin_alert_rule_preview_supports_grouped_event_repeat(seeded_app, seed
     }
 
 
+def test_admin_alert_rule_preview_supports_stale_heartbeat_threshold(seeded_app, seeded_client) -> None:
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T10:20:20.100+09:00")
+    seeded_app.config["AGENT_HEARTBEAT_WARNING_SECONDS"] = 10
+    seeded_app.config["AGENT_HEARTBEAT_DOWN_SECONDS"] = 30
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO latest_states (
+                target_id, state_type, view_node_id, monitored_object_id, status, severity,
+                state_json, occurred_at, received_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "agent_local",
+                "agent",
+                None,
+                1303,
+                "up",
+                "normal",
+                json.dumps(
+                    {
+                        "heartbeat_time": "2026-04-10T10:20:00.100+09:00",
+                        "backend_connection_status": "connected",
+                        "outbox_queue_depth": 0,
+                    }
+                ),
+                "2026-04-10T10:20:00.100+09:00",
+                "2026-04-10T10:20:00.100+09:00",
+                "2026-04-10T10:20:00.100+09:00",
+            ),
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/alert-rules/preview?limit=20",
+        json={
+            "scope_type": "object_type",
+            "object_type": "MonitoringAgent",
+            "state_type": "agent",
+            "metric_key": "heartbeat_age_seconds",
+            "comparison": "gte",
+            "warning_threshold": 10,
+            "critical_threshold": 30,
+            "display_name": "Agent Heartbeat Stale",
+            "rule_key": "threshold.agent.heartbeat_age_seconds.agent-heartbeat-stale",
+            "is_enabled": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["rule"]["signal_type"] == "latest_state_metric"
+    assert payload["rule"]["metric_key"] == "heartbeat_age_seconds"
+    assert payload["summary"]["warning_match_count"] == 1
+    assert payload["summary"]["critical_match_count"] == 0
+    assert payload["items"][0]["signal_type"] == "latest_state_metric"
+    assert payload["items"][0]["current_metric_value"] == 20.0
+    assert payload["items"][0]["threshold_level"] == "warning"
+    assert payload["items"][0]["reason"] == "heartbeat_age_seconds=20.000 >= 10.000"
+    assert payload["items"][0]["winning_condition_trace"] == {
+        "severity": "warning",
+        "condition_mode": "scalar",
+        "logical_operator": None,
+        "matched_clause_indexes": [0],
+    }
+    assert payload["items"][0]["explanation"] == {
+        "rule_key": "threshold.agent.heartbeat_age_seconds.agent-heartbeat-stale",
+        "display_name": "Agent Heartbeat Stale",
+        "signal_type": "latest_state_metric",
+        "value_key": "heartbeat_age_seconds",
+        "threshold_level": "warning",
+        "reason": "heartbeat_age_seconds=20.000 >= 10.000",
+        "winning_condition_trace": {
+            "severity": "warning",
+            "condition_mode": "scalar",
+            "logical_operator": None,
+            "matched_clause_indexes": [0],
+        },
+        "family_key": ["threshold", "agent", "heartbeat_age_seconds", "gte"],
+        "winner_rule_key": "threshold.agent.heartbeat_age_seconds.agent-heartbeat-stale",
+        "suppressed_rule_keys": [],
+        "resolution_reason": None,
+    }
+
+
 def test_admin_alert_rule_rejects_invalid_grouped_event_rule_shape(seeded_client) -> None:
     login(seeded_client)
 

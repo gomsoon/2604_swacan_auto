@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from app.admin_api import (
     build_alert_rule_publish_warnings,
     build_default_alert_rule_display_name,
@@ -36,6 +38,12 @@ def test_admin_parser_helpers_cover_small_branches(seeded_app) -> None:
     assert preview_metric_value({"memory_total": 0, "memory_used": 50}, "memory_used_ratio") is None
     assert preview_metric_value({"memory_total": "bad", "memory_used": 50}, "memory_used_ratio") is None
     assert preview_metric_value({"cpu_usage": "bad"}, "cpu_usage") is None
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T10:20:20.100+09:00")
+    with seeded_app.app_context():
+        assert preview_metric_value(
+            {"heartbeat_time": "2026-04-10T10:20:00.100+09:00"},
+            "heartbeat_age_seconds",
+        ) == 20.0
 
     assert preview_threshold_level(None, "gte", 80.0, 90.0) == "unknown"
     assert preview_threshold_level(95.0, "gte", 80.0, 90.0) == "critical"

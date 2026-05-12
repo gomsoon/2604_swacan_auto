@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import Any
 
-from flask import current_app
+from flask import current_app, has_app_context
 
 
 def get_current_time() -> datetime:
@@ -16,6 +16,26 @@ def get_current_time() -> datetime:
     return datetime.now().astimezone()
 
 
+def _heartbeat_thresholds(
+    *,
+    warning_seconds: int | None = None,
+    down_seconds: int | None = None,
+) -> tuple[int, int]:
+    if warning_seconds is None:
+        warning_seconds = (
+            int(current_app.config.get("AGENT_HEARTBEAT_WARNING_SECONDS", 15))
+            if has_app_context()
+            else 15
+        )
+    if down_seconds is None:
+        down_seconds = (
+            int(current_app.config.get("AGENT_HEARTBEAT_DOWN_SECONDS", 30))
+            if has_app_context()
+            else 30
+        )
+    return int(warning_seconds), int(down_seconds)
+
+
 def parse_timestamp(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -24,6 +44,42 @@ def parse_timestamp(value: str | None) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo is not None else parsed.astimezone()
+
+
+def derive_agent_heartbeat_state(
+    state: dict[str, Any],
+    *,
+    occurred_at: str | None = None,
+    now: datetime | None = None,
+    warning_seconds: int | None = None,
+    down_seconds: int | None = None,
+) -> dict[str, Any]:
+    derived_state = dict(state)
+    heartbeat_at = parse_timestamp(derived_state.get("heartbeat_time") or occurred_at)
+    if heartbeat_at is None:
+        return derived_state
+
+    current_time = now or get_current_time()
+    warning_seconds, down_seconds = _heartbeat_thresholds(
+        warning_seconds=warning_seconds,
+        down_seconds=down_seconds,
+    )
+    age_seconds = max((current_time - heartbeat_at).total_seconds(), 0.0)
+    derived_state["heartbeat_age_seconds"] = round(age_seconds, 3)
+    derived_state["heartbeat_warning_seconds"] = warning_seconds
+    derived_state["heartbeat_down_seconds"] = down_seconds
+
+    if age_seconds >= down_seconds:
+        derived_state["heartbeat_timeout_level"] = "down"
+        derived_state["heartbeat_timeout_message"] = "heartbeat timeout"
+    elif age_seconds >= warning_seconds:
+        derived_state["heartbeat_timeout_level"] = "warning"
+        derived_state["heartbeat_timeout_message"] = "heartbeat delayed"
+    else:
+        derived_state["heartbeat_timeout_level"] = "normal"
+        derived_state.pop("heartbeat_timeout_message", None)
+
+    return derived_state
 
 
 def derive_latest_state(state_row) -> dict[str, Any]:
@@ -41,33 +97,16 @@ def derive_latest_state(state_row) -> dict[str, Any]:
     if payload["state_type"] != "agent":
         return payload
 
-    state = dict(payload["state"])
-    warning_seconds = int(current_app.config.get("AGENT_HEARTBEAT_WARNING_SECONDS", 15))
-    down_seconds = int(current_app.config.get("AGENT_HEARTBEAT_DOWN_SECONDS", 30))
-    heartbeat_at = parse_timestamp(state.get("heartbeat_time") or payload["occurred_at"])
     now = get_current_time()
+    state = derive_agent_heartbeat_state(payload["state"], occurred_at=payload["occurred_at"], now=now)
+    timeout_level = state.get("heartbeat_timeout_level")
 
-    if heartbeat_at is None:
-        payload["state"] = state
-        return payload
-
-    age_seconds = max((now - heartbeat_at).total_seconds(), 0.0)
-    state["heartbeat_age_seconds"] = round(age_seconds, 3)
-    state["heartbeat_warning_seconds"] = warning_seconds
-    state["heartbeat_down_seconds"] = down_seconds
-
-    if age_seconds >= down_seconds:
+    if timeout_level == "down":
         payload["status"] = "down"
         payload["severity"] = "critical"
-        state["heartbeat_timeout_level"] = "down"
-        state["heartbeat_timeout_message"] = "heartbeat timeout"
-    elif age_seconds >= warning_seconds:
+    elif timeout_level == "warning":
         payload["status"] = "warning"
         payload["severity"] = "warning"
-        state["heartbeat_timeout_level"] = "warning"
-        state["heartbeat_timeout_message"] = "heartbeat delayed"
-    else:
-        state["heartbeat_timeout_level"] = "normal"
 
     payload["state"] = state
     return payload

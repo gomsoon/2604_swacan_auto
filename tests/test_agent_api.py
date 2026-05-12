@@ -936,6 +936,189 @@ def test_agent_threshold_alert_opens_on_exact_queue_depth_boundaries(seeded_app,
     assert "500.000" in rule_alert["latest_message"]
 
 
+def test_agent_stale_threshold_rule_opens_without_new_ingest_and_resolves_on_fresh_heartbeat(seeded_app, seeded_client) -> None:
+    seeded_app.config["AGENT_HEARTBEAT_WARNING_SECONDS"] = 10
+    seeded_app.config["AGENT_HEARTBEAT_DOWN_SECONDS"] = 30
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO alert_rules (
+                id, rule_key, display_name, status, scope_type, object_type, monitored_object_id,
+                state_type, signal_type, signal_key, metric_key, comparison, warning_threshold, critical_threshold,
+                cond_mode, is_enabled, description, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1904,
+                "threshold.agent.heartbeat_age_seconds.agent-heartbeat-stale",
+                "Agent Heartbeat Stale",
+                "published",
+                "object_type",
+                "MonitoringAgent",
+                None,
+                "agent",
+                "latest_state_metric",
+                None,
+                "heartbeat_age_seconds",
+                "gte",
+                10.0,
+                30.0,
+                "scalar",
+                1,
+                "Alert when the agent heartbeat grows stale",
+                "2026-04-10T11:30:00.000+09:00",
+                "2026-04-10T11:30:00.000+09:00",
+            ),
+        )
+        db_conn.commit()
+
+    heartbeat_batch = {
+        "agent_id": "agent_local",
+        "boot_id": "boot_threshold_agent_stale",
+        "seq_start": 91,
+        "seq_end": 91,
+        "sent_at": "2026-04-10T11:30:00.150+09:00",
+        "items": [
+            {
+                "seq": 91,
+                "payload_type": "agent_state",
+                "occurred_at": "2026-04-10T11:30:00.100+09:00",
+                "target_id": "agent_local",
+                "payload": {
+                    "heartbeat_time": "2026-04-10T11:30:00.100+09:00",
+                    "backend_connection_status": "connected",
+                    "outbox_queue_depth": 0,
+                    "last_ack_seq": 90,
+                },
+            }
+        ],
+    }
+    recover_batch = {
+        **heartbeat_batch,
+        "seq_start": 92,
+        "seq_end": 92,
+        "items": [
+            {
+                **heartbeat_batch["items"][0],
+                "seq": 92,
+                "occurred_at": "2026-04-10T11:30:36.100+09:00",
+                "payload": {
+                    "heartbeat_time": "2026-04-10T11:30:36.100+09:00",
+                    "backend_connection_status": "connected",
+                    "outbox_queue_depth": 0,
+                    "last_ack_seq": 91,
+                },
+            }
+        ],
+    }
+
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T11:30:00.100+09:00")
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=heartbeat_batch).status_code == 202
+
+    with seeded_app.app_context():
+        first_result = process_pending_ingest(limit=1)
+        open_count = get_db().execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM alert_instances
+            WHERE monitored_object_id = 1303
+              AND source_rule_id = 1904
+              AND status = 'open'
+            """
+        ).fetchone()["count"]
+
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T11:30:15.100+09:00")
+    with seeded_app.app_context():
+        second_result = process_pending_ingest(limit=1)
+        db_conn = get_db()
+        warning_alert = db_conn.execute(
+            """
+            SELECT severity, status, repeat_count, latest_message, metadata_json
+            FROM alert_instances
+            WHERE monitored_object_id = 1303
+              AND source_rule_id = 1904
+              AND status = 'open'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        warning_metadata = json.loads(warning_alert["metadata_json"])
+
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T11:30:35.100+09:00")
+    with seeded_app.app_context():
+        third_result = process_pending_ingest(limit=1)
+        db_conn = get_db()
+        critical_alert = db_conn.execute(
+            """
+            SELECT severity, status, repeat_count, latest_message, metadata_json
+            FROM alert_instances
+            WHERE monitored_object_id = 1303
+              AND source_rule_id = 1904
+              AND status = 'open'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        critical_metadata = json.loads(critical_alert["metadata_json"])
+
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T11:30:36.200+09:00")
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=recover_batch).status_code == 202
+
+    with seeded_app.app_context():
+        fourth_result = process_pending_ingest(limit=1)
+        db_conn = get_db()
+        resolved_alert = db_conn.execute(
+            """
+            SELECT status, resolved_at
+            FROM alert_instances
+            WHERE monitored_object_id = 1303
+              AND source_rule_id = 1904
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        archive_row = db_conn.execute(
+            """
+            SELECT source_rule_id, source_rule_key, source_rule_display_name_snapshot,
+                   resolution_source, resolution_reason
+            FROM alert_history_archive
+            WHERE source_rule_id = 1904
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert first_result["processed_items"] == 1
+    assert open_count == 0
+    assert second_result["processed_items"] == 0
+    assert warning_alert["severity"] == "warning"
+    assert warning_alert["status"] == "open"
+    assert warning_alert["repeat_count"] == 1
+    assert warning_alert["latest_message"] == "heartbeat_age_seconds=15.000 >= 10.000"
+    assert warning_metadata["metric_key"] == "heartbeat_age_seconds"
+    assert warning_metadata["metric_value"] == 15.0
+    assert warning_metadata["explanation"]["threshold_level"] == "warning"
+    assert warning_metadata["explanation"]["reason"] == "heartbeat_age_seconds=15.000 >= 10.000"
+    assert third_result["processed_items"] == 0
+    assert critical_alert["severity"] == "critical"
+    assert critical_alert["status"] == "open"
+    assert critical_alert["repeat_count"] == 1
+    assert critical_alert["latest_message"] == "heartbeat_age_seconds=35.000 >= 30.000"
+    assert critical_metadata["metric_value"] == 35.0
+    assert critical_metadata["explanation"]["threshold_level"] == "critical"
+    assert critical_metadata["explanation"]["reason"] == "heartbeat_age_seconds=35.000 >= 30.000"
+    assert fourth_result["processed_items"] == 1
+    assert resolved_alert["status"] == "resolved"
+    assert resolved_alert["resolved_at"] is not None
+    assert archive_row["source_rule_id"] == 1904
+    assert archive_row["source_rule_key"] == "threshold.agent.heartbeat_age_seconds.agent-heartbeat-stale"
+    assert archive_row["source_rule_display_name_snapshot"] == "Agent Heartbeat Stale"
+    assert archive_row["resolution_source"] == "auto_recovery"
+    assert archive_row["resolution_reason"] == "threshold_cleared"
+
+
 def test_specific_threshold_rule_resolves_existing_general_alert_by_precedence(seeded_app, seeded_client) -> None:
     general_batch = {
         "agent_id": "agent_local",
