@@ -870,6 +870,7 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("critical condition: gte 90 OR gte 95")
     expect(page.locator("#alert-rule-editor-form")).to_contain_text("draft 저장 가능")
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("판정 결과")
+    expect(page.locator("#alert-rule-preview-panel")).to_contain_text("explanation File Descriptor High | cpu_usage | warning")
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("판정 trace warning / OR / clause 1 matched")
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("현재 입력 rule이 최종 winner입니다.")
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("suppressed 없음")

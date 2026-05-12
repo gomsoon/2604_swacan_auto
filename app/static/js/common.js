@@ -90,6 +90,38 @@ export function formatAlertResolutionReason(item) {
     return resolutionNote ? `${label} | ${resolutionNote}` : label;
 }
 
+function normalizeAlertExplanation(itemOrExplanation) {
+    if (!itemOrExplanation || typeof itemOrExplanation !== "object") {
+        return null;
+    }
+    if (itemOrExplanation.explanation && typeof itemOrExplanation.explanation === "object") {
+        return itemOrExplanation.explanation;
+    }
+    return itemOrExplanation;
+}
+
+export function formatAlertExplanationRule(itemOrExplanation) {
+    const explanation = normalizeAlertExplanation(itemOrExplanation);
+    if (!explanation) {
+        return "rule 정보 없음";
+    }
+    const ruleLabel = explanation.display_name || explanation.rule_key || "runtime alert";
+    const valueKey = explanation.value_key || "-";
+    const level = explanation.threshold_level || "-";
+    return `${ruleLabel} | ${valueKey} | ${level}`;
+}
+
+export function formatAlertExplanationReason(itemOrExplanation) {
+    const explanation = normalizeAlertExplanation(itemOrExplanation);
+    if (explanation?.reason) {
+        return explanation.reason;
+    }
+    if (itemOrExplanation?.latest_message) {
+        return itemOrExplanation.latest_message;
+    }
+    return "판정 근거 없음";
+}
+
 export function bindGlobalUi() {
     const logoutButton = document.getElementById("logout-button");
     if (!logoutButton) {
