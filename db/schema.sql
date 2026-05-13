@@ -345,6 +345,8 @@ CREATE TABLE IF NOT EXISTS alert_instances (
     monitored_object_id INTEGER NOT NULL,
     alert_code TEXT NOT NULL,
     source_rule_id INTEGER,
+    identity_kind TEXT NOT NULL DEFAULT 'rule',
+    identity_key TEXT,
     severity TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('open', 'in_progress', 'suppressed', 'resolved')),
     acknowledged_at TEXT,
@@ -394,6 +396,8 @@ CREATE TABLE IF NOT EXISTS alert_history_archive (
     source_rule_id INTEGER,
     source_rule_key TEXT,
     source_rule_display_name_snapshot TEXT,
+    identity_kind TEXT,
+    identity_key TEXT,
     opened_at TEXT NOT NULL,
     resolved_at TEXT NOT NULL,
     first_severity TEXT NOT NULL,
@@ -646,6 +650,9 @@ CREATE INDEX IF NOT EXISTS idx_alert_rules_scope_state
 
 CREATE INDEX IF NOT EXISTS idx_alert_instances_source_rule_status
     ON alert_instances(source_rule_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_alert_instances_identity_status
+    ON alert_instances(monitored_object_id, identity_kind, identity_key, status);
 
 CREATE INDEX IF NOT EXISTS idx_alert_instances_status_last_occurred
     ON alert_instances(status, last_occurred_at DESC);

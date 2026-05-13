@@ -15,6 +15,12 @@ from .alert_explainability import (
     build_alert_rule_reason,
 )
 from .alert_history import record_alert_history
+from .alert_identity import (
+    ALERT_IDENTITY_KIND_FAMILY,
+    ALERT_IDENTITY_KIND_RULE,
+    build_rule_identity_key,
+    build_threshold_family_identity_key_from_family_key,
+)
 from .alert_rule_evaluator import (
     EVENT_SIGNAL_TYPE_GROUPED_REPEAT,
     LATEST_STATE_SIGNAL_TYPE,
@@ -166,21 +172,30 @@ def create_alert_instance(
     latest_message: str,
     metadata_json: str,
     source_rule_id: int | None = None,
+    identity_kind: str | None = None,
+    identity_key: str | None = None,
 ) -> None:
     db_conn = get_db()
+    normalized_identity_kind = identity_kind or ALERT_IDENTITY_KIND_RULE
+    normalized_identity_key = identity_key or build_rule_identity_key(
+        source_rule_id=source_rule_id,
+        alert_code=alert_code,
+    )
     cursor = db_conn.execute(
         """
         INSERT INTO alert_instances (
-            monitored_object_id, alert_code, source_rule_id, severity, status,
+            monitored_object_id, alert_code, source_rule_id, identity_kind, identity_key, severity, status,
             status_updated_at, status_updated_by_user_id, status_note,
             first_occurred_at, last_occurred_at, repeat_count,
             latest_message, metadata_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 'open', ?, NULL, NULL, ?, ?, 1, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, NULL, NULL, ?, ?, 1, ?, ?, ?, ?)
         """,
         (
             monitored_object_id,
             alert_code,
             source_rule_id,
+            normalized_identity_kind,
+            normalized_identity_key,
             severity,
             received_at,
             occurred_at,
@@ -204,6 +219,8 @@ def create_alert_instance(
             "source": "worker",
             "alert_code": alert_code,
             "source_rule_id": source_rule_id,
+            "identity_kind": normalized_identity_kind,
+            "identity_key": normalized_identity_key,
         },
     )
 
@@ -269,6 +286,7 @@ def sync_latest_state_alert(
         rows_to_resolve = db_conn.execute(
             """
             SELECT id, monitored_object_id, alert_code, source_rule_id, severity, status,
+                   identity_kind, identity_key,
                    acknowledged_at, acknowledged_by_user_id,
                    first_occurred_at, last_occurred_at, repeat_count,
                    latest_message, metadata_json
@@ -297,6 +315,7 @@ def sync_latest_state_alert(
     rows_to_resolve = db_conn.execute(
         """
         SELECT id, monitored_object_id, alert_code, source_rule_id, severity, status,
+               identity_kind, identity_key,
                acknowledged_at, acknowledged_by_user_id,
                first_occurred_at, last_occurred_at, repeat_count,
                latest_message, metadata_json
@@ -405,14 +424,27 @@ def threshold_message(rule, metric_value: float, level: str) -> str:
     ) or "-"
 
 
-def fetch_open_alert_rows_for_rule_ids(*, monitored_object_id: int, rule_ids: list[int]):
+def fetch_open_alert_rows_for_rule_ids(
+    *,
+    monitored_object_id: int,
+    rule_ids: list[int],
+    exclude_alert_instance_ids: set[int] | None = None,
+):
     if not rule_ids:
         return []
 
     placeholders = ", ".join("?" for _ in rule_ids)
+    exclude_alert_instance_ids = exclude_alert_instance_ids or set()
+    exclude_clause = ""
+    exclude_params: tuple[int, ...] = ()
+    if exclude_alert_instance_ids:
+        exclude_placeholders = ", ".join("?" for _ in exclude_alert_instance_ids)
+        exclude_clause = f" AND id NOT IN ({exclude_placeholders})"
+        exclude_params = tuple(exclude_alert_instance_ids)
     return get_db().execute(
         f"""
         SELECT id, monitored_object_id, alert_code, source_rule_id, severity, status,
+               identity_kind, identity_key,
                acknowledged_at, acknowledged_by_user_id,
                first_occurred_at, last_occurred_at, repeat_count,
                latest_message, metadata_json
@@ -420,9 +452,30 @@ def fetch_open_alert_rows_for_rule_ids(*, monitored_object_id: int, rule_ids: li
         WHERE monitored_object_id = ?
           AND status != 'resolved'
           AND source_rule_id IN ({placeholders})
+          {exclude_clause}
         """,
-        (monitored_object_id, *rule_ids),
+        (monitored_object_id, *rule_ids, *exclude_params),
     ).fetchall()
+
+
+def fetch_open_alert_row_for_identity(*, monitored_object_id: int, identity_kind: str, identity_key: str):
+    return get_db().execute(
+        """
+        SELECT id, monitored_object_id, alert_code, source_rule_id, severity, status,
+               identity_kind, identity_key,
+               acknowledged_at, acknowledged_by_user_id,
+               first_occurred_at, last_occurred_at, repeat_count,
+               latest_message, metadata_json
+        FROM alert_instances
+        WHERE monitored_object_id = ?
+          AND identity_kind = ?
+          AND identity_key = ?
+          AND status != 'resolved'
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (monitored_object_id, identity_kind, identity_key),
+    ).fetchone()
 
 
 def build_threshold_alert_metadata(rule, metric_value: float, level: str, family_key: tuple[str, str | None, str | None, str | None]) -> str:
@@ -608,6 +661,15 @@ def sync_threshold_alerts(
         families.setdefault(threshold_family_key(rule), []).append(rule)
 
     for family_key, family_rules in families.items():
+        family_identity_key = build_threshold_family_identity_key_from_family_key(
+            monitored_object_id=monitored_object_id,
+            family_key=family_key,
+        )
+        family_existing = fetch_open_alert_row_for_identity(
+            monitored_object_id=monitored_object_id,
+            identity_kind=ALERT_IDENTITY_KIND_FAMILY,
+            identity_key=family_identity_key,
+        )
         metric_value = numeric_metric_value(
             state,
             family_rules[0]["metric_key"],
@@ -624,6 +686,7 @@ def sync_threshold_alerts(
             for rule in family_rules
             if isinstance(rule["id"], int) and rule["id"] not in firing_rule_ids
         ]
+        excluded_row_ids = {family_existing["id"]} if family_existing is not None else set()
 
         recovery_reason = threshold_resolution_reason_for_family(family_key)
         if non_firing_rule_ids:
@@ -631,6 +694,7 @@ def sync_threshold_alerts(
                 rows=fetch_open_alert_rows_for_rule_ids(
                     monitored_object_id=monitored_object_id,
                     rule_ids=non_firing_rule_ids,
+                    exclude_alert_instance_ids=excluded_row_ids,
                 ),
                 occurred_at=occurred_at,
                 received_at=received_at,
@@ -649,6 +713,7 @@ def sync_threshold_alerts(
                 rows=fetch_open_alert_rows_for_rule_ids(
                     monitored_object_id=monitored_object_id,
                     rule_ids=losing_rule_ids,
+                    exclude_alert_instance_ids=excluded_row_ids,
                 ),
                 occurred_at=occurred_at,
                 received_at=received_at,
@@ -664,6 +729,20 @@ def sync_threshold_alerts(
             )
 
         if winner_rule is None or metric_value is None or winner_rule_id is None:
+            if family_existing is not None:
+                resolve_alert_rows(
+                    rows=[family_existing],
+                    occurred_at=occurred_at,
+                    received_at=received_at,
+                    note=threshold_resolution_note_for_reason(recovery_reason),
+                    payload={
+                        "source": "worker",
+                        "reason": recovery_reason,
+                        "family_key": list(family_key),
+                    },
+                    resolution_source="auto_recovery",
+                    resolution_reason=recovery_reason,
+                )
             continue
 
         winner_level = winner_rule["_threshold_level"]
@@ -672,24 +751,15 @@ def sync_threshold_alerts(
         latest_message = threshold_message(winner_rule, metric_value, winner_level)
         metadata_json = build_threshold_alert_metadata(winner_rule, metric_value, winner_level, family_key)
         alert_code = f"rule.{winner_rule_id}"
-        existing = db_conn.execute(
-            """
-            SELECT id, status, severity, last_occurred_at, latest_message, metadata_json
-            FROM alert_instances
-            WHERE monitored_object_id = ?
-              AND source_rule_id = ?
-              AND status != 'resolved'
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (monitored_object_id, winner_rule_id),
-        ).fetchone()
+        existing = family_existing
 
         if existing is None:
             create_alert_instance(
                 monitored_object_id=monitored_object_id,
                 alert_code=alert_code,
                 source_rule_id=winner_rule_id,
+                identity_kind=ALERT_IDENTITY_KIND_FAMILY,
+                identity_key=family_identity_key,
                 severity=winner_level,
                 occurred_at=occurred_at,
                 received_at=received_at,
@@ -702,7 +772,8 @@ def sync_threshold_alerts(
             db_conn.execute(
                 """
                 UPDATE alert_instances
-                SET source_rule_id = ?,
+                SET alert_code = ?,
+                    source_rule_id = ?,
                     severity = ?,
                     last_occurred_at = ?,
                     repeat_count = repeat_count + 1,
@@ -712,6 +783,7 @@ def sync_threshold_alerts(
                 WHERE id = ?
                 """,
                 (
+                    alert_code,
                     winner_rule_id,
                     winner_level,
                     occurred_at,
@@ -724,14 +796,17 @@ def sync_threshold_alerts(
             continue
 
         should_refresh_last_occurred = (
-            existing["severity"] != winner_level
+            existing["alert_code"] != alert_code
+            or existing["source_rule_id"] != winner_rule_id
+            or existing["severity"] != winner_level
             or existing["latest_message"] != latest_message
             or existing["metadata_json"] != metadata_json
         )
         db_conn.execute(
             """
             UPDATE alert_instances
-            SET source_rule_id = ?,
+            SET alert_code = ?,
+                source_rule_id = ?,
                 severity = ?,
                 last_occurred_at = ?,
                 latest_message = ?,
@@ -740,6 +815,7 @@ def sync_threshold_alerts(
             WHERE id = ?
             """,
             (
+                alert_code,
                 winner_rule_id,
                 winner_level,
                 occurred_at if should_refresh_last_occurred else existing["last_occurred_at"],

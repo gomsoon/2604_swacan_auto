@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 from app.db import (
+    ensure_alert_identity_schema,
     ensure_alert_rule_lifecycle_schema,
     ensure_alert_history_archive_schema,
     get_db,
@@ -320,3 +321,73 @@ def test_ensure_alert_history_archive_schema_adds_snapshot_columns_and_backfills
     assert {"source_rule_key", "source_rule_display_name_snapshot"} <= columns
     assert row["source_rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
     assert row["source_rule_display_name_snapshot"] == "Process CPU High"
+
+
+def test_ensure_alert_identity_schema_adds_identity_columns_and_backfills_threshold_family() -> None:
+    db_conn = sqlite3.connect(":memory:")
+    db_conn.row_factory = sqlite3.Row
+    db_conn.execute(
+        """
+        CREATE TABLE alert_rules (
+            id INTEGER PRIMARY KEY,
+            signal_type TEXT,
+            state_type TEXT,
+            metric_key TEXT,
+            comparison TEXT
+        )
+        """
+    )
+    db_conn.execute(
+        """
+        CREATE TABLE alert_instances (
+            id INTEGER PRIMARY KEY,
+            monitored_object_id INTEGER NOT NULL,
+            alert_code TEXT NOT NULL,
+            source_rule_id INTEGER
+        )
+        """
+    )
+    db_conn.execute(
+        """
+        CREATE TABLE alert_history_archive (
+            id INTEGER PRIMARY KEY,
+            monitored_object_id INTEGER NOT NULL,
+            alert_code TEXT NOT NULL,
+            source_rule_id INTEGER
+        )
+        """
+    )
+    db_conn.execute(
+        """
+        INSERT INTO alert_rules (id, signal_type, state_type, metric_key, comparison)
+        VALUES (1501, 'latest_state_metric', 'process', 'cpu_usage', 'gte')
+        """
+    )
+    db_conn.execute(
+        "INSERT INTO alert_instances (id, monitored_object_id, alert_code, source_rule_id) VALUES (1, 1302, 'rule.1501', 1501)"
+    )
+    db_conn.execute(
+        "INSERT INTO alert_history_archive (id, monitored_object_id, alert_code, source_rule_id) VALUES (1, 1302, 'rule.1501', 1501)"
+    )
+
+    ensure_alert_identity_schema(db_conn)
+
+    instance_columns = {
+        row["name"] for row in db_conn.execute("PRAGMA table_info(alert_instances)").fetchall()
+    }
+    archive_columns = {
+        row["name"] for row in db_conn.execute("PRAGMA table_info(alert_history_archive)").fetchall()
+    }
+    instance_row = db_conn.execute(
+        "SELECT identity_kind, identity_key FROM alert_instances WHERE id = 1"
+    ).fetchone()
+    archive_row = db_conn.execute(
+        "SELECT identity_kind, identity_key FROM alert_history_archive WHERE id = 1"
+    ).fetchone()
+
+    assert {"identity_kind", "identity_key"} <= instance_columns
+    assert {"identity_kind", "identity_key"} <= archive_columns
+    assert instance_row["identity_kind"] == "family"
+    assert instance_row["identity_key"] == "threshold:1302:process:cpu_usage:gte"
+    assert archive_row["identity_kind"] == "family"
+    assert archive_row["identity_key"] == "threshold:1302:process:cpu_usage:gte"

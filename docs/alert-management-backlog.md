@@ -44,6 +44,20 @@ Current implementation note for item 3:
 - `winner_display_name` and `suppressed_rule_display_names` are now available for operator-facing cards
 - deep candidate catalogs and clause-level suppressed traces remain backlog items
 
+Current scope note for item 4:
+
+- review family-level current alert identity after preview/runtime precedence is aligned
+- start with threshold-style families only
+- defer event-family identity and archive analytics until the threshold path is stable
+
+Current implementation note for item 4:
+
+- threshold-style current alerts now use family-level identity
+- winner changes inside the same threshold family now reuse the same current alert row
+- runtime/archive now persist `identity_kind + identity_key` for this path
+- event families still remain rule-based for now
+- opener snapshots, winner transition timeline, and suppressed current rows remain deferred
+
 버전: Draft 0.3  
 작성일: 2026-04-18
 

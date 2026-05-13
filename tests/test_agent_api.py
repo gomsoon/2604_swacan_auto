@@ -1035,7 +1035,7 @@ def test_agent_stale_threshold_rule_opens_without_new_ingest_and_resolves_on_fre
         db_conn = get_db()
         warning_alert = db_conn.execute(
             """
-            SELECT severity, status, repeat_count, latest_message, metadata_json
+            SELECT severity, status, repeat_count, latest_message, metadata_json, identity_kind, identity_key
             FROM alert_instances
             WHERE monitored_object_id = 1303
               AND source_rule_id = 1904
@@ -1052,7 +1052,7 @@ def test_agent_stale_threshold_rule_opens_without_new_ingest_and_resolves_on_fre
         db_conn = get_db()
         critical_alert = db_conn.execute(
             """
-            SELECT severity, status, repeat_count, latest_message, metadata_json
+            SELECT severity, status, repeat_count, latest_message, metadata_json, identity_kind, identity_key
             FROM alert_instances
             WHERE monitored_object_id = 1303
               AND source_rule_id = 1904
@@ -1096,6 +1096,8 @@ def test_agent_stale_threshold_rule_opens_without_new_ingest_and_resolves_on_fre
     assert warning_alert["severity"] == "warning"
     assert warning_alert["status"] == "open"
     assert warning_alert["repeat_count"] == 1
+    assert warning_alert["identity_kind"] == "family"
+    assert warning_alert["identity_key"] == "threshold:1303:agent:heartbeat_age_seconds:gte"
     assert warning_alert["latest_message"] == "heartbeat_age_seconds=15.000 >= 10.000"
     assert warning_metadata["metric_key"] == "heartbeat_age_seconds"
     assert warning_metadata["metric_value"] == 15.0
@@ -1105,6 +1107,8 @@ def test_agent_stale_threshold_rule_opens_without_new_ingest_and_resolves_on_fre
     assert critical_alert["severity"] == "critical"
     assert critical_alert["status"] == "open"
     assert critical_alert["repeat_count"] == 1
+    assert critical_alert["identity_kind"] == "family"
+    assert critical_alert["identity_key"] == "threshold:1303:agent:heartbeat_age_seconds:gte"
     assert critical_alert["latest_message"] == "heartbeat_age_seconds=35.000 >= 30.000"
     assert critical_metadata["metric_value"] == 35.0
     assert critical_metadata["explanation"]["threshold_level"] == "critical"
@@ -1225,7 +1229,7 @@ def test_process_no_data_threshold_rule_opens_without_new_ingest_and_resolves_on
         db_conn = get_db()
         warning_alert = db_conn.execute(
             """
-            SELECT severity, status, repeat_count, latest_message, metadata_json
+            SELECT severity, status, repeat_count, latest_message, metadata_json, identity_kind, identity_key
             FROM alert_instances
             WHERE monitored_object_id = 1302
               AND source_rule_id = 1905
@@ -1242,7 +1246,7 @@ def test_process_no_data_threshold_rule_opens_without_new_ingest_and_resolves_on
         db_conn = get_db()
         critical_alert = db_conn.execute(
             """
-            SELECT severity, status, repeat_count, latest_message, metadata_json
+            SELECT severity, status, repeat_count, latest_message, metadata_json, identity_kind, identity_key
             FROM alert_instances
             WHERE monitored_object_id = 1302
               AND source_rule_id = 1905
@@ -1286,6 +1290,8 @@ def test_process_no_data_threshold_rule_opens_without_new_ingest_and_resolves_on
     assert warning_alert["severity"] == "warning"
     assert warning_alert["status"] == "open"
     assert warning_alert["repeat_count"] == 1
+    assert warning_alert["identity_kind"] == "family"
+    assert warning_alert["identity_key"] == "threshold:1302:process:latest_state_age_seconds:gte"
     assert warning_alert["latest_message"] == "latest_state_age_seconds=15.000 >= 10.000"
     assert warning_metadata["metric_key"] == "latest_state_age_seconds"
     assert warning_metadata["metric_value"] == 15.0
@@ -1295,6 +1301,8 @@ def test_process_no_data_threshold_rule_opens_without_new_ingest_and_resolves_on
     assert critical_alert["severity"] == "critical"
     assert critical_alert["status"] == "open"
     assert critical_alert["repeat_count"] == 1
+    assert critical_alert["identity_kind"] == "family"
+    assert critical_alert["identity_key"] == "threshold:1302:process:latest_state_age_seconds:gte"
     assert critical_alert["latest_message"] == "latest_state_age_seconds=35.000 >= 30.000"
     assert critical_metadata["metric_key"] == "latest_state_age_seconds"
     assert critical_metadata["metric_value"] == 35.0
@@ -1396,36 +1404,25 @@ def test_specific_threshold_rule_resolves_existing_general_alert_by_precedence(s
     with seeded_app.app_context():
         second_result = process_pending_ingest(limit=1)
         db_conn = get_db()
-        general_rows = db_conn.execute(
+        family_rows = db_conn.execute(
             """
-            SELECT id, alert_code, severity, status, resolved_at
+            SELECT id, alert_code, source_rule_id, identity_kind, identity_key, severity, status, repeat_count, resolved_at
             FROM alert_instances
             WHERE monitored_object_id = 1302
-              AND source_rule_id = 1501
+              AND identity_kind = 'family'
             ORDER BY id ASC
             """
         ).fetchall()
-        specific_row = db_conn.execute(
+        current_row = db_conn.execute(
             """
-            SELECT alert_code, severity, status, repeat_count, latest_message
+            SELECT id, alert_code, source_rule_id, identity_kind, identity_key, severity, status, repeat_count, latest_message
             FROM alert_instances
             WHERE monitored_object_id = 1302
-              AND source_rule_id = 1901
+              AND identity_kind = 'family'
               AND status = 'open'
             ORDER BY id DESC
             LIMIT 1
             """
-        ).fetchone()
-        history_row = db_conn.execute(
-            """
-            SELECT note, payload_json
-            FROM alert_history
-            WHERE alert_instance_id = ?
-              AND action_type = 'resolved'
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (initial_general["id"],),
         ).fetchone()
         archive_row = db_conn.execute(
             """
@@ -1442,21 +1439,18 @@ def test_specific_threshold_rule_resolves_existing_general_alert_by_precedence(s
     assert second_result["processed_items"] == 1
     assert initial_general["alert_code"] == "rule.1501"
     assert initial_general["status"] == "open"
-    assert len(general_rows) == 1
-    assert general_rows[0]["status"] == "resolved"
-    assert general_rows[0]["resolved_at"] is not None
-    assert specific_row["alert_code"] == "rule.1901"
-    assert specific_row["severity"] == "warning"
-    assert specific_row["status"] == "open"
-    assert specific_row["repeat_count"] == 1
-    assert "88.000" in specific_row["latest_message"]
-    assert history_row["note"] == "suppressed by threshold precedence"
-    assert json.loads(history_row["payload_json"])["reason"] == "suppressed_by_precedence"
-    assert archive_row["source_rule_id"] == 1501
-    assert archive_row["source_rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
-    assert archive_row["source_rule_display_name_snapshot"] == "Process CPU High"
-    assert archive_row["resolution_source"] == "system_cleanup"
-    assert archive_row["resolution_reason"] == "suppressed_by_precedence"
+    assert len(family_rows) == 1
+    assert family_rows[0]["resolved_at"] is None
+    assert current_row["id"] == initial_general["id"]
+    assert current_row["alert_code"] == "rule.1901"
+    assert current_row["source_rule_id"] == 1901
+    assert current_row["identity_kind"] == "family"
+    assert current_row["identity_key"] == "threshold:1302:process:cpu_usage:gte"
+    assert current_row["severity"] == "warning"
+    assert current_row["status"] == "open"
+    assert current_row["repeat_count"] == 2
+    assert "88.000" in current_row["latest_message"]
+    assert archive_row is None
 
 
 def test_compound_threshold_rule_wins_at_runtime_and_resolves_on_recovery(seeded_app, seeded_client) -> None:

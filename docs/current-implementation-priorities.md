@@ -41,6 +41,19 @@ Current implementation note for item 3:
 - current alert and archive cards can read `winner_display_name` and `suppressed_rule_display_names`
 - full candidate catalogs, family-level identity, and `reason_code` are still deferred
 
+Current scope note for the next review step:
+
+- move current alert identity from rule-level to family-level for threshold-style families first
+- keep event families rule-based until the threshold migration is stable
+- treat winner changes as incident updates rather than close/open churn
+
+Current implementation note for the next review step:
+
+- threshold-style family-level identity is now implemented in runtime storage
+- phase 1 now persists durable `identity_kind + identity_key` fields for current/archive rows
+- threshold winner changes now preserve the same current row and therefore preserve ACK/in-progress state
+- event family identity remains the next follow-up slice
+
 ## Agent Addendum
 
 - See [agent-current-state-backlog.md](C:/2604_swacan_auto/docs/agent-current-state-backlog.md).

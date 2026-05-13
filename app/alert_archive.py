@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from .alert_explainability import build_alert_explanation_from_metadata
+from .alert_identity import ALERT_IDENTITY_KIND_RULE, build_rule_identity_key
 
 
 RESOLUTION_SOURCES = {
@@ -73,6 +74,18 @@ def insert_alert_history_archive(
 
     source_rule_key, source_rule_display_name_snapshot = _resolve_archive_rule_snapshot(db_conn, alert_row)
     metadata_json = _merge_archive_metadata_json(alert_row["metadata_json"], resolution_note)
+    row_keys = set(alert_row.keys()) if hasattr(alert_row, "keys") else set()
+    identity_kind = (
+        alert_row["identity_kind"] if "identity_kind" in row_keys else ALERT_IDENTITY_KIND_RULE
+    )
+    identity_key = (
+        alert_row["identity_key"]
+        if "identity_key" in row_keys
+        else build_rule_identity_key(
+            source_rule_id=alert_row["source_rule_id"],
+            alert_code=alert_row["alert_code"],
+        )
+    )
 
     cursor = db_conn.execute(
         """
@@ -82,6 +95,8 @@ def insert_alert_history_archive(
             source_rule_id,
             source_rule_key,
             source_rule_display_name_snapshot,
+            identity_kind,
+            identity_key,
             opened_at,
             resolved_at,
             first_severity,
@@ -99,7 +114,7 @@ def insert_alert_history_archive(
             metadata_json,
             created_at,
             updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             alert_row["monitored_object_id"],
@@ -107,6 +122,8 @@ def insert_alert_history_archive(
             alert_row["source_rule_id"],
             source_rule_key,
             source_rule_display_name_snapshot,
+            identity_kind,
+            identity_key,
             alert_row["first_occurred_at"],
             resolved_at,
             alert_row["severity"],

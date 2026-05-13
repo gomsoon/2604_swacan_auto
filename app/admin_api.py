@@ -423,7 +423,7 @@ def resolve_alert_instance(
 ):
     existing = db_conn.execute(
         """
-        SELECT id, monitored_object_id, alert_code, source_rule_id, severity, status,
+        SELECT id, monitored_object_id, alert_code, source_rule_id, identity_kind, identity_key, severity, status,
                acknowledged_at, acknowledged_by_user_id,
                first_occurred_at, last_occurred_at, repeat_count,
                latest_message, metadata_json

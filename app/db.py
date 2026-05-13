@@ -6,6 +6,8 @@ import re
 
 import click
 from flask import current_app, g
+
+from .alert_identity import derive_alert_identity
 from flask.cli import with_appcontext
 
 
@@ -221,6 +223,113 @@ def ensure_alert_history_archive_schema(db_conn: sqlite3.Connection) -> None:
     db_conn.commit()
 
 
+def ensure_alert_identity_schema(db_conn: sqlite3.Connection) -> None:
+    has_alert_rules = _table_exists(db_conn, "alert_rules")
+    if _table_exists(db_conn, "alert_instances"):
+        columns = _table_columns(db_conn, "alert_instances")
+        if "identity_kind" not in columns:
+            db_conn.execute(
+                "ALTER TABLE alert_instances ADD COLUMN identity_kind TEXT NOT NULL DEFAULT 'rule'"
+            )
+        if "identity_key" not in columns:
+            db_conn.execute("ALTER TABLE alert_instances ADD COLUMN identity_key TEXT")
+        if {"monitored_object_id", "identity_kind", "identity_key", "status"} <= _table_columns(
+            db_conn, "alert_instances"
+        ):
+            db_conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_alert_instances_identity_status "
+                "ON alert_instances(monitored_object_id, identity_kind, identity_key, status)"
+            )
+
+        if has_alert_rules:
+            rows = db_conn.execute(
+                """
+                SELECT alerts.id, alerts.monitored_object_id, alerts.alert_code, alerts.source_rule_id,
+                       alerts.identity_kind, alerts.identity_key,
+                       rules.signal_type, rules.state_type, rules.metric_key, rules.comparison
+                FROM alert_instances AS alerts
+                LEFT JOIN alert_rules AS rules ON rules.id = alerts.source_rule_id
+                """
+            ).fetchall()
+        else:
+            rows = db_conn.execute(
+                """
+                SELECT alerts.id, alerts.monitored_object_id, alerts.alert_code, alerts.source_rule_id,
+                       alerts.identity_kind, alerts.identity_key,
+                       NULL AS signal_type, NULL AS state_type, NULL AS metric_key, NULL AS comparison
+                FROM alert_instances AS alerts
+                """
+            ).fetchall()
+        for row in rows:
+            identity_kind, identity_key = derive_alert_identity(
+                monitored_object_id=row["monitored_object_id"],
+                alert_code=row["alert_code"],
+                source_rule_id=row["source_rule_id"],
+                signal_type=row["signal_type"],
+                state_type=row["state_type"],
+                metric_key=row["metric_key"],
+                comparison=row["comparison"],
+            )
+            if row["identity_kind"] != identity_kind or row["identity_key"] != identity_key:
+                db_conn.execute(
+                    """
+                    UPDATE alert_instances
+                    SET identity_kind = ?, identity_key = ?
+                    WHERE id = ?
+                    """,
+                    (identity_kind, identity_key, row["id"]),
+                )
+
+    if _table_exists(db_conn, "alert_history_archive"):
+        columns = _table_columns(db_conn, "alert_history_archive")
+        if "identity_kind" not in columns:
+            db_conn.execute("ALTER TABLE alert_history_archive ADD COLUMN identity_kind TEXT")
+        if "identity_key" not in columns:
+            db_conn.execute("ALTER TABLE alert_history_archive ADD COLUMN identity_key TEXT")
+
+        if has_alert_rules:
+            rows = db_conn.execute(
+                """
+                SELECT archive.id, archive.monitored_object_id, archive.alert_code, archive.source_rule_id,
+                       archive.identity_kind, archive.identity_key,
+                       rules.signal_type, rules.state_type, rules.metric_key, rules.comparison
+                FROM alert_history_archive AS archive
+                LEFT JOIN alert_rules AS rules ON rules.id = archive.source_rule_id
+                """
+            ).fetchall()
+        else:
+            rows = db_conn.execute(
+                """
+                SELECT archive.id, archive.monitored_object_id, archive.alert_code, archive.source_rule_id,
+                       archive.identity_kind, archive.identity_key,
+                       NULL AS signal_type, NULL AS state_type, NULL AS metric_key, NULL AS comparison
+                FROM alert_history_archive AS archive
+                """
+            ).fetchall()
+        for row in rows:
+            identity_kind, identity_key = derive_alert_identity(
+                monitored_object_id=row["monitored_object_id"],
+                alert_code=row["alert_code"],
+                source_rule_id=row["source_rule_id"],
+                signal_type=row["signal_type"],
+                state_type=row["state_type"],
+                metric_key=row["metric_key"],
+                comparison=row["comparison"],
+            )
+            if row["identity_kind"] != identity_kind or row["identity_key"] != identity_key:
+                db_conn.execute(
+                    """
+                    UPDATE alert_history_archive
+                    SET identity_kind = ?, identity_key = ?
+                    WHERE id = ?
+                    """,
+                    (identity_kind, identity_key, row["id"]),
+                )
+
+    db_conn.commit()
+
+
 def ensure_runtime_schema(db_conn: sqlite3.Connection) -> None:
     ensure_alert_rule_lifecycle_schema(db_conn)
     ensure_alert_history_archive_schema(db_conn)
+    ensure_alert_identity_schema(db_conn)

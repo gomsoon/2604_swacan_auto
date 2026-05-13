@@ -21,10 +21,15 @@ Phase 1 is intentionally narrow.
 
 Out of scope for phase 1:
 
-- compound publish/runtime enablement
 - family-level alert identity
 - suppressed current alert rows
 - full candidate catalog runtime explainability
+
+Compound threshold publish/runtime enablement has since been completed in a
+separate follow-up slice. Family-level identity remains the next review topic.
+
+That follow-up review has now completed for threshold-style runtime families.
+Event-family identity still remains deferred.
 
 ## Threshold Family
 
