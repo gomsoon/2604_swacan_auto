@@ -172,7 +172,9 @@ def test_serialize_alert_archive_row_handles_metadata_json_and_invalid_json() ->
         "winning_condition_trace": None,
         "family_key": None,
         "winner_rule_key": "threshold.process.cpu_usage.process-cpu-high",
+        "winner_display_name": "Process CPU High",
         "suppressed_rule_keys": [],
+        "suppressed_rule_display_names": [],
         "resolution_reason": RESOLUTION_REASON_MANUAL_RESOLVED,
     }
     assert invalid_payload["was_acknowledged"] is False
@@ -189,6 +191,8 @@ def test_serialize_alert_archive_row_handles_metadata_json_and_invalid_json() ->
         "winning_condition_trace": None,
         "family_key": None,
         "winner_rule_key": "threshold.agent.outbox_queue_depth.agent-queue-high",
+        "winner_display_name": "Agent Queue High",
         "suppressed_rule_keys": [],
+        "suppressed_rule_display_names": [],
         "resolution_reason": None,
     }

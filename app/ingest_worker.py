@@ -439,7 +439,9 @@ def build_threshold_alert_metadata(rule, metric_value: float, level: str, family
         winning_condition_trace=rule.get("_winning_condition_trace"),
         family_key=family_key,
         winner_rule_key=rule.get("rule_key"),
+        winner_display_name=rule.get("display_name"),
         suppressed_rule_keys=rule.get("_suppressed_rule_keys"),
+        suppressed_rule_display_names=rule.get("_suppressed_rule_display_names"),
         resolution_reason=None,
     )
     return json.dumps(
@@ -460,7 +462,9 @@ def build_threshold_alert_metadata(rule, metric_value: float, level: str, family
             "reason": reason,
             "winning_condition_trace": rule.get("_winning_condition_trace"),
             "winner_rule_key": rule.get("rule_key"),
+            "winner_display_name": rule.get("display_name"),
             "suppressed_rule_keys": rule.get("_suppressed_rule_keys") or [],
+            "suppressed_rule_display_names": rule.get("_suppressed_rule_display_names") or [],
             "family_key": list(family_key),
             "explanation": explanation,
         },
@@ -516,7 +520,9 @@ def build_event_alert_metadata(rule, grouped_event: dict, level: str, family_key
         winning_condition_trace=rule.get("_winning_condition_trace"),
         family_key=family_key,
         winner_rule_key=rule.get("rule_key"),
+        winner_display_name=rule.get("display_name"),
         suppressed_rule_keys=rule.get("_suppressed_rule_keys"),
+        suppressed_rule_display_names=rule.get("_suppressed_rule_display_names"),
         resolution_reason=None,
     )
     return json.dumps(
@@ -539,7 +545,9 @@ def build_event_alert_metadata(rule, grouped_event: dict, level: str, family_key
             "reason": reason,
             "winning_condition_trace": rule.get("_winning_condition_trace"),
             "winner_rule_key": rule.get("rule_key"),
+            "winner_display_name": rule.get("display_name"),
             "suppressed_rule_keys": rule.get("_suppressed_rule_keys") or [],
+            "suppressed_rule_display_names": rule.get("_suppressed_rule_display_names") or [],
             "family_key": list(family_key),
             "explanation": explanation,
         },
@@ -660,6 +668,7 @@ def sync_threshold_alerts(
 
         winner_level = winner_rule["_threshold_level"]
         winner_rule["_suppressed_rule_keys"] = decision["suppressed_rule_keys"]
+        winner_rule["_suppressed_rule_display_names"] = decision["suppressed_rule_display_names"]
         latest_message = threshold_message(winner_rule, metric_value, winner_level)
         metadata_json = build_threshold_alert_metadata(winner_rule, metric_value, winner_level, family_key)
         alert_code = f"rule.{winner_rule_id}"
@@ -895,6 +904,7 @@ def sync_event_alerts(
 
         winner_level = winner_rule["_threshold_level"]
         winner_rule["_suppressed_rule_keys"] = decision["suppressed_rule_keys"]
+        winner_rule["_suppressed_rule_display_names"] = decision["suppressed_rule_display_names"]
         latest_message = event_message(winner_rule, repeat_count, winner_level)
         metadata_json = build_event_alert_metadata(winner_rule, grouped_event, winner_level, family_key)
         alert_code = f"rule.{winner_rule_id}"

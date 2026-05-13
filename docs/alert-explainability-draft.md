@@ -27,7 +27,9 @@ The shared `explanation` object should stay small and stable.
 - `winning_condition_trace`
 - `family_key`
 - `winner_rule_key`
+- `winner_display_name`
 - `suppressed_rule_keys`
+- `suppressed_rule_display_names`
 - `resolution_reason`
 
 Notes:

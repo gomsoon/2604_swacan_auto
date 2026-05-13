@@ -1624,7 +1624,9 @@ def test_compound_threshold_rule_wins_at_runtime_and_resolves_on_recovery(seeded
         },
         "family_key": ["threshold", "process", "cpu_usage", "gte"],
         "winner_rule_key": "threshold.process.cpu_usage.app-process-cpu-band",
+        "winner_display_name": "App Process CPU Band",
         "suppressed_rule_keys": ["threshold.process.cpu_usage.process-cpu-high"],
+        "suppressed_rule_display_names": ["Process CPU High"],
         "resolution_reason": None,
     }
     assert second_result["processed_items"] == 1

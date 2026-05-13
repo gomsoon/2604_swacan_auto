@@ -4,9 +4,9 @@
 
 Current recommended alert-focused sequence:
 
-1. Alert lifecycle / archive hardening
-2. Event / stale / no-data rule MVP scope
-3. Preview/runtime explainability
+1. Preview/runtime explainability expansion
+2. Family-level alert identity review
+3. Monitoring alert operations follow-up
 
 This sequence should be treated as the default follow-up order unless a new
 operational blocker changes priorities.
@@ -34,6 +34,12 @@ Current scope note for item 3:
 - keep the phase narrow and contract-oriented before larger UI work
 - leave deep candidate traces, family-level identity, and structured reason
   codes on the deferred backlog
+
+Current implementation note for item 3:
+
+- preview/current/archive now share a common `explanation` object
+- current alert and archive cards can read `winner_display_name` and `suppressed_rule_display_names`
+- full candidate catalogs, family-level identity, and `reason_code` are still deferred
 
 ## Agent Addendum
 

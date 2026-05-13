@@ -1047,7 +1047,9 @@ def build_alert_rule_target_preview(
             or threshold_evaluation["winning_condition_trace"],
             family_key=alert_rule_family_key(winner_rule or rule),
             winner_rule_key=decision.get("winner_rule_key"),
+            winner_display_name=decision.get("winner_display_name"),
             suppressed_rule_keys=decision.get("suppressed_rule_keys"),
+            suppressed_rule_display_names=decision.get("suppressed_rule_display_names"),
             resolution_reason=None,
         )
         decision_payload = {

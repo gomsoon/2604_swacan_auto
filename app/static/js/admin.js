@@ -6,6 +6,7 @@
     formatAlertResolutionReason,
     formatAlertResolutionSource,
     formatTimestamp,
+    formatAlertExplanationDecision,
     showBanner,
 } from "./common.js";
 
@@ -1434,6 +1435,7 @@ function renderAlerts(items) {
             (item) => {
                 const explanationRule = formatAlertExplanationRule(item);
                 const explanationReason = formatAlertExplanationReason(item);
+                const explanationDecision = formatAlertExplanationDecision(item);
                 return `
                 <article class="admin-item">
                     <div class="section-header">
@@ -1453,6 +1455,7 @@ function renderAlerts(items) {
                     <p class="admin-meta">explanation ${escapeHtml(explanationRule)}</p>
                     <p class="admin-meta">반복 ${escapeHtml(item.repeat_count)}회 | 최근 ${escapeHtml(formatTimestamp(item.last_occurred_at))}</p>
                     <p class="admin-meta">${escapeHtml(explanationReason)}</p>
+                    <p class="admin-meta">${escapeHtml(explanationDecision)}</p>
                       ${
                           item.is_acknowledged
                               ? `<p class="admin-meta">ACK ${escapeHtml(item.acknowledged_by_username || "-")} | ${escapeHtml(formatTimestamp(item.acknowledged_at))}${item.ack_note ? ` | ${escapeHtml(item.ack_note)}` : ""}</p>`
@@ -1502,6 +1505,7 @@ function renderAlertArchive(items) {
             (item) => {
                 const explanationRule = formatAlertExplanationRule(item);
                 const explanationReason = formatAlertExplanationReason(item);
+                const explanationDecision = formatAlertExplanationDecision(item);
                 return `
                 <article class="admin-item compact-admin-item">
                     <div class="section-header">
@@ -1517,6 +1521,7 @@ function renderAlertArchive(items) {
                     <p class="admin-meta">resolved by ${escapeHtml(item.resolved_by_username || "-")} | target ${escapeHtml(item.source_rule_target_label || item.semantic_type_code || "-")}</p>
                     <p class="admin-meta">explanation ${escapeHtml(explanationRule)}</p>
                     <p class="admin-meta">${escapeHtml(explanationReason)}</p>
+                    <p class="admin-meta">${escapeHtml(explanationDecision)}</p>
                     <p class="admin-meta">${escapeHtml(formatAlertResolutionReason(item))}</p>
                 </article>
             `;

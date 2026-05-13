@@ -6,6 +6,7 @@
     formatAlertResolutionReason,
     formatAlertResolutionSource,
     formatTimestamp,
+    formatAlertExplanationDecision,
     showBanner,
 } from "./common.js";
 import { renderDiagram } from "./diagram.js";
@@ -357,12 +358,14 @@ function renderAlertCards(items, emptyMessage) {
                     const linkedEvent = findGroupedEventForAlert(alert);
                     const explanationRule = formatAlertExplanationRule(alert);
                     const explanationReason = formatAlertExplanationReason(alert);
+                    const explanationDecision = formatAlertExplanationDecision(alert);
                     return `
                         <article class="selection-summary-card ${cardSeverityClass(alert.severity)}${linkedEvent ? " is-actionable" : ""}" data-alert-id="${escapeHtml(alert.id)}"${linkedEvent ? ` data-linked-grouped-event-id="${escapeHtml(linkedEvent.id)}"` : ""}>
                             <h4>${escapeHtml(alert.alert_code)}</h4>
                             <p>${escapeHtml(explanationReason)}</p>
                             <p>${escapeHtml(alert.severity)} | ${escapeHtml(alert.status)} | 반복 ${escapeHtml(alert.repeat_count ?? 1)}회${alert.is_acknowledged ? " | ACK" : ""}</p>
                             <p>${escapeHtml(explanationRule)}</p>
+                            <p>${escapeHtml(explanationDecision)}</p>
                             <p>${escapeHtml(formatTimestamp(alert.last_occurred_at))}</p>
                             ${alert.ack_note ? `<p>ACK 메모: ${escapeHtml(alert.ack_note)}</p>` : ""}
                             ${alert.status_note ? `<p>상태 메모: ${escapeHtml(alert.status_note)}</p>` : ""}
@@ -484,6 +487,7 @@ function renderRuntimeHistorySection(monitoredObjectId) {
                 <p>${escapeHtml(formatAlertExplanationReason(item))}</p>
                 <p>${escapeHtml(item.final_severity)} | ${escapeHtml(formatAlertResolutionSource(item.resolution_source))} | 반복 ${escapeHtml(item.repeat_count ?? 1)}회</p>
                 <p>${escapeHtml(formatAlertExplanationRule(item))}</p>
+                <p>${escapeHtml(formatAlertExplanationDecision(item))}</p>
                 <p>${escapeHtml(formatTimestamp(item.resolved_at))}</p>
                 <p>해결 사유: ${escapeHtml(formatAlertResolutionReason(item))}</p>
             </article>

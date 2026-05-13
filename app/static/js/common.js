@@ -122,6 +122,26 @@ export function formatAlertExplanationReason(itemOrExplanation) {
     return "판정 근거 없음";
 }
 
+export function formatAlertExplanationDecision(itemOrExplanation) {
+    const explanation = normalizeAlertExplanation(itemOrExplanation);
+    if (!explanation) {
+        return "winner / suppressed 정보 없음";
+    }
+    const winnerLabel =
+        explanation.winner_display_name ||
+        explanation.display_name ||
+        explanation.winner_rule_key ||
+        explanation.rule_key ||
+        "winner 없음";
+    const suppressedNames = Array.isArray(explanation.suppressed_rule_display_names)
+        ? explanation.suppressed_rule_display_names.filter((value) => typeof value === "string" && value.trim().length > 0)
+        : [];
+    const suppressedLabel = suppressedNames.length
+        ? `suppressed ${suppressedNames.length}건: ${suppressedNames.join(", ")}`
+        : "suppressed 없음";
+    return `winner ${winnerLabel} | ${suppressedLabel}`;
+}
+
 export function bindGlobalUi() {
     const logoutButton = document.getElementById("logout-button");
     if (!logoutButton) {

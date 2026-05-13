@@ -79,13 +79,20 @@ def build_alert_explanation(
     winning_condition_trace: dict[str, Any] | None,
     family_key: list[Any] | tuple[Any, ...] | None,
     winner_rule_key: str | None,
+    winner_display_name: str | None,
     suppressed_rule_keys: list[str] | None,
+    suppressed_rule_display_names: list[str] | None,
     resolution_reason: str | None,
 ) -> dict[str, Any]:
     normalized_family_key = list(family_key) if isinstance(family_key, tuple) else family_key
     normalized_suppressed_rule_keys = [
         value
         for value in (suppressed_rule_keys or [])
+        if isinstance(value, str) and value
+    ]
+    normalized_suppressed_rule_display_names = [
+        value
+        for value in (suppressed_rule_display_names or [])
         if isinstance(value, str) and value
     ]
     return {
@@ -98,7 +105,9 @@ def build_alert_explanation(
         "winning_condition_trace": winning_condition_trace,
         "family_key": normalized_family_key,
         "winner_rule_key": winner_rule_key,
+        "winner_display_name": winner_display_name,
         "suppressed_rule_keys": normalized_suppressed_rule_keys,
+        "suppressed_rule_display_names": normalized_suppressed_rule_display_names,
         "resolution_reason": resolution_reason,
     }
 
@@ -111,7 +120,9 @@ def build_alert_rule_explanation(
     winning_condition_trace: dict[str, Any] | None,
     family_key: list[Any] | tuple[Any, ...] | None,
     winner_rule_key: str | None,
+    winner_display_name: str | None,
     suppressed_rule_keys: list[str] | None,
+    suppressed_rule_display_names: list[str] | None,
     resolution_reason: str | None,
 ) -> dict[str, Any]:
     safe_rule = rule or {}
@@ -125,7 +136,9 @@ def build_alert_rule_explanation(
         winning_condition_trace=winning_condition_trace,
         family_key=family_key,
         winner_rule_key=winner_rule_key,
+        winner_display_name=winner_display_name,
         suppressed_rule_keys=suppressed_rule_keys,
+        suppressed_rule_display_names=suppressed_rule_display_names,
         resolution_reason=resolution_reason,
     )
 
@@ -151,7 +164,9 @@ def build_alert_explanation_from_metadata(
             winning_condition_trace=None,
             family_key=None,
             winner_rule_key=fallback_rule_key,
+            winner_display_name=fallback_display_name,
             suppressed_rule_keys=[],
+            suppressed_rule_display_names=[],
             resolution_reason=resolution_reason,
         )
 
@@ -170,9 +185,15 @@ def build_alert_explanation_from_metadata(
     suppressed_rule_keys = metadata.get("suppressed_rule_keys")
     if not isinstance(suppressed_rule_keys, list):
         suppressed_rule_keys = []
+    suppressed_rule_display_names = metadata.get("suppressed_rule_display_names")
+    if not isinstance(suppressed_rule_display_names, list):
+        suppressed_rule_display_names = []
     winner_rule_key = metadata.get("winner_rule_key")
     if not isinstance(winner_rule_key, str) or not winner_rule_key:
         winner_rule_key = rule_key
+    winner_display_name = metadata.get("winner_display_name")
+    if not isinstance(winner_display_name, str) or not winner_display_name:
+        winner_display_name = display_name
     return build_alert_explanation(
         rule_key=rule_key,
         display_name=display_name,
@@ -185,6 +206,8 @@ def build_alert_explanation_from_metadata(
         else None,
         family_key=family_key if isinstance(family_key, (list, tuple)) else None,
         winner_rule_key=winner_rule_key,
+        winner_display_name=winner_display_name,
         suppressed_rule_keys=suppressed_rule_keys,
+        suppressed_rule_display_names=suppressed_rule_display_names,
         resolution_reason=resolution_reason,
     )

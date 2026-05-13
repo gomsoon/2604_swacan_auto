@@ -4,11 +4,11 @@
 
 Current recommended order after compound publish enablement:
 
-1. Alert lifecycle / archive hardening
-2. Event / stale / no-data rule MVP scope
-3. Preview/runtime explainability
-4. Family-level alert identity review
-5. Monitoring alert operations follow-up
+1. Preview/runtime explainability expansion
+2. Family-level alert identity review
+3. Monitoring alert operations follow-up
+4. Lifecycle/archive product follow-up
+5. Full candidate/winner/suppressed decision UI
 
 This note is intentionally short so the next implementation discussion can
 resume from the same order without re-deriving priorities.
@@ -37,6 +37,12 @@ Current scope note for item 3:
 - keep this slice winner-centric and contract-first
 - defer full candidate trace trees, family-level identity, and `reason_code`
   expansion to later backlog slices
+
+Current implementation note for item 3:
+
+- preview/current/archive now expose the same `explanation` contract
+- `winner_display_name` and `suppressed_rule_display_names` are now available for operator-facing cards
+- deep candidate catalogs and clause-level suppressed traces remain backlog items
 
 버전: Draft 0.3  
 작성일: 2026-04-18

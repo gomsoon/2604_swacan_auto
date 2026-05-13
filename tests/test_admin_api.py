@@ -637,7 +637,9 @@ def test_admin_alerts_returns_open_alerts(seeded_app, seeded_client) -> None:
         "winning_condition_trace": None,
         "family_key": None,
         "winner_rule_key": None,
+        "winner_display_name": None,
         "suppressed_rule_keys": [],
+        "suppressed_rule_display_names": [],
         "resolution_reason": None,
     }
 
@@ -1487,7 +1489,9 @@ def test_admin_alert_rule_preview_returns_compound_or_winning_trace(seeded_app, 
         },
         "family_key": ["threshold", "process", "cpu_usage", "gte"],
         "winner_rule_key": "threshold.process.cpu_usage.preview-cpu-band",
+        "winner_display_name": "Preview CPU Band",
         "suppressed_rule_keys": ["threshold.process.cpu_usage.process-cpu-high"],
+        "suppressed_rule_display_names": ["Process CPU High"],
         "resolution_reason": None,
     }
 
@@ -2017,7 +2021,9 @@ def test_admin_alert_rule_preview_supports_grouped_event_repeat(seeded_app, seed
         },
         "family_key": ["event", "process", "process_restarted", "gte"],
         "winner_rule_key": "event.process.process_restarted.process-restart-burst",
+        "winner_display_name": "Process Restart Burst",
         "suppressed_rule_keys": [],
+        "suppressed_rule_display_names": [],
         "resolution_reason": None,
     }
 
@@ -2104,7 +2110,9 @@ def test_admin_alert_rule_preview_supports_stale_heartbeat_threshold(seeded_app,
         },
         "family_key": ["threshold", "agent", "heartbeat_age_seconds", "gte"],
         "winner_rule_key": "threshold.agent.heartbeat_age_seconds.agent-heartbeat-stale",
+        "winner_display_name": "Agent Heartbeat Stale",
         "suppressed_rule_keys": [],
+        "suppressed_rule_display_names": [],
         "resolution_reason": None,
     }
 
@@ -2177,7 +2185,9 @@ def test_admin_alert_rule_preview_supports_no_data_latest_state_age_threshold(se
         },
         "family_key": ["threshold", "process", "latest_state_age_seconds", "gte"],
         "winner_rule_key": "threshold.process.latest_state_age_seconds.process-no-data",
+        "winner_display_name": "Process No Data",
         "suppressed_rule_keys": [],
+        "suppressed_rule_display_names": [],
         "resolution_reason": None,
     }
 
