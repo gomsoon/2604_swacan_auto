@@ -38,6 +38,31 @@ def build_threshold_family_identity_key_from_family_key(
     )
 
 
+def build_event_family_identity_key(
+    *,
+    monitored_object_id: int,
+    state_type: str | None,
+    signal_key: str | None,
+    comparison: str | None,
+) -> str:
+    return f"event:{monitored_object_id}:{state_type or '-'}:{signal_key or '-'}:{comparison or '-'}"
+
+
+def build_event_family_identity_key_from_rule(
+    *,
+    monitored_object_id: int,
+    state_type: str | None,
+    signal_key: str | None,
+    comparison: str | None,
+) -> str:
+    return build_event_family_identity_key(
+        monitored_object_id=monitored_object_id,
+        state_type=state_type,
+        signal_key=signal_key,
+        comparison=comparison,
+    )
+
+
 def derive_alert_identity(
     *,
     monitored_object_id: int | None,
@@ -51,7 +76,22 @@ def derive_alert_identity(
     normalized_signal_type = signal_type or LATEST_STATE_SIGNAL_TYPE
     if (
         monitored_object_id is not None
-        and normalized_signal_type != EVENT_SIGNAL_TYPE_GROUPED_REPEAT
+        and normalized_signal_type == EVENT_SIGNAL_TYPE_GROUPED_REPEAT
+        and state_type
+        and metric_key
+        and comparison
+    ):
+        return (
+            ALERT_IDENTITY_KIND_FAMILY,
+            build_event_family_identity_key(
+                monitored_object_id=monitored_object_id,
+                state_type=state_type,
+                signal_key=metric_key,
+                comparison=comparison,
+            ),
+        )
+    if (
+        monitored_object_id is not None
         and state_type
         and metric_key
         and comparison

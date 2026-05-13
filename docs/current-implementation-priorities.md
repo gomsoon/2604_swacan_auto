@@ -52,7 +52,7 @@ Current implementation note for the next review step:
 - threshold-style family-level identity is now implemented in runtime storage
 - phase 1 now persists durable `identity_kind + identity_key` fields for current/archive rows
 - threshold winner changes now preserve the same current row and therefore preserve ACK/in-progress state
-- event family identity remains the next follow-up slice
+- event family identity is the next follow-up slice
 
 ## Agent Addendum
 

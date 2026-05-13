@@ -1730,7 +1730,7 @@ def test_grouped_event_rule_opens_from_repeat_count_and_resolves_after_window(se
         db_conn = get_db()
         warning_alert = db_conn.execute(
             """
-            SELECT alert_code, source_rule_id, severity, status, latest_message, metadata_json
+            SELECT id, alert_code, source_rule_id, identity_kind, identity_key, severity, status, latest_message, metadata_json
             FROM alert_instances
             WHERE monitored_object_id = 1302
               AND source_rule_id = 1903
@@ -1746,7 +1746,7 @@ def test_grouped_event_rule_opens_from_repeat_count_and_resolves_after_window(se
         db_conn = get_db()
         critical_alert = db_conn.execute(
             """
-            SELECT severity, status, repeat_count, latest_message, metadata_json
+            SELECT id, severity, status, repeat_count, latest_message, metadata_json, identity_kind, identity_key
             FROM alert_instances
             WHERE monitored_object_id = 1302
               AND source_rule_id = 1903
@@ -1794,6 +1794,8 @@ def test_grouped_event_rule_opens_from_repeat_count_and_resolves_after_window(se
 
     assert first_result["processed_items"] == 1
     assert second_result["processed_items"] == 1
+    assert warning_alert["identity_kind"] == "family"
+    assert warning_alert["identity_key"] == "event:1302:process:process_restarted:gte"
     assert warning_alert["alert_code"] == "rule.1903"
     assert warning_alert["source_rule_id"] == 1903
     assert warning_alert["severity"] == "warning"
@@ -1805,9 +1807,12 @@ def test_grouped_event_rule_opens_from_repeat_count_and_resolves_after_window(se
     assert warning_metadata["explanation"]["reason"] == "process_restarted repeat_count=2 >= 2"
     assert warning_metadata["explanation"]["winner_rule_key"] == "event.process.process_restarted.process-restart-burst"
     assert third_result["processed_items"] == 1
+    assert critical_alert["id"] == warning_alert["id"]
     assert critical_alert["severity"] == "critical"
     assert critical_alert["status"] == "open"
     assert critical_alert["repeat_count"] == 2
+    assert critical_alert["identity_kind"] == "family"
+    assert critical_alert["identity_key"] == "event:1302:process:process_restarted:gte"
     assert critical_alert["latest_message"] == "process_restarted repeat_count=3 >= 3"
     assert critical_metadata["signal_type"] == "grouped_event_repeat"
     assert critical_metadata["winning_condition_trace"]["severity"] == "critical"
@@ -1821,6 +1826,163 @@ def test_grouped_event_rule_opens_from_repeat_count_and_resolves_after_window(se
     assert archive_row["source_rule_display_name_snapshot"] == "Process Restart Burst"
     assert archive_row["resolution_source"] == "auto_recovery"
     assert archive_row["resolution_reason"] == "event_window_elapsed"
+
+
+def test_specific_event_rule_reuses_same_family_row_by_precedence(seeded_app, seeded_client) -> None:
+    base_time = datetime.now().astimezone().replace(microsecond=0)
+    first_time = base_time
+    second_time = base_time + timedelta(seconds=5)
+    third_time = base_time + timedelta(seconds=10)
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            INSERT INTO alert_rules (
+                id, rule_key, display_name, status, scope_type, object_type, monitored_object_id,
+                state_type, signal_type, signal_key, metric_key, comparison, warning_threshold, critical_threshold,
+                cond_mode, is_enabled, description, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1906,
+                "event.process.process_restarted.process-restart-general",
+                "Process Restart General",
+                "published",
+                "object_type",
+                "SoftwareProcess",
+                None,
+                "process",
+                "grouped_event_repeat",
+                "process_restarted",
+                "process_restarted",
+                "gte",
+                2.0,
+                4.0,
+                "scalar",
+                1,
+                "General restart burst alert",
+                "2026-04-10T11:50:00.000+09:00",
+                "2026-04-10T11:50:00.000+09:00",
+            ),
+        )
+        db_conn.commit()
+
+    def event_batch(seq: int, when: datetime) -> dict:
+        return {
+            "agent_id": "agent_local",
+            "boot_id": "boot_event_precedence",
+            "seq_start": seq,
+            "seq_end": seq,
+            "sent_at": when.isoformat(),
+            "items": [
+                {
+                    "seq": seq,
+                    "payload_type": "process_event",
+                    "occurred_at": when.isoformat(),
+                    "target_id": "app_main",
+                    "payload": {
+                        "event_type": "process_restarted",
+                        "severity": "warning",
+                        "message": "process restarted",
+                    },
+                }
+            ],
+        }
+
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=event_batch(201, first_time)).status_code == 202
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=event_batch(202, second_time)).status_code == 202
+
+    with seeded_app.app_context():
+        first_result = process_pending_ingest(limit=1)
+        second_result = process_pending_ingest(limit=1)
+        db_conn = get_db()
+        initial_row = db_conn.execute(
+            """
+            SELECT id, alert_code, source_rule_id, identity_kind, identity_key, status, repeat_count
+            FROM alert_instances
+            WHERE monitored_object_id = 1302
+              AND identity_kind = 'family'
+              AND status = 'open'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        db_conn.execute(
+            """
+            INSERT INTO alert_rules (
+                id, rule_key, display_name, status, scope_type, object_type, monitored_object_id,
+                state_type, signal_type, signal_key, metric_key, comparison, warning_threshold, critical_threshold,
+                cond_mode, is_enabled, description, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1907,
+                "event.process.process_restarted.process-restart-specific",
+                "Process Restart Specific",
+                "published",
+                "monitored_object",
+                None,
+                1302,
+                "process",
+                "grouped_event_repeat",
+                "process_restarted",
+                "process_restarted",
+                "gte",
+                2.0,
+                4.0,
+                "scalar",
+                1,
+                "Specific restart burst alert",
+                "2026-04-10T11:50:07.000+09:00",
+                "2026-04-10T11:50:07.000+09:00",
+            ),
+        )
+        db_conn.commit()
+
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=event_batch(203, third_time)).status_code == 202
+
+    with seeded_app.app_context():
+        third_result = process_pending_ingest(limit=1)
+        db_conn = get_db()
+        current_row = db_conn.execute(
+            """
+            SELECT id, alert_code, source_rule_id, identity_kind, identity_key, status, repeat_count, latest_message
+            FROM alert_instances
+            WHERE monitored_object_id = 1302
+              AND identity_kind = 'family'
+              AND status = 'open'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        archive_row = db_conn.execute(
+            """
+            SELECT id
+            FROM alert_history_archive
+            WHERE source_rule_id = 1906
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert first_result["processed_items"] == 1
+    assert second_result["processed_items"] == 1
+    assert initial_row["alert_code"] == "rule.1906"
+    assert initial_row["source_rule_id"] == 1906
+    assert initial_row["identity_kind"] == "family"
+    assert initial_row["identity_key"] == "event:1302:process:process_restarted:gte"
+    assert initial_row["repeat_count"] == 1
+    assert third_result["processed_items"] == 1
+    assert current_row["id"] == initial_row["id"]
+    assert current_row["alert_code"] == "rule.1907"
+    assert current_row["source_rule_id"] == 1907
+    assert current_row["identity_kind"] == "family"
+    assert current_row["identity_key"] == "event:1302:process:process_restarted:gte"
+    assert current_row["status"] == "open"
+    assert current_row["repeat_count"] == 2
+    assert "repeat_count=3" in current_row["latest_message"]
+    assert archive_row is None
 
 
 def test_grouped_events_merge_at_exact_window_boundary(seeded_app, seeded_client) -> None:

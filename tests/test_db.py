@@ -391,3 +391,47 @@ def test_ensure_alert_identity_schema_adds_identity_columns_and_backfills_thresh
     assert instance_row["identity_key"] == "threshold:1302:process:cpu_usage:gte"
     assert archive_row["identity_kind"] == "family"
     assert archive_row["identity_key"] == "threshold:1302:process:cpu_usage:gte"
+
+
+def test_ensure_alert_identity_schema_backfills_event_family_identity() -> None:
+    db_conn = sqlite3.connect(":memory:")
+    db_conn.row_factory = sqlite3.Row
+    db_conn.execute(
+        """
+        CREATE TABLE alert_rules (
+            id INTEGER PRIMARY KEY,
+            signal_type TEXT,
+            state_type TEXT,
+            metric_key TEXT,
+            comparison TEXT
+        )
+        """
+    )
+    db_conn.execute(
+        """
+        CREATE TABLE alert_instances (
+            id INTEGER PRIMARY KEY,
+            monitored_object_id INTEGER NOT NULL,
+            alert_code TEXT NOT NULL,
+            source_rule_id INTEGER
+        )
+        """
+    )
+    db_conn.execute(
+        """
+        INSERT INTO alert_rules (id, signal_type, state_type, metric_key, comparison)
+        VALUES (1903, 'grouped_event_repeat', 'process', 'process_restarted', 'gte')
+        """
+    )
+    db_conn.execute(
+        "INSERT INTO alert_instances (id, monitored_object_id, alert_code, source_rule_id) VALUES (1, 1302, 'rule.1903', 1903)"
+    )
+
+    ensure_alert_identity_schema(db_conn)
+
+    instance_row = db_conn.execute(
+        "SELECT identity_kind, identity_key FROM alert_instances WHERE id = 1"
+    ).fetchone()
+
+    assert instance_row["identity_kind"] == "family"
+    assert instance_row["identity_key"] == "event:1302:process:process_restarted:gte"

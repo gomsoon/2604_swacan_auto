@@ -55,7 +55,7 @@ Current implementation note for item 4:
 - threshold-style current alerts now use family-level identity
 - winner changes inside the same threshold family now reuse the same current alert row
 - runtime/archive now persist `identity_kind + identity_key` for this path
-- event families still remain rule-based for now
+- event families are the next identity migration target and still remain rule-based for now
 - opener snapshots, winner transition timeline, and suppressed current rows remain deferred
 
 버전: Draft 0.3  

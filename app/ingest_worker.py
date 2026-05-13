@@ -18,6 +18,7 @@ from .alert_history import record_alert_history
 from .alert_identity import (
     ALERT_IDENTITY_KIND_FAMILY,
     ALERT_IDENTITY_KIND_RULE,
+    build_event_family_identity_key_from_rule,
     build_rule_identity_key,
     build_threshold_family_identity_key_from_family_key,
 )
@@ -920,6 +921,17 @@ def sync_event_alerts(
         families.setdefault(event_family_key(rule), []).append(rule)
 
     for family_key, family_rules in families.items():
+        family_identity_key = build_event_family_identity_key_from_rule(
+            monitored_object_id=monitored_object_id,
+            state_type=family_rules[0]["state_type"],
+            signal_key=family_rules[0]["signal_key"],
+            comparison=family_rules[0]["comparison"],
+        )
+        family_existing = fetch_open_alert_row_for_identity(
+            monitored_object_id=monitored_object_id,
+            identity_kind=ALERT_IDENTITY_KIND_FAMILY,
+            identity_key=family_identity_key,
+        )
         grouped_event = load_recent_grouped_event(
             monitored_object_id=monitored_object_id,
             signal_key=family_rules[0]["signal_key"],
@@ -937,12 +949,14 @@ def sync_event_alerts(
             for rule in family_rules
             if isinstance(rule["id"], int) and rule["id"] not in firing_rule_ids
         ]
+        excluded_row_ids = {family_existing["id"]} if family_existing is not None else set()
 
         if non_firing_rule_ids:
             resolve_alert_rows(
                 rows=fetch_open_alert_rows_for_rule_ids(
                     monitored_object_id=monitored_object_id,
                     rule_ids=non_firing_rule_ids,
+                    exclude_alert_instance_ids=excluded_row_ids,
                 ),
                 occurred_at=occurred_at,
                 received_at=received_at,
@@ -961,6 +975,7 @@ def sync_event_alerts(
                 rows=fetch_open_alert_rows_for_rule_ids(
                     monitored_object_id=monitored_object_id,
                     rule_ids=losing_rule_ids,
+                    exclude_alert_instance_ids=excluded_row_ids,
                 ),
                 occurred_at=occurred_at,
                 received_at=received_at,
@@ -976,6 +991,20 @@ def sync_event_alerts(
             )
 
         if winner_rule is None or repeat_count is None or grouped_event is None or winner_rule_id is None:
+            if family_existing is not None:
+                resolve_alert_rows(
+                    rows=[family_existing],
+                    occurred_at=occurred_at,
+                    received_at=received_at,
+                    note="event repeat window elapsed",
+                    payload={
+                        "source": "worker",
+                        "reason": "event_window_elapsed",
+                        "family_key": list(family_key),
+                    },
+                    resolution_source="auto_recovery",
+                    resolution_reason="event_window_elapsed",
+                )
             continue
 
         winner_level = winner_rule["_threshold_level"]
@@ -984,24 +1013,15 @@ def sync_event_alerts(
         latest_message = event_message(winner_rule, repeat_count, winner_level)
         metadata_json = build_event_alert_metadata(winner_rule, grouped_event, winner_level, family_key)
         alert_code = f"rule.{winner_rule_id}"
-        existing = db_conn.execute(
-            """
-            SELECT id, status
-            FROM alert_instances
-            WHERE monitored_object_id = ?
-              AND source_rule_id = ?
-              AND status != 'resolved'
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (monitored_object_id, winner_rule_id),
-        ).fetchone()
+        existing = family_existing
 
         if existing is None:
             create_alert_instance(
                 monitored_object_id=monitored_object_id,
                 alert_code=alert_code,
                 source_rule_id=winner_rule_id,
+                identity_kind=ALERT_IDENTITY_KIND_FAMILY,
+                identity_key=family_identity_key,
                 severity=winner_level,
                 occurred_at=occurred_at,
                 received_at=received_at,
@@ -1013,7 +1033,8 @@ def sync_event_alerts(
         db_conn.execute(
             """
             UPDATE alert_instances
-            SET source_rule_id = ?,
+            SET alert_code = ?,
+                source_rule_id = ?,
                 severity = ?,
                 last_occurred_at = ?,
                 repeat_count = repeat_count + 1,
@@ -1023,6 +1044,7 @@ def sync_event_alerts(
             WHERE id = ?
             """,
             (
+                alert_code,
                 winner_rule_id,
                 winner_level,
                 occurred_at,
