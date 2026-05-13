@@ -2109,6 +2109,121 @@ def test_admin_alert_rule_preview_supports_stale_heartbeat_threshold(seeded_app,
     }
 
 
+def test_admin_alert_rule_preview_supports_no_data_latest_state_age_threshold(seeded_app, seeded_client) -> None:
+    seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-10T10:20:20.100+09:00")
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute("DELETE FROM latest_states WHERE monitored_object_id = ? AND state_type = ?", (1302, "process"))
+        db_conn.execute(
+            """
+            INSERT INTO latest_states (
+                target_id, state_type, view_node_id, monitored_object_id, status, severity,
+                state_json, occurred_at, received_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "app_main",
+                "process",
+                None,
+                1302,
+                "up",
+                "normal",
+                json.dumps({"pid": 1234, "state": "running", "cpu_usage": 10.0, "memory_rss": 4096}),
+                "2026-04-10T10:20:00.100+09:00",
+                "2026-04-10T10:20:00.100+09:00",
+                "2026-04-10T10:20:00.100+09:00",
+            ),
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.post(
+        "/api/admin/alert-rules/preview?limit=20",
+        json={
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "latest_state_age_seconds",
+            "comparison": "gte",
+            "warning_threshold": 10,
+            "critical_threshold": 30,
+            "display_name": "Process No Data",
+            "rule_key": "threshold.process.latest_state_age_seconds.process-no-data",
+            "is_enabled": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["rule"]["signal_type"] == "latest_state_metric"
+    assert payload["rule"]["metric_key"] == "latest_state_age_seconds"
+    assert payload["summary"]["warning_match_count"] == 1
+    assert payload["summary"]["critical_match_count"] == 0
+    assert payload["items"][0]["current_metric_value"] == 20.0
+    assert payload["items"][0]["threshold_level"] == "warning"
+    assert payload["items"][0]["reason"] == "latest_state_age_seconds=20.000 >= 10.000"
+    assert payload["items"][0]["explanation"] == {
+        "rule_key": "threshold.process.latest_state_age_seconds.process-no-data",
+        "display_name": "Process No Data",
+        "signal_type": "latest_state_metric",
+        "value_key": "latest_state_age_seconds",
+        "threshold_level": "warning",
+        "reason": "latest_state_age_seconds=20.000 >= 10.000",
+        "winning_condition_trace": {
+            "severity": "warning",
+            "condition_mode": "scalar",
+            "logical_operator": None,
+            "matched_clause_indexes": [0],
+        },
+        "family_key": ["threshold", "process", "latest_state_age_seconds", "gte"],
+        "winner_rule_key": "threshold.process.latest_state_age_seconds.process-no-data",
+        "suppressed_rule_keys": [],
+        "resolution_reason": None,
+    }
+
+
+def test_admin_alert_rule_rejects_invalid_no_data_rule_shape(seeded_client) -> None:
+    login(seeded_client)
+
+    agent_response = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "object_type",
+            "object_type": "MonitoringAgent",
+            "state_type": "agent",
+            "metric_key": "latest_state_age_seconds",
+            "comparison": "gte",
+            "warning_threshold": 10,
+            "is_enabled": True,
+        },
+    )
+    compound_response = seeded_client.post(
+        "/api/admin/alert-rules",
+        json={
+            "scope_type": "object_type",
+            "object_type": "SoftwareProcess",
+            "state_type": "process",
+            "metric_key": "latest_state_age_seconds",
+            "comparison": "gte",
+            "condition_mode": "compound",
+            "warning_condition": {
+                "logical_operator": "or",
+                "clauses": [
+                    {"comparison": "gte", "value": 10},
+                    {"comparison": "gte", "value": 20},
+                ],
+            },
+            "warning_threshold": 10,
+            "is_enabled": True,
+        },
+    )
+
+    assert agent_response.status_code == 400
+    assert agent_response.get_json()["error"]["message"] == "agent no-data/stale should use heartbeat_age_seconds threshold rules"
+    assert compound_response.status_code == 400
+    assert compound_response.get_json()["error"]["message"] == "latest_state_age_seconds currently supports only scalar condition_mode"
+
+
 def test_admin_alert_rule_rejects_invalid_grouped_event_rule_shape(seeded_client) -> None:
     login(seeded_client)
 

@@ -46,6 +46,18 @@ def parse_timestamp(value: str | None) -> datetime | None:
     return parsed if parsed.tzinfo is not None else parsed.astimezone()
 
 
+def derive_latest_state_age_seconds(
+    *,
+    received_at: str | None,
+    now: datetime | None = None,
+) -> float | None:
+    received_time = parse_timestamp(received_at)
+    if received_time is None:
+        return None
+    current_time = now or get_current_time()
+    return round(max((current_time - received_time).total_seconds(), 0.0), 3)
+
+
 def derive_agent_heartbeat_state(
     state: dict[str, Any],
     *,

@@ -39,7 +39,7 @@ VALID_EVENT_TYPES = {
 ALERT_OPEN_STATUSES = {"warning", "down"}
 ALERT_OPEN_SEVERITIES = {"warning", "critical"}
 ALERT_ACTIVE_STATUSES = {"open", "in_progress", "suppressed"}
-TIME_DERIVED_THRESHOLD_METRIC_KEYS = {"heartbeat_age_seconds"}
+TIME_DERIVED_THRESHOLD_METRIC_KEYS = {"heartbeat_age_seconds", "latest_state_age_seconds"}
 
 
 @dataclass(frozen=True)
@@ -370,8 +370,26 @@ def sync_latest_state_alert(
     )
 
 
-def numeric_metric_value(state: dict, metric_key: str) -> float | None:
-    return metric_value_for_state(state, metric_key)
+def numeric_metric_value(
+    state: dict,
+    metric_key: str,
+    *,
+    latest_received_at: str | None = None,
+) -> float | None:
+    return metric_value_for_state(state, metric_key, latest_received_at=latest_received_at)
+
+
+def threshold_resolution_reason_for_family(family_key: tuple[str, str | None, str | None, str | None]) -> str:
+    metric_key = family_key[2]
+    if metric_key == "latest_state_age_seconds":
+        return "data_resumed"
+    return "threshold_cleared"
+
+
+def threshold_resolution_note_for_reason(reason: str) -> str:
+    if reason == "data_resumed":
+        return "fresh data received"
+    return "threshold no longer matched"
 
 
 def threshold_level(metric_value: float | None, rule) -> str | None:
@@ -536,6 +554,7 @@ def sync_threshold_alerts(
     state: dict,
     occurred_at: str,
     received_at: str,
+    latest_received_at_for_metrics: str | None = None,
     allowed_metric_keys: set[str] | None = None,
     increment_repeat_count: bool = True,
 ) -> None:
@@ -581,7 +600,11 @@ def sync_threshold_alerts(
         families.setdefault(threshold_family_key(rule), []).append(rule)
 
     for family_key, family_rules in families.items():
-        metric_value = numeric_metric_value(state, family_rules[0]["metric_key"])
+        metric_value = numeric_metric_value(
+            state,
+            family_rules[0]["metric_key"],
+            latest_received_at=latest_received_at_for_metrics or received_at,
+        )
         candidates = evaluate_threshold_candidates(metric_value, [{**dict(rule), "_origin": "runtime_rule"} for rule in family_rules])
         decision = summarize_threshold_decision(candidates)
         winner_rule = decision["winner_rule"]
@@ -594,6 +617,7 @@ def sync_threshold_alerts(
             if isinstance(rule["id"], int) and rule["id"] not in firing_rule_ids
         ]
 
+        recovery_reason = threshold_resolution_reason_for_family(family_key)
         if non_firing_rule_ids:
             resolve_alert_rows(
                 rows=fetch_open_alert_rows_for_rule_ids(
@@ -602,14 +626,14 @@ def sync_threshold_alerts(
                 ),
                 occurred_at=occurred_at,
                 received_at=received_at,
-                note="threshold no longer matched",
+                note=threshold_resolution_note_for_reason(recovery_reason),
                 payload={
                     "source": "worker",
-                    "reason": "threshold_cleared",
+                    "reason": recovery_reason,
                     "family_key": list(family_key),
                 },
                 resolution_source="auto_recovery",
-                resolution_reason="threshold_cleared",
+                resolution_reason=recovery_reason,
             )
 
         if losing_rule_ids:
@@ -726,7 +750,8 @@ def reevaluate_time_derived_threshold_alerts(*, received_at: str) -> None:
         SELECT DISTINCT
             ls.monitored_object_id,
             ls.state_type,
-            ls.state_json
+            ls.state_json,
+            ls.received_at
         FROM latest_states AS ls
         JOIN monitored_objects AS mo ON mo.id = ls.monitored_object_id
         JOIN alert_rules AS rules
@@ -739,7 +764,6 @@ def reevaluate_time_derived_threshold_alerts(*, received_at: str) -> None:
                (rules.scope_type = 'monitored_object' AND rules.monitored_object_id = ls.monitored_object_id)
             OR (rules.scope_type = 'object_type' AND rules.object_type = mo.object_type)
          )
-        WHERE ls.state_type = 'agent'
         """,
         (LATEST_STATE_SIGNAL_TYPE, *TIME_DERIVED_THRESHOLD_METRIC_KEYS),
     ).fetchall()
@@ -757,6 +781,7 @@ def reevaluate_time_derived_threshold_alerts(*, received_at: str) -> None:
             state=state,
             occurred_at=received_at,
             received_at=received_at,
+            latest_received_at_for_metrics=row["received_at"],
             allowed_metric_keys=TIME_DERIVED_THRESHOLD_METRIC_KEYS,
             increment_repeat_count=False,
         )

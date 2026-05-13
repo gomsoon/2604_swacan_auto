@@ -18,7 +18,7 @@ Current MVP decision for item 2:
 - `stale` should not open as a separate rule engine first.
 - MVP `stale` should be expressed as a threshold-style rule over derived metrics such as `heartbeat_age_seconds`.
 - `event` should be the first genuinely new rule type after threshold/compound threshold.
-- `no-data` should stay on the deferred backlog until lifecycle and baseline timing rules are clearer.
+- MVP `no-data` should also reuse the threshold evaluator through derived metrics such as `latest_state_age_seconds`, while never-seen/grace/reset policy remains deferred.
 
 Current implementation note for item 2:
 
@@ -27,7 +27,9 @@ Current implementation note for item 2:
 - event MVP is limited to process events with scalar `gte` repeat-count thresholds.
 - `stale` is now enabled through threshold-style reuse for published `agent.heartbeat_age_seconds` rules.
 - preview and runtime both evaluate the same derived heartbeat metric, and the worker periodically re-evaluates it even without new agent payloads.
-- `stale` and `no-data` are still deferred from separate rule-family implementation.
+- `no-data` is now enabled through threshold-style reuse for published `process/host.latest_state_age_seconds` rules.
+- preview and runtime both evaluate the same derived latest-state age metric, and the worker periodically re-evaluates it even without new payloads.
+- `stale` and `no-data` both remain deferred only from separate rule-family implementation and from never-seen/grace/reset policy work.
 
 Current scope note for item 3:
 

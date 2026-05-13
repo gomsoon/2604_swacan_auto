@@ -44,6 +44,11 @@ def test_admin_parser_helpers_cover_small_branches(seeded_app) -> None:
             {"heartbeat_time": "2026-04-10T10:20:00.100+09:00"},
             "heartbeat_age_seconds",
         ) == 20.0
+        assert preview_metric_value(
+            {},
+            "latest_state_age_seconds",
+            latest_received_at="2026-04-10T10:20:00.100+09:00",
+        ) == 20.0
 
     assert preview_threshold_level(None, "gte", 80.0, 90.0) == "unknown"
     assert preview_threshold_level(95.0, "gte", 80.0, 90.0) == "critical"

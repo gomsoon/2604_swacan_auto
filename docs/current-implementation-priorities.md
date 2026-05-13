@@ -15,7 +15,7 @@ Current scope decision for item 2:
 
 - `stale` first reuses the threshold evaluator over derived runtime metrics.
 - `event` becomes the first new post-threshold rule family.
-- `no-data` remains deferred until baseline timing, first-seen grace period, and rematch/reset policy are hardened.
+- `no-data` also first reuses the threshold evaluator over derived runtime metrics, while never-seen/grace/reset policy remains deferred.
 
 Current implementation note for item 2:
 
@@ -25,6 +25,7 @@ Current implementation note for item 2:
   - `signal_key = process_started | process_stopped | process_restarted`
   - scalar `gte` repeat-count thresholds only
 - `stale` threshold-style reuse is now available for published `agent.heartbeat_age_seconds` rules, including periodic runtime re-evaluation without new agent payloads.
+- `no-data` threshold-style reuse is now available for published `process/host.latest_state_age_seconds` rules, including periodic runtime re-evaluation without new payloads.
 - the next priority after this MVP remains lifecycle/archive clarity and later explainability expansion.
 
 Current scope note for item 3:

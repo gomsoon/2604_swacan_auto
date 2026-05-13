@@ -1017,6 +1017,7 @@ def build_alert_rule_target_preview(
             state,
             rule=rule,
             monitored_object_id=preview_row["monitored_object_id"],
+            latest_received_at=preview_row["latest_received_at"],
         )
         threshold_evaluation = preview_threshold_evaluation(current_metric_value, rule)
         threshold_level = threshold_evaluation["threshold_level"]
@@ -1153,8 +1154,13 @@ def serialize_monitored_object(row) -> dict[str, Any]:
     }
 
 
-def preview_metric_value(state: dict[str, Any], metric_key: str) -> float | None:
-    return metric_value_for_state(state, metric_key)
+def preview_metric_value(
+    state: dict[str, Any],
+    metric_key: str,
+    *,
+    latest_received_at: str | None = None,
+) -> float | None:
+    return metric_value_for_state(state, metric_key, latest_received_at=latest_received_at)
 
 
 def preview_grouped_event_row(monitored_object_id: int, signal_key: str) -> dict[str, Any] | None:
@@ -1189,13 +1195,14 @@ def preview_rule_current_value(
     *,
     rule: dict[str, Any],
     monitored_object_id: int,
+    latest_received_at: str | None = None,
 ) -> tuple[float | None, dict[str, Any] | None]:
     if normalize_alert_rule_signal_type(rule) == EVENT_SIGNAL_TYPE_GROUPED_REPEAT:
         grouped_row = preview_grouped_event_row(monitored_object_id, rule["signal_key"])
         if grouped_row is None:
             return None, None
         return float(grouped_row["repeat_count"]), grouped_row
-    return preview_metric_value(state, rule["metric_key"]), None
+    return preview_metric_value(state, rule["metric_key"], latest_received_at=latest_received_at), None
 
 
 def preview_threshold_clause_matches(metric_value: float, clause: dict[str, Any]) -> bool:
@@ -1642,6 +1649,31 @@ def validate_alert_rule_payload(
             if not isinstance(metric_key, str) or not metric_key.strip():
                 return None, error_response("validation_error", "metric_key is required", 400)
             payload["metric_key"] = metric_key.strip()
+        if payload.get("metric_key") == "latest_state_age_seconds":
+            if payload.get("state_type") == "agent":
+                return None, error_response(
+                    "validation_error",
+                    "agent no-data/stale should use heartbeat_age_seconds threshold rules",
+                    400,
+                )
+            if payload.get("state_type") not in {"process", "host"}:
+                return None, error_response(
+                    "validation_error",
+                    "latest_state_age_seconds is currently limited to process and host state types",
+                    400,
+                )
+            if payload.get("comparison") != "gte":
+                return None, error_response(
+                    "validation_error",
+                    "latest_state_age_seconds currently requires comparison=gte",
+                    400,
+                )
+            if payload.get("condition_mode") != "scalar":
+                return None, error_response(
+                    "validation_error",
+                    "latest_state_age_seconds currently supports only scalar condition_mode",
+                    400,
+                )
 
     try:
         if "warning_threshold" in payload:
