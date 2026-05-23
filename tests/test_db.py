@@ -6,6 +6,7 @@ from app.db import (
     ensure_alert_identity_schema,
     ensure_alert_rule_lifecycle_schema,
     ensure_alert_history_archive_schema,
+    ensure_alert_winner_transition_schema,
     get_db,
     slugify_rule_key_part,
     suggest_alert_rule_display_name,
@@ -435,3 +436,209 @@ def test_ensure_alert_identity_schema_backfills_event_family_identity() -> None:
 
     assert instance_row["identity_kind"] == "family"
     assert instance_row["identity_key"] == "event:1302:process:process_restarted:gte"
+
+
+def test_ensure_alert_winner_transition_schema_adds_summary_columns_and_backfills_rows() -> None:
+    db_conn = sqlite3.connect(":memory:")
+    db_conn.row_factory = sqlite3.Row
+    db_conn.execute(
+        """
+        CREATE TABLE alert_rules (
+            id INTEGER PRIMARY KEY,
+            rule_key TEXT,
+            display_name TEXT
+        )
+        """
+    )
+    db_conn.execute(
+        """
+        CREATE TABLE alert_instances (
+            id INTEGER PRIMARY KEY,
+            monitored_object_id INTEGER NOT NULL,
+            alert_code TEXT NOT NULL,
+            source_rule_id INTEGER,
+            identity_kind TEXT,
+            identity_key TEXT,
+            status TEXT
+        )
+        """
+    )
+    db_conn.execute(
+        """
+        CREATE TABLE alert_history_archive (
+            id INTEGER PRIMARY KEY,
+            monitored_object_id INTEGER NOT NULL,
+            alert_code TEXT NOT NULL,
+            source_rule_id INTEGER,
+            source_rule_key TEXT,
+            source_rule_display_name_snapshot TEXT,
+            identity_kind TEXT,
+            identity_key TEXT
+        )
+        """
+    )
+    db_conn.execute(
+        """
+        INSERT INTO alert_rules (id, rule_key, display_name)
+        VALUES (1501, 'threshold.process.cpu_usage.process-cpu-high', 'Process CPU High')
+        """
+    )
+    db_conn.execute(
+        """
+        INSERT INTO alert_instances (
+            id, monitored_object_id, alert_code, source_rule_id, identity_kind, identity_key, status
+        ) VALUES (
+            1, 1302, 'rule.1501', 1501, 'family', 'threshold:1302:process:cpu_usage:gte', 'open'
+        )
+        """
+    )
+    db_conn.execute(
+        """
+        INSERT INTO alert_history_archive (
+            id, monitored_object_id, alert_code, source_rule_id,
+            source_rule_key, source_rule_display_name_snapshot, identity_kind, identity_key
+        ) VALUES (
+            1, 1302, 'rule.1501', 1501,
+            'threshold.process.cpu_usage.process-cpu-high', 'Process CPU High',
+            'family', 'threshold:1302:process:cpu_usage:gte'
+        )
+        """
+    )
+
+    ensure_alert_winner_transition_schema(db_conn)
+
+    instance_columns = {
+        row["name"] for row in db_conn.execute("PRAGMA table_info(alert_instances)").fetchall()
+    }
+    archive_columns = {
+        row["name"] for row in db_conn.execute("PRAGMA table_info(alert_history_archive)").fetchall()
+    }
+    winner_transition_table = db_conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'alert_winner_transitions'"
+    ).fetchone()
+    instance_row = db_conn.execute(
+        """
+        SELECT opening_rule_id, opening_rule_key, opening_rule_display_name_snapshot,
+               winner_transition_count, last_winner_transition_at
+        FROM alert_instances
+        WHERE id = 1
+        """
+    ).fetchone()
+    archive_row = db_conn.execute(
+        """
+        SELECT opening_rule_id, opening_rule_key, opening_rule_display_name_snapshot,
+               winner_transition_count, last_winner_transition_at
+        FROM alert_history_archive
+        WHERE id = 1
+        """
+    ).fetchone()
+    transition_count = db_conn.execute("SELECT COUNT(*) AS c FROM alert_winner_transitions").fetchone()
+
+    assert {
+        "opening_rule_id",
+        "opening_rule_key",
+        "opening_rule_display_name_snapshot",
+        "winner_transition_count",
+        "last_winner_transition_at",
+    } <= instance_columns
+    assert {
+        "opening_rule_id",
+        "opening_rule_key",
+        "opening_rule_display_name_snapshot",
+        "winner_transition_count",
+        "last_winner_transition_at",
+    } <= archive_columns
+    assert winner_transition_table is not None
+    assert instance_row["opening_rule_id"] == 1501
+    assert instance_row["opening_rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
+    assert instance_row["opening_rule_display_name_snapshot"] == "Process CPU High"
+    assert instance_row["winner_transition_count"] == 0
+    assert instance_row["last_winner_transition_at"] is None
+    assert archive_row["opening_rule_id"] == 1501
+    assert archive_row["opening_rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
+    assert archive_row["opening_rule_display_name_snapshot"] == "Process CPU High"
+    assert archive_row["winner_transition_count"] == 0
+    assert archive_row["last_winner_transition_at"] is None
+    assert transition_count["c"] == 0
+
+
+def test_ensure_alert_winner_transition_schema_keeps_null_opening_snapshot_without_source_rule() -> None:
+    db_conn = sqlite3.connect(":memory:")
+    db_conn.row_factory = sqlite3.Row
+    db_conn.execute(
+        """
+        CREATE TABLE alert_instances (
+            id INTEGER PRIMARY KEY,
+            monitored_object_id INTEGER NOT NULL,
+            alert_code TEXT NOT NULL,
+            source_rule_id INTEGER,
+            identity_kind TEXT,
+            identity_key TEXT,
+            status TEXT
+        )
+        """
+    )
+    db_conn.execute(
+        """
+        CREATE TABLE alert_history_archive (
+            id INTEGER PRIMARY KEY,
+            monitored_object_id INTEGER NOT NULL,
+            alert_code TEXT NOT NULL,
+            source_rule_id INTEGER,
+            source_rule_key TEXT,
+            source_rule_display_name_snapshot TEXT,
+            identity_kind TEXT,
+            identity_key TEXT
+        )
+        """
+    )
+    db_conn.execute(
+        """
+        INSERT INTO alert_instances (
+            id, monitored_object_id, alert_code, source_rule_id, identity_kind, identity_key, status
+        ) VALUES (
+            1, 1302, 'code:stale-agent', NULL, 'family', 'threshold:1302:agent:heartbeat_age_seconds:gte', 'open'
+        )
+        """
+    )
+    db_conn.execute(
+        """
+        INSERT INTO alert_history_archive (
+            id, monitored_object_id, alert_code, source_rule_id,
+            source_rule_key, source_rule_display_name_snapshot, identity_kind, identity_key
+        ) VALUES (
+            1, 1302, 'code:stale-agent', NULL,
+            NULL, NULL, 'family', 'threshold:1302:agent:heartbeat_age_seconds:gte'
+        )
+        """
+    )
+
+    ensure_alert_winner_transition_schema(db_conn)
+
+    instance_row = db_conn.execute(
+        """
+        SELECT opening_rule_id, opening_rule_key, opening_rule_display_name_snapshot,
+               winner_transition_count, last_winner_transition_at
+        FROM alert_instances
+        WHERE id = 1
+        """
+    ).fetchone()
+    archive_row = db_conn.execute(
+        """
+        SELECT opening_rule_id, opening_rule_key, opening_rule_display_name_snapshot,
+               winner_transition_count, last_winner_transition_at
+        FROM alert_history_archive
+        WHERE id = 1
+        """
+    ).fetchone()
+
+    assert instance_row["opening_rule_id"] is None
+    assert instance_row["opening_rule_key"] is None
+    assert instance_row["opening_rule_display_name_snapshot"] is None
+    assert instance_row["winner_transition_count"] == 0
+    assert instance_row["last_winner_transition_at"] is None
+    assert archive_row["opening_rule_id"] is None
+    assert archive_row["opening_rule_key"] is None
+    assert archive_row["opening_rule_display_name_snapshot"] is None
+    assert archive_row["winner_transition_count"] == 0
+    assert archive_row["last_winner_transition_at"] is None

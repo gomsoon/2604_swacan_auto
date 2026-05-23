@@ -329,7 +329,148 @@ def ensure_alert_identity_schema(db_conn: sqlite3.Connection) -> None:
     db_conn.commit()
 
 
+def ensure_alert_winner_transition_schema(db_conn: sqlite3.Connection) -> None:
+    has_alert_rules = _table_exists(db_conn, "alert_rules")
+
+    if _table_exists(db_conn, "alert_instances"):
+        columns = _table_columns(db_conn, "alert_instances")
+        if "opening_rule_id" not in columns:
+            db_conn.execute("ALTER TABLE alert_instances ADD COLUMN opening_rule_id INTEGER")
+        if "opening_rule_key" not in columns:
+            db_conn.execute("ALTER TABLE alert_instances ADD COLUMN opening_rule_key TEXT")
+        if "opening_rule_display_name_snapshot" not in columns:
+            db_conn.execute(
+                "ALTER TABLE alert_instances ADD COLUMN opening_rule_display_name_snapshot TEXT"
+            )
+        if "winner_transition_count" not in columns:
+            db_conn.execute(
+                "ALTER TABLE alert_instances ADD COLUMN winner_transition_count INTEGER NOT NULL DEFAULT 0"
+            )
+        if "last_winner_transition_at" not in columns:
+            db_conn.execute("ALTER TABLE alert_instances ADD COLUMN last_winner_transition_at TEXT")
+
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET opening_rule_id = COALESCE(opening_rule_id, source_rule_id),
+                winner_transition_count = COALESCE(winner_transition_count, 0)
+            """
+        )
+        if has_alert_rules:
+            db_conn.execute(
+                """
+                UPDATE alert_instances
+                SET opening_rule_key = COALESCE(
+                        opening_rule_key,
+                        (SELECT rule_key FROM alert_rules WHERE id = alert_instances.source_rule_id)
+                    ),
+                    opening_rule_display_name_snapshot = COALESCE(
+                        opening_rule_display_name_snapshot,
+                        (SELECT display_name FROM alert_rules WHERE id = alert_instances.source_rule_id)
+                    )
+                WHERE source_rule_id IS NOT NULL
+                  AND (
+                        opening_rule_key IS NULL
+                     OR opening_rule_display_name_snapshot IS NULL
+                  )
+                """
+            )
+
+        db_conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS alert_winner_transitions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                alert_instance_id INTEGER NOT NULL,
+                identity_kind TEXT NOT NULL,
+                identity_key TEXT NOT NULL,
+                monitored_object_id INTEGER NOT NULL,
+                previous_rule_id INTEGER,
+                previous_rule_key TEXT,
+                previous_rule_display_name_snapshot TEXT,
+                previous_severity TEXT,
+                new_rule_id INTEGER,
+                new_rule_key TEXT,
+                new_rule_display_name_snapshot TEXT,
+                new_severity TEXT,
+                transition_reason TEXT NOT NULL,
+                occurred_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                metadata_json TEXT,
+                FOREIGN KEY (alert_instance_id) REFERENCES alert_instances(id) ON DELETE CASCADE
+            )
+            """
+        )
+        db_conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_alert_winner_transitions_instance_time "
+            "ON alert_winner_transitions(alert_instance_id, occurred_at)"
+        )
+        db_conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_alert_winner_transitions_identity_time "
+            "ON alert_winner_transitions(monitored_object_id, identity_kind, identity_key, occurred_at)"
+        )
+
+    if _table_exists(db_conn, "alert_history_archive"):
+        columns = _table_columns(db_conn, "alert_history_archive")
+        if "opening_rule_id" not in columns:
+            db_conn.execute("ALTER TABLE alert_history_archive ADD COLUMN opening_rule_id INTEGER")
+        if "opening_rule_key" not in columns:
+            db_conn.execute("ALTER TABLE alert_history_archive ADD COLUMN opening_rule_key TEXT")
+        if "opening_rule_display_name_snapshot" not in columns:
+            db_conn.execute(
+                "ALTER TABLE alert_history_archive ADD COLUMN opening_rule_display_name_snapshot TEXT"
+            )
+        if "winner_transition_count" not in columns:
+            db_conn.execute(
+                "ALTER TABLE alert_history_archive ADD COLUMN winner_transition_count INTEGER NOT NULL DEFAULT 0"
+            )
+        if "last_winner_transition_at" not in columns:
+            db_conn.execute("ALTER TABLE alert_history_archive ADD COLUMN last_winner_transition_at TEXT")
+
+        db_conn.execute(
+            """
+            UPDATE alert_history_archive
+            SET opening_rule_id = COALESCE(opening_rule_id, source_rule_id),
+                winner_transition_count = COALESCE(winner_transition_count, 0)
+            """
+        )
+        if has_alert_rules:
+            db_conn.execute(
+                """
+                UPDATE alert_history_archive
+                SET opening_rule_key = COALESCE(
+                        opening_rule_key,
+                        source_rule_key,
+                        (SELECT rule_key FROM alert_rules WHERE id = alert_history_archive.source_rule_id)
+                    ),
+                    opening_rule_display_name_snapshot = COALESCE(
+                        opening_rule_display_name_snapshot,
+                        source_rule_display_name_snapshot,
+                        (SELECT display_name FROM alert_rules WHERE id = alert_history_archive.source_rule_id)
+                    )
+                WHERE source_rule_id IS NOT NULL
+                  AND (
+                        opening_rule_key IS NULL
+                     OR opening_rule_display_name_snapshot IS NULL
+                  )
+                """
+            )
+        else:
+            db_conn.execute(
+                """
+                UPDATE alert_history_archive
+                SET opening_rule_key = COALESCE(opening_rule_key, source_rule_key),
+                    opening_rule_display_name_snapshot = COALESCE(
+                        opening_rule_display_name_snapshot,
+                        source_rule_display_name_snapshot
+                    )
+                """
+            )
+
+    db_conn.commit()
+
+
 def ensure_runtime_schema(db_conn: sqlite3.Connection) -> None:
     ensure_alert_rule_lifecycle_schema(db_conn)
     ensure_alert_history_archive_schema(db_conn)
     ensure_alert_identity_schema(db_conn)
+    ensure_alert_winner_transition_schema(db_conn)

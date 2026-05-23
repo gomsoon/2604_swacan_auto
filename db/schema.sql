@@ -345,8 +345,13 @@ CREATE TABLE IF NOT EXISTS alert_instances (
     monitored_object_id INTEGER NOT NULL,
     alert_code TEXT NOT NULL,
     source_rule_id INTEGER,
+    opening_rule_id INTEGER,
+    opening_rule_key TEXT,
+    opening_rule_display_name_snapshot TEXT,
     identity_kind TEXT NOT NULL DEFAULT 'rule',
     identity_key TEXT,
+    winner_transition_count INTEGER NOT NULL DEFAULT 0,
+    last_winner_transition_at TEXT,
     severity TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('open', 'in_progress', 'suppressed', 'resolved')),
     acknowledged_at TEXT,
@@ -366,6 +371,7 @@ CREATE TABLE IF NOT EXISTS alert_instances (
     updated_at TEXT NOT NULL,
     FOREIGN KEY (monitored_object_id) REFERENCES monitored_objects(id) ON DELETE CASCADE,
     FOREIGN KEY (source_rule_id) REFERENCES alert_rules(id) ON DELETE SET NULL,
+    FOREIGN KEY (opening_rule_id) REFERENCES alert_rules(id) ON DELETE SET NULL,
     FOREIGN KEY (acknowledged_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (status_updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (resolved_by_user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -396,8 +402,13 @@ CREATE TABLE IF NOT EXISTS alert_history_archive (
     source_rule_id INTEGER,
     source_rule_key TEXT,
     source_rule_display_name_snapshot TEXT,
+    opening_rule_id INTEGER,
+    opening_rule_key TEXT,
+    opening_rule_display_name_snapshot TEXT,
     identity_kind TEXT,
     identity_key TEXT,
+    winner_transition_count INTEGER NOT NULL DEFAULT 0,
+    last_winner_transition_at TEXT,
     opened_at TEXT NOT NULL,
     resolved_at TEXT NOT NULL,
     first_severity TEXT NOT NULL,
@@ -419,9 +430,40 @@ CREATE TABLE IF NOT EXISTS alert_history_archive (
     updated_at TEXT NOT NULL,
     FOREIGN KEY (monitored_object_id) REFERENCES monitored_objects(id) ON DELETE CASCADE,
     FOREIGN KEY (source_rule_id) REFERENCES alert_rules(id) ON DELETE SET NULL,
+    FOREIGN KEY (opening_rule_id) REFERENCES alert_rules(id) ON DELETE SET NULL,
     FOREIGN KEY (last_acknowledged_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (resolved_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
+
+CREATE TABLE IF NOT EXISTS alert_winner_transitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    alert_instance_id INTEGER NOT NULL,
+    identity_kind TEXT NOT NULL,
+    identity_key TEXT NOT NULL,
+    monitored_object_id INTEGER NOT NULL,
+    previous_rule_id INTEGER,
+    previous_rule_key TEXT,
+    previous_rule_display_name_snapshot TEXT,
+    previous_severity TEXT,
+    new_rule_id INTEGER,
+    new_rule_key TEXT,
+    new_rule_display_name_snapshot TEXT,
+    new_severity TEXT,
+    transition_reason TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    metadata_json TEXT,
+    FOREIGN KEY (alert_instance_id) REFERENCES alert_instances(id) ON DELETE CASCADE,
+    FOREIGN KEY (monitored_object_id) REFERENCES monitored_objects(id) ON DELETE CASCADE,
+    FOREIGN KEY (previous_rule_id) REFERENCES alert_rules(id) ON DELETE SET NULL,
+    FOREIGN KEY (new_rule_id) REFERENCES alert_rules(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_alert_winner_transitions_instance_time
+    ON alert_winner_transitions(alert_instance_id, occurred_at);
+
+CREATE INDEX IF NOT EXISTS idx_alert_winner_transitions_identity_time
+    ON alert_winner_transitions(monitored_object_id, identity_kind, identity_key, occurred_at);
 
 CREATE TABLE IF NOT EXISTS alert_rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
