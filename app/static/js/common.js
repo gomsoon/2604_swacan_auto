@@ -142,6 +142,61 @@ export function formatAlertExplanationDecision(itemOrExplanation) {
     return `winner ${winnerLabel} | ${suppressedLabel}`;
 }
 
+function normalizeAlertWinnerTransitionSummary(itemOrSummary) {
+    if (!itemOrSummary || typeof itemOrSummary !== "object") {
+        return null;
+    }
+    if (
+        itemOrSummary.winner_transition_summary &&
+        typeof itemOrSummary.winner_transition_summary === "object"
+    ) {
+        return itemOrSummary.winner_transition_summary;
+    }
+    return itemOrSummary;
+}
+
+export function formatAlertWinnerTransitionRule(rule) {
+    if (!rule || typeof rule !== "object") {
+        return "rule 정보 없음";
+    }
+    return rule.display_name || rule.rule_key || "rule 정보 없음";
+}
+
+export function formatAlertWinnerTransitionSummary(itemOrSummary, options = {}) {
+    const summary = normalizeAlertWinnerTransitionSummary(itemOrSummary);
+    const winnerLabel = options.winnerLabel || "Current winner";
+    const timelineAvailable = options.timelineAvailable ?? true;
+    if (!summary) {
+        return {
+            opening: "Opened by -",
+            winner: `${winnerLabel} -`,
+            count: "Winner transitions 0",
+            lastChange: "Last winner change -",
+            timelineAvailable,
+        };
+    }
+
+    const openingRule = formatAlertWinnerTransitionRule(summary.opening_rule);
+    const winnerRule = formatAlertWinnerTransitionRule(summary.winner_rule);
+    const transitionCount = Number(summary.transition_count) || 0;
+    return {
+        opening: `Opened by ${openingRule}`,
+        winner: `${winnerLabel} ${winnerRule}`,
+        count: `Winner transitions ${transitionCount}`,
+        lastChange: `Last winner change ${formatTimestamp(summary.last_transition_at)}`,
+        timelineAvailable,
+    };
+}
+
+export function formatAlertWinnerTransitionLabel(item) {
+    if (!item || typeof item !== "object") {
+        return "winner transition 정보 없음";
+    }
+    const previousRule = formatAlertWinnerTransitionRule(item.previous_rule);
+    const newRule = formatAlertWinnerTransitionRule(item.new_rule);
+    return `${previousRule} -> ${newRule}`;
+}
+
 export function bindGlobalUi() {
     const logoutButton = document.getElementById("logout-button");
     if (!logoutButton) {

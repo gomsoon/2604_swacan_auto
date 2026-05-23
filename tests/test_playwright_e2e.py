@@ -43,6 +43,57 @@ def test_playwright_minimal_e2e(page: Page, live_server) -> None:
     base_url, seeded_app = live_server
     seeded_app.config["CURRENT_TIME_PROVIDER"] = lambda: datetime.fromisoformat("2026-04-12T20:10:05.000+09:00")
 
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET opening_rule_id = ?,
+                opening_rule_key = ?,
+                opening_rule_display_name_snapshot = ?,
+                winner_transition_count = ?,
+                last_winner_transition_at = ?
+            WHERE id = ?
+            """,
+            (
+                1501,
+                "threshold.agent.outbox_queue_depth.agent-queue-baseline",
+                "Agent Queue Baseline",
+                1,
+                "2026-04-12T21:05:00.000+09:00",
+                1,
+            ),
+        )
+        db_conn.execute(
+            """
+            INSERT INTO alert_winner_transitions (
+                alert_instance_id, identity_kind, identity_key, monitored_object_id,
+                previous_rule_id, previous_rule_key, previous_rule_display_name_snapshot, previous_severity,
+                new_rule_id, new_rule_key, new_rule_display_name_snapshot, new_severity,
+                transition_reason, occurred_at, created_at, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1,
+                "family",
+                "threshold:1303:agent:outbox_queue_depth:gte",
+                1303,
+                1501,
+                "threshold.agent.outbox_queue_depth.agent-queue-baseline",
+                "Agent Queue Baseline",
+                "warning",
+                1502,
+                "threshold.agent.outbox_queue_depth.agent-queue-high",
+                "Agent Queue High",
+                "warning",
+                "winner_rule_changed",
+                "2026-04-12T21:05:00.000+09:00",
+                "2026-04-12T21:05:00.000+09:00",
+                json.dumps({"reason": "specificity_override"}),
+            ),
+        )
+        db_conn.commit()
+
     browser_login(page, base_url)
 
     page.get_by_label("이름").fill("Playwright Demo View")
@@ -947,6 +998,12 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
 
     alertCard = page.locator("#admin-alerts-list .admin-item", has_text="agent.warning").first
     expect(alertCard).to_contain_text("Agent queue backlog")
+    expect(alertCard).to_contain_text("Opened by Agent Queue Baseline")
+    expect(alertCard).to_contain_text("Current winner Agent Queue High")
+    expect(alertCard).to_contain_text("Winner transitions 1")
+    alertCard.get_by_role("button", name="전환 이력 보기").click()
+    expect(alertCard).to_contain_text("Agent Queue Baseline -> Agent Queue High")
+    expect(alertCard).to_contain_text("winner 변경")
     page.once("dialog", lambda dialog: dialog.accept("운영 확인"))
     alertCard.get_by_role("button", name="ACK").click()
     expect(page.locator("#admin-alerts-list")).to_contain_text("운영 확인")

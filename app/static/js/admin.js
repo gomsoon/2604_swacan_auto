@@ -7,6 +7,8 @@
     formatAlertResolutionSource,
     formatTimestamp,
     formatAlertExplanationDecision,
+    formatAlertWinnerTransitionLabel,
+    formatAlertWinnerTransitionSummary,
     showBanner,
 } from "./common.js";
 
@@ -239,6 +241,10 @@ let selectedMetamodelDiff = null;
 let selectedMetamodelWorkspace = null;
 let metamodelAuditLogs = [];
 let selectedMetamodelAuditLogId = null;
+let currentAlertItems = [];
+let currentAlertArchiveItems = [];
+const alertWinnerTransitionDetails = new Map();
+const alertWinnerTransitionExpanded = new Set();
 let metamodelEditorFocusTimer = null;
 let metamodelWorkspaceInteractionMode = "select";
 let metamodelWorkspacePendingTypeId = null;
@@ -1424,56 +1430,6 @@ function renderEventDetailPanel() {
     `;
 }
 
-function renderAlerts(items) {
-    if (items.length === 0) {
-        alertsList.innerHTML = '<p class="section-copy">표시할 alert가 없습니다.</p>';
-        return;
-    }
-
-    alertsList.innerHTML = items
-        .map(
-            (item) => {
-                const explanationRule = formatAlertExplanationRule(item);
-                const explanationReason = formatAlertExplanationReason(item);
-                const explanationDecision = formatAlertExplanationDecision(item);
-                return `
-                <article class="admin-item">
-                    <div class="section-header">
-                        <h3>${escapeHtml(item.display_name || item.runtime_binding_key || item.alert_code)}</h3>
-                        <div class="toolbar-inline">
-                            <span class="meta-pill">${escapeHtml(item.alert_code)}</span>
-                            <span class="meta-pill">${escapeHtml(item.severity)}</span>
-                            <span class="meta-pill">${escapeHtml(item.status)}</span>
-                            ${item.is_acknowledged ? '<span class="meta-pill">ACK</span>' : ""}
-                            <button class="button ghost small toggle-alert-ack-button" type="button" data-alert-id="${escapeHtml(item.id)}" data-acknowledged="${item.is_acknowledged ? "true" : "false"}" data-ack-note="${escapeHtml(item.ack_note || "")}">${item.is_acknowledged ? "ACK 해제" : "ACK"}</button>
-                            ${item.status !== "resolved" ? `<button class="button ghost small resolve-alert-button" type="button" data-alert-id="${escapeHtml(item.id)}" data-resolution-reason="${escapeHtml(item.status_note || "")}">해결 처리</button>` : ""}
-                            ${buildAlertStatusButtons(item)}
-                        </div>
-                    </div>
-                    <p class="admin-meta">object=${escapeHtml(item.monitored_object_id)} | binding=${escapeHtml(item.runtime_binding_key || "-")} | type=${escapeHtml(item.semantic_type_code || "-")}</p>
-                    <p class="admin-meta">rule=${escapeHtml(item.source_rule_metric_key || item.alert_code)} | target=${escapeHtml(item.source_rule_target_label || "-")}</p>
-                    <p class="admin-meta">explanation ${escapeHtml(explanationRule)}</p>
-                    <p class="admin-meta">반복 ${escapeHtml(item.repeat_count)}회 | 최근 ${escapeHtml(formatTimestamp(item.last_occurred_at))}</p>
-                    <p class="admin-meta">${escapeHtml(explanationReason)}</p>
-                    <p class="admin-meta">${escapeHtml(explanationDecision)}</p>
-                      ${
-                          item.is_acknowledged
-                              ? `<p class="admin-meta">ACK ${escapeHtml(item.acknowledged_by_username || "-")} | ${escapeHtml(formatTimestamp(item.acknowledged_at))}${item.ack_note ? ` | ${escapeHtml(item.ack_note)}` : ""}</p>`
-                              : '<p class="admin-meta">ACK 대기 중</p>'
-                      }
-                      <p class="admin-meta">상태 업데이트 ${escapeHtml(item.status_updated_by_username || "-")} | ${escapeHtml(formatTimestamp(item.status_updated_at))}${item.status_note ? ` | ${escapeHtml(item.status_note)}` : ""}</p>
-                      ${
-                          item.resolved_at
-                              ? `<p class="admin-meta">해결 ${escapeHtml(item.resolved_by_username || "-")} | ${escapeHtml(formatTimestamp(item.resolved_at))}</p>`
-                              : ""
-                      }
-                </article>
-            `;
-            }
-        )
-        .join("");
-}
-
 function buildAlertStatusButtons(item) {
     const buttonSpecs = [];
     if (item.status !== "open") {
@@ -1494,6 +1450,146 @@ function buildAlertStatusButtons(item) {
         .join("");
 }
 
+function getAlertWinnerTransitionCacheKey(kind, id) {
+    return `${kind}:${id}`;
+}
+
+function clearAlertWinnerTransitionState(kind) {
+    const prefix = `${kind}:`;
+    for (const key of Array.from(alertWinnerTransitionDetails.keys())) {
+        if (key.startsWith(prefix)) {
+            alertWinnerTransitionDetails.delete(key);
+        }
+    }
+    for (const key of Array.from(alertWinnerTransitionExpanded)) {
+        if (key.startsWith(prefix)) {
+            alertWinnerTransitionExpanded.delete(key);
+        }
+    }
+}
+
+function renderAlertWinnerTransitionTimelineRows(items) {
+    if (!Array.isArray(items) || items.length === 0) {
+        return '<p class="alert-transition-empty">winner transition 없음</p>';
+    }
+
+    return `
+        <div class="alert-transition-timeline">
+            ${items
+                .map((item) => {
+                    const transitionReason =
+                        item.transition_reason === "winner_rule_changed"
+                            ? "winner 변경"
+                            : item.transition_reason || "-";
+                    return `
+                        <article class="alert-transition-row">
+                            <p class="alert-transition-row-title">${escapeHtml(formatAlertWinnerTransitionLabel(item))}</p>
+                            <p class="alert-transition-row-meta">${escapeHtml(item.previous_severity || "-")} → ${escapeHtml(item.new_severity || "-")} | ${escapeHtml(formatTimestamp(item.occurred_at))}</p>
+                            <p class="alert-transition-row-meta">${escapeHtml(transitionReason)}</p>
+                        </article>
+                    `;
+                })
+                .join("")}
+        </div>
+    `;
+}
+
+function renderAlertWinnerTransitionSection(item, { kind, winnerLabel, alertId }) {
+    const key = getAlertWinnerTransitionCacheKey(kind, alertId);
+    const timelineAvailable = kind === "archive" ? item.origin_alert_instance_id != null : true;
+    const summary = formatAlertWinnerTransitionSummary(item, {
+        winnerLabel,
+        timelineAvailable,
+    });
+    const isExpanded = alertWinnerTransitionExpanded.has(key);
+    const detailState = alertWinnerTransitionDetails.get(key);
+
+    let detailMarkup = "";
+    if (isExpanded) {
+        if (!timelineAvailable) {
+            detailMarkup = '<p class="alert-transition-unavailable">이 archive는 transition timeline이 없습니다.</p>';
+        } else if (!detailState || detailState.status === "loading") {
+            detailMarkup = '<p class="alert-transition-loading">전환 이력을 불러오는 중입니다.</p>';
+        } else if (detailState.status === "error") {
+            detailMarkup = `<p class="alert-transition-unavailable">전환 이력을 불러오지 못했습니다. ${escapeHtml(detailState.message || "")}</p>`;
+        } else {
+            detailMarkup = renderAlertWinnerTransitionTimelineRows(detailState.payload?.items || []);
+        }
+    }
+
+    return `
+        <section class="alert-transition-summary">
+            <div class="alert-transition-summary-lines">
+                <p class="admin-meta">${escapeHtml(summary.opening)}</p>
+                <p class="admin-meta">${escapeHtml(summary.winner)}</p>
+                <p class="admin-meta">${escapeHtml(summary.count)}</p>
+                <p class="admin-meta">${escapeHtml(summary.lastChange)}</p>
+            </div>
+            <div class="alert-transition-actions">
+                ${
+                    timelineAvailable
+                        ? `<button class="button ghost small toggle-alert-transition-button" type="button" data-transition-kind="${escapeHtml(kind)}" data-transition-id="${escapeHtml(alertId)}">${isExpanded ? "전환 이력 숨기기" : "전환 이력 보기"}</button>`
+                        : '<p class="alert-transition-unavailable">이 archive는 transition timeline이 없습니다.</p>'
+                }
+            </div>
+            ${isExpanded ? detailMarkup : ""}
+        </section>
+    `;
+}
+
+function renderAlerts(items) {
+    if (items.length === 0) {
+        alertsList.innerHTML = '<p class="section-copy">표시할 alert가 없습니다.</p>';
+        return;
+    }
+
+    alertsList.innerHTML = items
+        .map((item) => {
+            const explanationRule = formatAlertExplanationRule(item);
+            const explanationReason = formatAlertExplanationReason(item);
+            const explanationDecision = formatAlertExplanationDecision(item);
+            return `
+                <article class="admin-item">
+                    <div class="section-header">
+                        <h3>${escapeHtml(item.display_name || item.runtime_binding_key || item.alert_code)}</h3>
+                        <div class="toolbar-inline">
+                            <span class="meta-pill">${escapeHtml(item.alert_code)}</span>
+                            <span class="meta-pill">${escapeHtml(item.severity)}</span>
+                            <span class="meta-pill">${escapeHtml(item.status)}</span>
+                            ${item.is_acknowledged ? '<span class="meta-pill">ACK</span>' : ""}
+                            <button class="button ghost small toggle-alert-ack-button" type="button" data-alert-id="${escapeHtml(item.id)}" data-acknowledged="${item.is_acknowledged ? "true" : "false"}" data-ack-note="${escapeHtml(item.ack_note || "")}">${item.is_acknowledged ? "ACK 해제" : "ACK"}</button>
+                            ${item.status !== "resolved" ? `<button class="button ghost small resolve-alert-button" type="button" data-alert-id="${escapeHtml(item.id)}" data-resolution-reason="${escapeHtml(item.status_note || "")}">해결 처리</button>` : ""}
+                            ${buildAlertStatusButtons(item)}
+                        </div>
+                    </div>
+                    <p class="admin-meta">object=${escapeHtml(item.monitored_object_id)} | binding=${escapeHtml(item.runtime_binding_key || "-")} | type=${escapeHtml(item.semantic_type_code || "-")}</p>
+                    <p class="admin-meta">rule=${escapeHtml(item.source_rule_metric_key || item.alert_code)} | target=${escapeHtml(item.source_rule_target_label || "-")}</p>
+                    <p class="admin-meta">explanation ${escapeHtml(explanationRule)}</p>
+                    <p class="admin-meta">반복 ${escapeHtml(item.repeat_count)}회 | 최근 ${escapeHtml(formatTimestamp(item.last_occurred_at))}</p>
+                    <p class="admin-meta">${escapeHtml(explanationReason)}</p>
+                    <p class="admin-meta">${escapeHtml(explanationDecision)}</p>
+                    ${renderAlertWinnerTransitionSection(item, {
+                        kind: "alert",
+                        winnerLabel: "Current winner",
+                        alertId: item.id,
+                    })}
+                    ${
+                        item.is_acknowledged
+                            ? `<p class="admin-meta">ACK ${escapeHtml(item.acknowledged_by_username || "-")} | ${escapeHtml(formatTimestamp(item.acknowledged_at))}${item.ack_note ? ` | ${escapeHtml(item.ack_note)}` : ""}</p>`
+                            : '<p class="admin-meta">ACK 대기 중</p>'
+                    }
+                    <p class="admin-meta">상태 업데이트 ${escapeHtml(item.status_updated_by_username || "-")} | ${escapeHtml(formatTimestamp(item.status_updated_at))}${item.status_note ? ` | ${escapeHtml(item.status_note)}` : ""}</p>
+                    ${
+                        item.resolved_at
+                            ? `<p class="admin-meta">해결 ${escapeHtml(item.resolved_by_username || "-")} | ${escapeHtml(formatTimestamp(item.resolved_at))}</p>`
+                            : ""
+                    }
+                </article>
+            `;
+        })
+        .join("");
+}
+
 function renderAlertArchive(items) {
     if (items.length === 0) {
         alertArchiveList.innerHTML = '<p class="section-copy">종료된 alert archive가 없습니다.</p>';
@@ -1501,12 +1597,11 @@ function renderAlertArchive(items) {
     }
 
     alertArchiveList.innerHTML = items
-        .map(
-            (item) => {
-                const explanationRule = formatAlertExplanationRule(item);
-                const explanationReason = formatAlertExplanationReason(item);
-                const explanationDecision = formatAlertExplanationDecision(item);
-                return `
+        .map((item) => {
+            const explanationRule = formatAlertExplanationRule(item);
+            const explanationReason = formatAlertExplanationReason(item);
+            const explanationDecision = formatAlertExplanationDecision(item);
+            return `
                 <article class="admin-item compact-admin-item">
                     <div class="section-header">
                         <h3>${escapeHtml(item.display_name || item.runtime_binding_key || item.alert_code)}</h3>
@@ -1522,11 +1617,15 @@ function renderAlertArchive(items) {
                     <p class="admin-meta">explanation ${escapeHtml(explanationRule)}</p>
                     <p class="admin-meta">${escapeHtml(explanationReason)}</p>
                     <p class="admin-meta">${escapeHtml(explanationDecision)}</p>
+                    ${renderAlertWinnerTransitionSection(item, {
+                        kind: "archive",
+                        winnerLabel: "Final winner",
+                        alertId: item.id,
+                    })}
                     <p class="admin-meta">${escapeHtml(formatAlertResolutionReason(item))}</p>
                 </article>
             `;
-            }
-        )
+        })
         .join("");
 }
 
@@ -4196,12 +4295,16 @@ async function loadAlerts() {
         params.set("is_acknowledged", alertAckFilter.value);
     }
     const payload = await apiFetch(`/api/admin/alerts?${params.toString()}`);
-    renderAlerts(payload.items);
+    currentAlertItems = Array.isArray(payload.items) ? payload.items : [];
+    clearAlertWinnerTransitionState("alert");
+    renderAlerts(currentAlertItems);
 }
 
 async function loadAlertArchive() {
     const payload = await apiFetch("/api/admin/alert-archive?limit=10");
-    renderAlertArchive(payload.items);
+    currentAlertArchiveItems = Array.isArray(payload.items) ? payload.items : [];
+    clearAlertWinnerTransitionState("archive");
+    renderAlertArchive(currentAlertArchiveItems);
 }
 
 async function loadDebug() {
@@ -5083,6 +5186,59 @@ async function resolveAlert(alertId, currentReason) {
     });
 }
 
+async function loadAlertWinnerTransitions(kind, alertId) {
+    const key = getAlertWinnerTransitionCacheKey(kind, alertId);
+    const endpoint =
+        kind === "archive"
+            ? `/api/admin/alert-archive/${alertId}/winner-transitions?limit=20`
+            : `/api/admin/alerts/${alertId}/winner-transitions?limit=20`;
+    alertWinnerTransitionDetails.set(key, { status: "loading" });
+    if (kind === "archive") {
+        renderAlertArchive(currentAlertArchiveItems);
+    } else {
+        renderAlerts(currentAlertItems);
+    }
+
+    try {
+        const payload = await apiFetch(endpoint);
+        alertWinnerTransitionDetails.set(key, { status: "ready", payload });
+    } catch (error) {
+        alertWinnerTransitionDetails.set(key, { status: "error", message: error.message });
+    }
+
+    if (kind === "archive") {
+        renderAlertArchive(currentAlertArchiveItems);
+    } else {
+        renderAlerts(currentAlertItems);
+    }
+}
+
+async function toggleAlertWinnerTransitions(kind, alertId) {
+    const key = getAlertWinnerTransitionCacheKey(kind, alertId);
+    if (alertWinnerTransitionExpanded.has(key)) {
+        alertWinnerTransitionExpanded.delete(key);
+        if (kind === "archive") {
+            renderAlertArchive(currentAlertArchiveItems);
+        } else {
+            renderAlerts(currentAlertItems);
+        }
+        return;
+    }
+
+    alertWinnerTransitionExpanded.add(key);
+    const existing = alertWinnerTransitionDetails.get(key);
+    if (!existing) {
+        await loadAlertWinnerTransitions(kind, alertId);
+        return;
+    }
+
+    if (kind === "archive") {
+        renderAlertArchive(currentAlertArchiveItems);
+    } else {
+        renderAlerts(currentAlertItems);
+    }
+}
+
 async function refreshAll() {
     clearBanner();
     renderMetamodelPermissionPill();
@@ -5678,6 +5834,15 @@ alertRulesList?.addEventListener("click", (event) => {
 });
 
 alertsList?.addEventListener("click", (event) => {
+    const transitionButton =
+        event.target instanceof HTMLElement ? event.target.closest(".toggle-alert-transition-button") : null;
+    if (transitionButton) {
+        const kind = transitionButton.dataset.transitionKind || "alert";
+        const alertId = Number(transitionButton.dataset.transitionId);
+        toggleAlertWinnerTransitions(kind, alertId).catch((error) => showBanner(error.message, "error"));
+        return;
+    }
+
     const ackButton = event.target instanceof HTMLElement ? event.target.closest(".toggle-alert-ack-button") : null;
     if (ackButton) {
         const alertId = Number(ackButton.dataset.alertId);
@@ -5719,6 +5884,17 @@ alertsList?.addEventListener("click", (event) => {
             showBanner(`alert 상태를 ${nextStatus}(으)로 변경했습니다.`, "success");
         })
         .catch((error) => showBanner(error.message, "error"));
+});
+
+alertArchiveList?.addEventListener("click", (event) => {
+    const transitionButton =
+        event.target instanceof HTMLElement ? event.target.closest(".toggle-alert-transition-button") : null;
+    if (!transitionButton) {
+        return;
+    }
+
+    const alertId = Number(transitionButton.dataset.transitionId);
+    toggleAlertWinnerTransitions("archive", alertId).catch((error) => showBanner(error.message, "error"));
 });
 
 ingestStatusFilter?.addEventListener("change", loadIngest);
