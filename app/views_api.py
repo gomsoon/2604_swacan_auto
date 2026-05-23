@@ -145,6 +145,8 @@ def serialize_alert_instance(alert_row) -> dict[str, Any]:
         "id": alert_row["id"],
         "monitored_object_id": alert_row["monitored_object_id"],
         "alert_code": alert_row["alert_code"],
+        "identity_kind": alert_row["identity_kind"] if "identity_kind" in alert_row.keys() else None,
+        "identity_key": alert_row["identity_key"] if "identity_key" in alert_row.keys() else None,
         "source_rule_id": alert_row["source_rule_id"],
         "source_rule_key": alert_row["source_rule_key"] if "source_rule_key" in alert_row.keys() else None,
         "source_rule_display_name_snapshot": (
@@ -428,7 +430,7 @@ def fetch_alert_rows_for_monitored_objects(monitored_object_ids: list[int], *, s
 
     return get_db().execute(
         f"""
-        SELECT alerts.id, alerts.monitored_object_id, alerts.alert_code, alerts.source_rule_id,
+        SELECT alerts.id, alerts.monitored_object_id, alerts.alert_code, alerts.identity_kind, alerts.identity_key, alerts.source_rule_id,
                rules.rule_key AS source_rule_key, rules.display_name AS source_rule_display_name_snapshot,
                alerts.opening_rule_id, alerts.opening_rule_key, alerts.opening_rule_display_name_snapshot,
                alerts.winner_transition_count, alerts.last_winner_transition_at,
@@ -466,6 +468,7 @@ def fetch_alert_archive_rows_for_monitored_object(monitored_object_id: int, *, l
                mo.object_type AS semantic_type_code,
                archive.alert_code, archive.source_rule_id, archive.source_rule_key,
                archive.source_rule_display_name_snapshot,
+               archive.identity_kind, archive.identity_key, archive.origin_alert_instance_id,
                archive.opening_rule_id, archive.opening_rule_key, archive.opening_rule_display_name_snapshot,
                archive.winner_transition_count, archive.last_winner_transition_at,
                rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,

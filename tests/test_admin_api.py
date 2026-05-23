@@ -876,6 +876,93 @@ def test_admin_alert_history_accepts_boundary_limits_and_rejects_invalid_values(
     assert missing_response.get_json()["error"]["code"] == "not_found"
 
 
+def test_admin_alert_winner_transitions_returns_current_detail_summary(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET source_rule_id = ?, identity_kind = ?, identity_key = ?,
+                opening_rule_id = NULL,
+                opening_rule_key = ?, opening_rule_display_name_snapshot = ?,
+                winner_transition_count = ?, last_winner_transition_at = ?
+            WHERE id = ?
+            """,
+            (
+                1502,
+                "family",
+                "threshold:1303:agent:outbox_queue_depth:gte",
+                "threshold.agent.outbox_queue_depth.agent-queue-baseline",
+                "Agent Queue Baseline",
+                1,
+                "2026-04-12T11:04:15.000+09:00",
+                1,
+            ),
+        )
+        db_conn.execute(
+            """
+            INSERT INTO alert_winner_transitions (
+                alert_instance_id, identity_kind, identity_key, monitored_object_id,
+                previous_rule_id, previous_rule_key, previous_rule_display_name_snapshot, previous_severity,
+                new_rule_id, new_rule_key, new_rule_display_name_snapshot, new_severity,
+                transition_reason, occurred_at, created_at, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1,
+                "family",
+                "threshold:1303:agent:outbox_queue_depth:gte",
+                1303,
+                None,
+                "threshold.agent.outbox_queue_depth.agent-queue-baseline",
+                "Agent Queue Baseline",
+                "warning",
+                1502,
+                "threshold.agent.outbox_queue_depth.agent-queue-high",
+                "Agent Queue High",
+                "warning",
+                "winner_rule_changed",
+                "2026-04-12T11:04:15.000+09:00",
+                "2026-04-12T11:04:15.000+09:00",
+                json.dumps({"reason": "specificity_override"}),
+            ),
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    response = seeded_client.get("/api/admin/alerts/1/winner-transitions?limit=10")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["summary"] == {
+        "monitored_object_id": 1303,
+        "display_name": "Local Agent",
+        "semantic_type_code": "MonitoringAgent",
+        "identity_kind": "family",
+        "identity_key": "threshold:1303:agent:outbox_queue_depth:gte",
+        "opening_rule": {
+            "id": 1502,
+            "rule_key": "threshold.agent.outbox_queue_depth.agent-queue-baseline",
+            "display_name": "Agent Queue Baseline",
+        },
+        "winner_rule": {
+            "id": 1502,
+            "rule_key": "threshold.agent.outbox_queue_depth.agent-queue-high",
+            "display_name": "Agent Queue High",
+        },
+        "transition_count": 1,
+        "last_transition_at": "2026-04-12T11:04:15.000+09:00",
+        "timeline_available": True,
+    }
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["alert_instance_id"] == 1
+    assert payload["items"][0]["previous_rule"]["rule_key"] == "threshold.agent.outbox_queue_depth.agent-queue-baseline"
+    assert payload["items"][0]["new_rule"]["rule_key"] == "threshold.agent.outbox_queue_depth.agent-queue-high"
+    assert payload["items"][0]["transition_reason"] == "winner_rule_changed"
+    assert payload["items"][0]["metadata"] == {"reason": "specificity_override"}
+
+
 def test_admin_manual_resolve_archives_alert_and_returns_summary(seeded_app, seeded_client) -> None:
     seed_admin_dashboard_rows(seeded_app)
     login(seeded_client)
@@ -913,6 +1000,127 @@ def test_admin_manual_resolve_archives_alert_and_returns_summary(seeded_app, see
         assert archive_rows[0]["final_status"] == "resolved"
         assert archive_rows[0]["source_rule_key"] is None
         assert archive_rows[0]["source_rule_display_name_snapshot"] is None
+
+
+def test_admin_alert_archive_winner_transitions_returns_archive_detail_summary(seeded_app, seeded_client) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET source_rule_id = ?, identity_kind = ?, identity_key = ?,
+                opening_rule_id = NULL,
+                opening_rule_key = ?, opening_rule_display_name_snapshot = ?,
+                winner_transition_count = ?, last_winner_transition_at = ?
+            WHERE id = ?
+            """,
+            (
+                1502,
+                "family",
+                "threshold:1303:agent:outbox_queue_depth:gte",
+                "threshold.agent.outbox_queue_depth.agent-queue-baseline",
+                "Agent Queue Baseline",
+                1,
+                "2026-04-12T11:04:15.000+09:00",
+                1,
+            ),
+        )
+        db_conn.execute(
+            """
+            INSERT INTO alert_winner_transitions (
+                alert_instance_id, identity_kind, identity_key, monitored_object_id,
+                previous_rule_id, previous_rule_key, previous_rule_display_name_snapshot, previous_severity,
+                new_rule_id, new_rule_key, new_rule_display_name_snapshot, new_severity,
+                transition_reason, occurred_at, created_at, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1,
+                "family",
+                "threshold:1303:agent:outbox_queue_depth:gte",
+                1303,
+                None,
+                "threshold.agent.outbox_queue_depth.agent-queue-baseline",
+                "Agent Queue Baseline",
+                "warning",
+                1502,
+                "threshold.agent.outbox_queue_depth.agent-queue-high",
+                "Agent Queue High",
+                "warning",
+                "winner_rule_changed",
+                "2026-04-12T11:04:15.000+09:00",
+                "2026-04-12T11:04:15.000+09:00",
+                json.dumps({"reason": "specificity_override"}),
+            ),
+        )
+        db_conn.commit()
+    login(seeded_client)
+
+    resolve_response = seeded_client.post(
+        "/api/admin/alerts/1/resolve",
+        json={"resolution_reason": "operator manual resolve"},
+    )
+
+    assert resolve_response.status_code == 200
+    archive_id = resolve_response.get_json()["archive"]["id"]
+
+    response = seeded_client.get(f"/api/admin/alert-archive/{archive_id}/winner-transitions?limit=10")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["summary"] == {
+        "monitored_object_id": 1303,
+        "display_name": "Local Agent",
+        "semantic_type_code": "MonitoringAgent",
+        "identity_kind": "family",
+        "identity_key": "threshold:1303:agent:outbox_queue_depth:gte",
+        "opening_rule": {
+            "id": 1502,
+            "rule_key": "threshold.agent.outbox_queue_depth.agent-queue-baseline",
+            "display_name": "Agent Queue Baseline",
+        },
+        "winner_rule": {
+            "id": 1502,
+            "rule_key": "threshold.agent.outbox_queue_depth.agent-queue-high",
+            "display_name": "Agent Queue High",
+        },
+        "transition_count": 1,
+        "last_transition_at": "2026-04-12T11:04:15.000+09:00",
+        "timeline_available": True,
+    }
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["new_rule"]["rule_key"] == "threshold.agent.outbox_queue_depth.agent-queue-high"
+    assert payload["items"][0]["metadata"] == {"reason": "specificity_override"}
+
+
+def test_admin_alert_archive_winner_transitions_reports_unavailable_for_legacy_archive(
+    seeded_app, seeded_client
+) -> None:
+    seed_admin_dashboard_rows(seeded_app)
+    login(seeded_client)
+
+    resolve_response = seeded_client.post(
+        "/api/admin/alerts/1/resolve",
+        json={"resolution_reason": "operator manual resolve"},
+    )
+    assert resolve_response.status_code == 200
+    archive_id = resolve_response.get_json()["archive"]["id"]
+
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            "UPDATE alert_history_archive SET origin_alert_instance_id = NULL WHERE id = ?",
+            (archive_id,),
+        )
+        db_conn.commit()
+
+    response = seeded_client.get(f"/api/admin/alert-archive/{archive_id}/winner-transitions?limit=10")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["summary"]["timeline_available"] is False
+    assert payload["items"] == []
 
 
 def test_admin_manual_resolve_accepts_and_rejects_boundary_reason_lengths(seeded_app, seeded_client) -> None:

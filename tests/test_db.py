@@ -527,7 +527,7 @@ def test_ensure_alert_winner_transition_schema_adds_summary_columns_and_backfill
     archive_row = db_conn.execute(
         """
         SELECT opening_rule_id, opening_rule_key, opening_rule_display_name_snapshot,
-               winner_transition_count, last_winner_transition_at
+               origin_alert_instance_id, winner_transition_count, last_winner_transition_at
         FROM alert_history_archive
         WHERE id = 1
         """
@@ -545,6 +545,7 @@ def test_ensure_alert_winner_transition_schema_adds_summary_columns_and_backfill
         "opening_rule_id",
         "opening_rule_key",
         "opening_rule_display_name_snapshot",
+        "origin_alert_instance_id",
         "winner_transition_count",
         "last_winner_transition_at",
     } <= archive_columns
@@ -557,6 +558,7 @@ def test_ensure_alert_winner_transition_schema_adds_summary_columns_and_backfill
     assert archive_row["opening_rule_id"] == 1501
     assert archive_row["opening_rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
     assert archive_row["opening_rule_display_name_snapshot"] == "Process CPU High"
+    assert archive_row["origin_alert_instance_id"] is None
     assert archive_row["winner_transition_count"] == 0
     assert archive_row["last_winner_transition_at"] is None
     assert transition_count["c"] == 0
@@ -626,7 +628,7 @@ def test_ensure_alert_winner_transition_schema_keeps_null_opening_snapshot_witho
     archive_row = db_conn.execute(
         """
         SELECT opening_rule_id, opening_rule_key, opening_rule_display_name_snapshot,
-               winner_transition_count, last_winner_transition_at
+               origin_alert_instance_id, winner_transition_count, last_winner_transition_at
         FROM alert_history_archive
         WHERE id = 1
         """
@@ -640,5 +642,6 @@ def test_ensure_alert_winner_transition_schema_keeps_null_opening_snapshot_witho
     assert archive_row["opening_rule_id"] is None
     assert archive_row["opening_rule_key"] is None
     assert archive_row["opening_rule_display_name_snapshot"] is None
+    assert archive_row["origin_alert_instance_id"] is None
     assert archive_row["winner_transition_count"] == 0
     assert archive_row["last_winner_transition_at"] is None

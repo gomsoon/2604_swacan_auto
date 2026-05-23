@@ -58,9 +58,13 @@ Current implementation note for item 4:
 - `grouped_event_repeat` event families now also use family-level identity
 - winner changes inside the same family now reuse the same current alert row
 - runtime/archive now persist `identity_kind + identity_key` for both paths
-- the next follow-up is `opening_rule_*`, `winner_transition_count`,
-  `last_winner_transition_at`, and a dedicated `alert_winner_transitions`
-  timeline table
+- opener snapshot summary, `winner_transition_count`,
+  `last_winner_transition_at`, and the dedicated
+  `alert_winner_transitions` timeline table are now implemented
+- admin detail APIs can now read transition rows for current alerts and new
+  archive rows
+- the next follow-up is winner-transition timeline UI and richer archive
+  analytics
 - suppressed current rows remain deferred
 
 버전: Draft 0.3  

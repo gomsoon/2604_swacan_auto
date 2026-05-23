@@ -186,6 +186,7 @@ def insert_alert_history_archive(
             source_rule_display_name_snapshot,
             identity_kind,
             identity_key,
+            origin_alert_instance_id,
             opening_rule_id,
             opening_rule_key,
             opening_rule_display_name_snapshot,
@@ -208,7 +209,7 @@ def insert_alert_history_archive(
             metadata_json,
             created_at,
             updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             alert_row["monitored_object_id"],
@@ -218,6 +219,7 @@ def insert_alert_history_archive(
             source_rule_display_name_snapshot,
             identity_kind,
             identity_key,
+            alert_row["id"] if "id" in row_keys else None,
             opening_rule_id,
             opening_rule_key,
             opening_rule_display_name_snapshot,
@@ -308,6 +310,11 @@ def serialize_alert_archive_row(row) -> dict[str, Any]:
         "source_rule_id": row["source_rule_id"],
         "source_rule_key": row["source_rule_key"],
         "source_rule_display_name_snapshot": row["source_rule_display_name_snapshot"],
+        "identity_kind": row["identity_kind"] if "identity_kind" in row.keys() else None,
+        "identity_key": row["identity_key"] if "identity_key" in row.keys() else None,
+        "origin_alert_instance_id": (
+            row["origin_alert_instance_id"] if "origin_alert_instance_id" in row.keys() else None
+        ),
         "opening_rule_id": row["opening_rule_id"] if "opening_rule_id" in row.keys() else None,
         "opening_rule_key": row["opening_rule_key"] if "opening_rule_key" in row.keys() else None,
         "opening_rule_display_name_snapshot": (

@@ -4,7 +4,7 @@
 
 Current recommended alert-focused sequence:
 
-1. Winner transition timeline / archive analytics
+1. Winner transition timeline UI / archive analytics follow-up
 2. Preview/runtime explainability product follow-up
 3. Monitoring alert operations follow-up
 
@@ -55,7 +55,11 @@ Current implementation note for the next review step:
 - runtime/archive now persist durable `identity_kind + identity_key` fields
 - winner changes now preserve the same current row and therefore preserve
   ACK/in-progress state
-- the next follow-up slice is opener snapshots plus winner-transition analytics
+- opener snapshots and winner-transition analytics are now implemented through:
+  - summary columns on current/archive rows
+  - the append-only `alert_winner_transitions` table
+  - admin detail APIs for current/archive winner transitions
+- the next follow-up slice is timeline UI / archive analytics polish
 
 ## Agent Addendum
 

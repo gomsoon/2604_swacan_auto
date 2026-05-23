@@ -407,6 +407,7 @@ CREATE TABLE IF NOT EXISTS alert_history_archive (
     opening_rule_display_name_snapshot TEXT,
     identity_kind TEXT,
     identity_key TEXT,
+    origin_alert_instance_id INTEGER,
     winner_transition_count INTEGER NOT NULL DEFAULT 0,
     last_winner_transition_at TEXT,
     opened_at TEXT NOT NULL,

@@ -42,9 +42,9 @@ Already implemented:
 
 Still missing:
 
-- dedicated API/detail view for `alert_winner_transitions`
 - winner-transition timeline UI
 - richer timeline analytics beyond opener/final winner summary
+- wider product/API exposure beyond admin detail endpoints
 
 ## Phase 1 Scope
 
@@ -220,7 +220,11 @@ Status:
 - summary columns are now exposed on admin current-alert payloads
 - summary columns are now exposed on monitoring current-alert payloads
 - summary columns are now exposed on archive payloads
-- dedicated transition-row detail API remains deferred
+- admin detail APIs now expose transition rows for:
+  - current alerts
+  - archive rows with `origin_alert_instance_id`
+- legacy archive rows without `origin_alert_instance_id` report timeline
+  unavailability instead of guessing
 
 UI timeline rendering can remain a later slice.
 

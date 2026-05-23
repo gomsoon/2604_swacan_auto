@@ -304,6 +304,8 @@ def serialize_alert_instance(row) -> dict[str, Any]:
         "semantic_type_code": row["semantic_type_code"],
         "display_name": row["display_name"],
         "alert_code": row["alert_code"],
+        "identity_kind": row["identity_kind"] if "identity_kind" in row.keys() else None,
+        "identity_key": row["identity_key"] if "identity_key" in row.keys() else None,
         "source_rule_id": row["source_rule_id"],
         "source_rule_key": row["source_rule_key"] if "source_rule_key" in row.keys() else None,
         "source_rule_display_name_snapshot": (
@@ -394,6 +396,53 @@ def serialize_alert_instance(row) -> dict[str, Any]:
     return payload
 
 
+def serialize_alert_winner_transition_row(row) -> dict[str, Any]:
+    payload = {
+        "id": row["id"],
+        "alert_instance_id": row["alert_instance_id"],
+        "identity_kind": row["identity_kind"],
+        "identity_key": row["identity_key"],
+        "monitored_object_id": row["monitored_object_id"],
+        "previous_rule": {
+            "id": row["previous_rule_id"],
+            "rule_key": row["previous_rule_key"],
+            "display_name": row["previous_rule_display_name_snapshot"],
+        },
+        "new_rule": {
+            "id": row["new_rule_id"],
+            "rule_key": row["new_rule_key"],
+            "display_name": row["new_rule_display_name_snapshot"],
+        },
+        "previous_severity": row["previous_severity"],
+        "new_severity": row["new_severity"],
+        "transition_reason": row["transition_reason"],
+        "occurred_at": row["occurred_at"],
+        "created_at": row["created_at"],
+    }
+    if row["metadata_json"]:
+        payload["metadata"] = parse_json_or_text(row["metadata_json"])
+    return payload
+
+
+def build_alert_winner_transition_detail_summary(
+    alert_payload: dict[str, Any],
+    *,
+    timeline_available: bool,
+) -> dict[str, Any]:
+    return {
+        "monitored_object_id": alert_payload["monitored_object_id"],
+        "display_name": alert_payload["display_name"],
+        "semantic_type_code": alert_payload["semantic_type_code"],
+        "identity_kind": alert_payload.get("identity_kind"),
+        "identity_key": alert_payload.get("identity_key"),
+        "opening_rule": alert_payload["winner_transition_summary"]["opening_rule"],
+        "winner_rule": alert_payload["winner_transition_summary"]["winner_rule"],
+        "transition_count": alert_payload["winner_transition_summary"]["transition_count"],
+        "last_transition_at": alert_payload["winner_transition_summary"]["last_transition_at"],
+        "timeline_available": timeline_available,
+    }
+
+
 def serialize_alert_history_row(row) -> dict[str, Any]:
     payload = {
         "id": row["id"],
@@ -420,6 +469,7 @@ def fetch_alert_archive_row(archive_id: int):
                mo.object_type AS semantic_type_code,
                archive.alert_code, archive.source_rule_id, archive.source_rule_key,
                archive.source_rule_display_name_snapshot,
+               archive.identity_kind, archive.identity_key, archive.origin_alert_instance_id,
                archive.opening_rule_id, archive.opening_rule_key, archive.opening_rule_display_name_snapshot,
                archive.winner_transition_count, archive.last_winner_transition_at,
                rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
@@ -448,7 +498,7 @@ def fetch_alert_instance_row(alert_id: int):
     return get_db().execute(
         """
         SELECT alerts.id, alerts.monitored_object_id, mo.runtime_binding_key, mo.object_type AS semantic_type_code,
-               mo.display_name, alerts.alert_code, alerts.severity, alerts.status,
+               mo.display_name, alerts.alert_code, alerts.identity_kind, alerts.identity_key, alerts.severity, alerts.status,
                alerts.source_rule_id, rules.rule_key AS source_rule_key, rules.display_name AS source_rule_display_name_snapshot,
                alerts.opening_rule_id, alerts.opening_rule_key, alerts.opening_rule_display_name_snapshot,
                alerts.winner_transition_count, alerts.last_winner_transition_at,
@@ -472,6 +522,22 @@ def fetch_alert_instance_row(alert_id: int):
         """,
         (alert_id,),
     ).fetchone()
+
+
+def fetch_alert_winner_transition_rows(alert_instance_id: int, *, limit: int):
+    return get_db().execute(
+        """
+        SELECT id, alert_instance_id, identity_kind, identity_key, monitored_object_id,
+               previous_rule_id, previous_rule_key, previous_rule_display_name_snapshot, previous_severity,
+               new_rule_id, new_rule_key, new_rule_display_name_snapshot, new_severity,
+               transition_reason, occurred_at, created_at, metadata_json
+        FROM alert_winner_transitions
+        WHERE alert_instance_id = ?
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT ?
+        """,
+        (alert_instance_id, limit),
+    ).fetchall()
 
 
 def resolve_alert_instance(
@@ -2179,7 +2245,7 @@ def list_alert_instances():
 
     sql = """
         SELECT alerts.id, alerts.monitored_object_id, mo.runtime_binding_key, mo.object_type AS semantic_type_code,
-               mo.display_name, alerts.alert_code, alerts.severity, alerts.status,
+               mo.display_name, alerts.alert_code, alerts.identity_kind, alerts.identity_key, alerts.severity, alerts.status,
                alerts.source_rule_id, rules.rule_key AS source_rule_key, rules.display_name AS source_rule_display_name_snapshot,
                alerts.opening_rule_id, alerts.opening_rule_key, alerts.opening_rule_display_name_snapshot,
                alerts.winner_transition_count, alerts.last_winner_transition_at,
@@ -2244,6 +2310,28 @@ def get_alert_history(alert_id: int):
     return {"items": [serialize_alert_history_row(row) for row in rows]}
 
 
+@bp.get("/alerts/<int:alert_id>/winner-transitions")
+@admin_required
+def get_alert_winner_transitions(alert_id: int):
+    limit, error = parse_limit()
+    if error:
+        return error
+
+    alert_row = fetch_alert_instance_row(alert_id)
+    if alert_row is None:
+        return error_response("not_found", "alert not found", 404)
+
+    alert_payload = serialize_alert_instance(alert_row)
+    transition_rows = fetch_alert_winner_transition_rows(alert_id, limit=limit)
+    return {
+        "summary": build_alert_winner_transition_detail_summary(
+            alert_payload,
+            timeline_available=True,
+        ),
+        "items": [serialize_alert_winner_transition_row(row) for row in transition_rows],
+    }
+
+
 @bp.get("/alert-history")
 @bp.get("/alert-archive")
 @admin_required
@@ -2279,6 +2367,7 @@ def list_alert_archive():
                mo.object_type AS semantic_type_code,
                archive.alert_code, archive.source_rule_id, archive.source_rule_key,
                archive.source_rule_display_name_snapshot,
+               archive.identity_kind, archive.identity_key, archive.origin_alert_instance_id,
                archive.opening_rule_id, archive.opening_rule_key, archive.opening_rule_display_name_snapshot,
                archive.winner_transition_count, archive.last_winner_transition_at,
                rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
@@ -2305,6 +2394,34 @@ def list_alert_archive():
 
     rows = get_db().execute(sql, tuple(params)).fetchall()
     return {"items": [serialize_alert_archive_row(row) for row in rows]}
+
+
+@bp.get("/alert-archive/<int:archive_id>/winner-transitions")
+@admin_required
+def get_alert_archive_winner_transitions(archive_id: int):
+    limit, error = parse_limit()
+    if error:
+        return error
+
+    archive_row = fetch_alert_archive_row(archive_id)
+    if archive_row is None:
+        return error_response("not_found", "alert archive not found", 404)
+
+    archive_payload = serialize_alert_archive_row(archive_row)
+    origin_alert_instance_id = archive_payload.get("origin_alert_instance_id")
+    timeline_available = origin_alert_instance_id is not None
+    transition_rows = (
+        fetch_alert_winner_transition_rows(int(origin_alert_instance_id), limit=limit)
+        if timeline_available
+        else []
+    )
+    return {
+        "summary": build_alert_winner_transition_detail_summary(
+            archive_payload,
+            timeline_available=timeline_available,
+        ),
+        "items": [serialize_alert_winner_transition_row(row) for row in transition_rows],
+    }
 
 
 @bp.patch("/alerts/<int:alert_id>")

@@ -419,6 +419,8 @@ def ensure_alert_winner_transition_schema(db_conn: sqlite3.Connection) -> None:
             db_conn.execute(
                 "ALTER TABLE alert_history_archive ADD COLUMN opening_rule_display_name_snapshot TEXT"
             )
+        if "origin_alert_instance_id" not in columns:
+            db_conn.execute("ALTER TABLE alert_history_archive ADD COLUMN origin_alert_instance_id INTEGER")
         if "winner_transition_count" not in columns:
             db_conn.execute(
                 "ALTER TABLE alert_history_archive ADD COLUMN winner_transition_count INTEGER NOT NULL DEFAULT 0"
