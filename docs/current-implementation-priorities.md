@@ -39,7 +39,11 @@ Current implementation note for item 3:
 
 - preview/current/archive now share a common `explanation` object
 - current alert and archive cards can read `winner_display_name` and `suppressed_rule_display_names`
-- full candidate catalogs, family-level identity, and `reason_code` are still deferred
+- current explainability polish should now focus on:
+  - stable reason vocabulary
+  - shared labels across preview/current/archive/timeline
+  - winner transition reason readability
+- full candidate catalogs and `reason_code` remain deferred
 
 Current scope note for the next review step:
 

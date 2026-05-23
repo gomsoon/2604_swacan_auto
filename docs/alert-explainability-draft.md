@@ -1,7 +1,7 @@
 # Alert Explainability Draft
 
-Version: Draft 0.1
-Updated: 2026-05-13
+Version: Draft 0.2
+Updated: 2026-05-24
 
 ## Goal
 
@@ -14,7 +14,14 @@ Use the same explanation contract across:
 The immediate goal is not a full trace tree. The goal is to make the same alert
 readable with the same language no matter where the operator sees it.
 
-## Explanation Contract
+The operator-facing questions stay fixed:
+
+1. Why did this fire?
+2. Which rule became the winner?
+3. Which rules were suppressed?
+4. Why did this close?
+
+## Explanation Contract V2
 
 The shared `explanation` object should stay small and stable.
 
@@ -40,14 +47,51 @@ Notes:
 - `winning_condition_trace` is the structured machine-readable reason.
 - `resolution_reason` is only meaningful for resolved/archive payloads.
 
-## Phase 1 Scope
+## Reason Vocabulary
+
+Reason text should stay short, stable, and category-specific.
+
+Recommended templates:
+
+- threshold scalar upper-bound:
+  - `{metric_key}={value} met {level} threshold {threshold}`
+- threshold scalar lower-bound:
+  - `{metric_key}={value} met {level} lower threshold {threshold}`
+- threshold compound:
+  - `{metric_key}={value} matched {level} condition ({logical_operator}, clause {n})`
+- event grouped repeat:
+  - `{signal_key} repeat count {count} met {level} threshold {threshold}`
+- stale threshold reuse:
+  - `heartbeat_age_seconds={value} met {level} threshold {threshold}`
+- no-data threshold reuse:
+  - `latest_state_age_seconds={value} met {level} threshold {threshold}`
+
+Resolution vocabulary remains code-oriented in storage and user-readable in UI.
+
+## UI Reading Order
+
+Preview/current/archive/timeline should reuse the same reading order:
+
+1. Rule
+2. Why it fired
+3. Winner / suppressed
+4. Why it closed
+
+Preview may group this into:
+
+1. Current rule evaluation
+2. Final winner
+3. Suppressed rules
+4. Decision trace
+
+## Current Scope
 
 This phase keeps the slice narrow.
 
-- add `explanation` to preview items
-- add `explanation` to current alert payloads
-- add `explanation` to archive payloads
-- normalize runtime metadata so threshold/event paths carry the same fields
+- keep `explanation` stable across preview items, current alert payloads, and archive payloads
+- normalize threshold/event/stale/no-data reason vocabulary
+- make preview/current/archive/timeline use the same operator-facing labels
+- avoid introducing a larger trace tree before the wording is stable
 
 This phase does not add:
 
@@ -93,12 +137,28 @@ Recommended runtime metadata fields:
 Archive serializers may rebuild the top-level `explanation` object from runtime
 metadata plus archive-only fields such as `resolution_reason`.
 
+Current/archive cards should explicitly show:
+
+- `Opened by`
+- `Current winner` or `Final winner`
+- `Why it fired`
+- `Why it closed`
+- `Winner transitions` when family identity is active
+
+Winner transition timeline rows should show:
+
+- `previous rule -> new rule`
+- severity change
+- occurred time
+- transition reason note when available
+
 ## Deferred Backlog
 
 These stay out of the current slice and should remain backlog items:
 
 1. full candidate/winner/suppressed catalog UI
 2. clause-level deep trace drill-down for suppressed rules
-3. family-level current alert identity
+3. full transition analytics dashboard
 4. suppressed current-row retention
 5. `reason_code + reason_message + reason_params`
+6. debug-oriented raw explanation dump view

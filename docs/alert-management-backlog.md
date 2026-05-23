@@ -43,6 +43,10 @@ Current implementation note for item 3:
 - preview/current/archive now expose the same `explanation` contract
 - `winner_display_name` and `suppressed_rule_display_names` are now available for operator-facing cards
 - deep candidate catalogs and clause-level suppressed traces remain backlog items
+- the next explainability polish is vocabulary and layout consistency across
+  preview/current/archive/timeline
+- winner transition timeline rows should eventually carry the same
+  `why it fired / why it closed / why winner changed` language as the cards
 
 Current scope note for item 4:
 

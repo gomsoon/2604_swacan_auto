@@ -3,10 +3,13 @@
     clearBanner,
     formatAlertExplanationReason,
     formatAlertExplanationRule,
+    formatAlertExplanationReasonLine,
+    formatAlertExplanationRuleLine,
     formatAlertResolutionReason,
     formatAlertResolutionSource,
     formatTimestamp,
     formatAlertExplanationDecision,
+    formatAlertExplanationDecisionLine,
     showBanner,
 } from "./common.js";
 import { renderDiagram } from "./diagram.js";
@@ -356,9 +359,9 @@ function renderAlertCards(items, emptyMessage) {
             ${items
                 .map((alert) => {
                     const linkedEvent = findGroupedEventForAlert(alert);
-                    const explanationRule = formatAlertExplanationRule(alert);
-                    const explanationReason = formatAlertExplanationReason(alert);
-                    const explanationDecision = formatAlertExplanationDecision(alert);
+                    const explanationRule = formatAlertExplanationRuleLine(alert);
+                    const explanationReason = formatAlertExplanationReasonLine(alert);
+                    const explanationDecision = formatAlertExplanationDecisionLine(alert);
                     return `
                         <article class="selection-summary-card ${cardSeverityClass(alert.severity)}${linkedEvent ? " is-actionable" : ""}" data-alert-id="${escapeHtml(alert.id)}"${linkedEvent ? ` data-linked-grouped-event-id="${escapeHtml(linkedEvent.id)}"` : ""}>
                             <h4>${escapeHtml(alert.alert_code)}</h4>
@@ -484,12 +487,12 @@ function renderRuntimeHistorySection(monitoredObjectId) {
         (item) => `
             <article class="selection-summary-card">
                 <h4>${escapeHtml(item.alert_code)}</h4>
-                <p>${escapeHtml(formatAlertExplanationReason(item))}</p>
+                <p>${escapeHtml(formatAlertExplanationReasonLine(item))}</p>
                 <p>${escapeHtml(item.final_severity)} | ${escapeHtml(formatAlertResolutionSource(item.resolution_source))} | 반복 ${escapeHtml(item.repeat_count ?? 1)}회</p>
-                <p>${escapeHtml(formatAlertExplanationRule(item))}</p>
-                <p>${escapeHtml(formatAlertExplanationDecision(item))}</p>
+                <p>${escapeHtml(formatAlertExplanationRuleLine(item))}</p>
+                <p>${escapeHtml(formatAlertExplanationDecisionLine(item))}</p>
                 <p>${escapeHtml(formatTimestamp(item.resolved_at))}</p>
-                <p>해결 사유: ${escapeHtml(formatAlertResolutionReason(item))}</p>
+                <p>Why it closed ${escapeHtml(formatAlertResolutionReason(item))}</p>
             </article>
         `
     );

@@ -2244,7 +2244,7 @@ def test_admin_alert_rule_preview_supports_grouped_event_repeat(seeded_app, seed
         "signal_type": "grouped_event_repeat",
         "value_key": "process_restarted",
         "threshold_level": "critical",
-        "reason": "process_restarted repeat_count=4 >= 4",
+        "reason": "process_restarted repeat count 4 met critical threshold 4",
         "winning_condition_trace": {
             "severity": "critical",
             "condition_mode": "scalar",
@@ -2320,7 +2320,7 @@ def test_admin_alert_rule_preview_supports_stale_heartbeat_threshold(seeded_app,
     assert payload["items"][0]["signal_type"] == "latest_state_metric"
     assert payload["items"][0]["current_metric_value"] == 20.0
     assert payload["items"][0]["threshold_level"] == "warning"
-    assert payload["items"][0]["reason"] == "heartbeat_age_seconds=20.000 >= 10.000"
+    assert payload["items"][0]["reason"] == "heartbeat_age_seconds=20.000 met warning threshold 10.000"
     assert payload["items"][0]["winning_condition_trace"] == {
         "severity": "warning",
         "condition_mode": "scalar",
@@ -2333,7 +2333,7 @@ def test_admin_alert_rule_preview_supports_stale_heartbeat_threshold(seeded_app,
         "signal_type": "latest_state_metric",
         "value_key": "heartbeat_age_seconds",
         "threshold_level": "warning",
-        "reason": "heartbeat_age_seconds=20.000 >= 10.000",
+        "reason": "heartbeat_age_seconds=20.000 met warning threshold 10.000",
         "winning_condition_trace": {
             "severity": "warning",
             "condition_mode": "scalar",
@@ -2401,14 +2401,14 @@ def test_admin_alert_rule_preview_supports_no_data_latest_state_age_threshold(se
     assert payload["summary"]["critical_match_count"] == 0
     assert payload["items"][0]["current_metric_value"] == 20.0
     assert payload["items"][0]["threshold_level"] == "warning"
-    assert payload["items"][0]["reason"] == "latest_state_age_seconds=20.000 >= 10.000"
+    assert payload["items"][0]["reason"] == "latest_state_age_seconds=20.000 met warning threshold 10.000"
     assert payload["items"][0]["explanation"] == {
         "rule_key": "threshold.process.latest_state_age_seconds.process-no-data",
         "display_name": "Process No Data",
         "signal_type": "latest_state_metric",
         "value_key": "latest_state_age_seconds",
         "threshold_level": "warning",
-        "reason": "latest_state_age_seconds=20.000 >= 10.000",
+        "reason": "latest_state_age_seconds=20.000 met warning threshold 10.000",
         "winning_condition_trace": {
             "severity": "warning",
             "condition_mode": "scalar",

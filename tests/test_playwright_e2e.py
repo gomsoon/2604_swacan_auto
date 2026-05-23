@@ -921,7 +921,7 @@ def test_playwright_admin_page(page: Page, live_server) -> None:
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("critical condition: gte 90 OR gte 95")
     expect(page.locator("#alert-rule-editor-form")).to_contain_text("draft 저장 가능")
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("판정 결과")
-    expect(page.locator("#alert-rule-preview-panel")).to_contain_text("explanation File Descriptor High | cpu_usage | warning")
+    expect(page.locator("#alert-rule-preview-panel")).to_contain_text("Rule File Descriptor High | cpu_usage | warning")
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("판정 trace warning / OR / clause 1 matched")
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("현재 입력 rule이 최종 winner입니다.")
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("suppressed 없음")
@@ -1064,7 +1064,7 @@ def test_playwright_admin_event_alert_rule(page: Page, live_server) -> None:
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("signal=process_restarted")
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("warning condition: gte 2")
     expect(page.locator("#alert-rule-preview-panel")).to_contain_text("critical condition: gte 4")
-    expect(page.locator("#alert-rule-preview-panel")).to_contain_text("repeat_count=4")
+    expect(page.locator("#alert-rule-preview-panel")).to_contain_text("repeat count 4")
 
     page.locator("#save-alert-rule-button").click()
     createdRule = page.locator(".admin-item", has_text="event.process.process_restarted.process-restart-burst").first

@@ -71,10 +71,18 @@ const ALERT_RESOLUTION_REASON_LABELS = {
     manual_resolved: "운영자가 수동으로 해결함",
     resolved_from_status_api: "상태 API로 해결 처리됨",
     threshold_cleared: "threshold가 해소됨",
+    data_resumed: "데이터 수신이 재개됨",
     event_window_elapsed: "이벤트 반복 창이 종료됨",
     suppressed_by_precedence: "우선순위 규칙에 의해 정리됨",
     state_normalized: "상태가 정상화됨",
     superseded: "새 상태 평가로 대체됨",
+};
+
+const ALERT_WINNER_TRANSITION_REASON_LABELS = {
+    winner_rule_changed: "winner 변경",
+    specificity_override: "더 구체적인 rule이 winner가 됨",
+    severity_escalation: "더 높은 severity rule이 winner가 됨",
+    newer_rule_won: "더 최근 rule이 winner가 됨",
 };
 
 export function formatAlertResolutionSource(value) {
@@ -142,6 +150,18 @@ export function formatAlertExplanationDecision(itemOrExplanation) {
     return `winner ${winnerLabel} | ${suppressedLabel}`;
 }
 
+export function formatAlertExplanationRuleLine(itemOrExplanation) {
+    return `Rule ${formatAlertExplanationRule(itemOrExplanation)}`;
+}
+
+export function formatAlertExplanationReasonLine(itemOrExplanation) {
+    return `Why it fired ${formatAlertExplanationReason(itemOrExplanation)}`;
+}
+
+export function formatAlertExplanationDecisionLine(itemOrExplanation) {
+    return `Winner / suppressed ${formatAlertExplanationDecision(itemOrExplanation)}`;
+}
+
 function normalizeAlertWinnerTransitionSummary(itemOrSummary) {
     if (!itemOrSummary || typeof itemOrSummary !== "object") {
         return null;
@@ -195,6 +215,23 @@ export function formatAlertWinnerTransitionLabel(item) {
     const previousRule = formatAlertWinnerTransitionRule(item.previous_rule);
     const newRule = formatAlertWinnerTransitionRule(item.new_rule);
     return `${previousRule} -> ${newRule}`;
+}
+
+export function formatAlertWinnerTransitionReason(item) {
+    if (!item || typeof item !== "object") {
+        return "winner 변경";
+    }
+    const metadataReason =
+        item.metadata && typeof item.metadata === "object" && typeof item.metadata.reason === "string"
+            ? item.metadata.reason
+            : null;
+    return (
+        ALERT_WINNER_TRANSITION_REASON_LABELS[metadataReason] ||
+        ALERT_WINNER_TRANSITION_REASON_LABELS[item.transition_reason] ||
+        metadataReason ||
+        item.transition_reason ||
+        "winner 변경"
+    );
 }
 
 export function bindGlobalUi() {

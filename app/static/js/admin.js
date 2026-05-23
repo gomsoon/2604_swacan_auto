@@ -3,11 +3,15 @@
     clearBanner,
     formatAlertExplanationReason,
     formatAlertExplanationRule,
+    formatAlertExplanationReasonLine,
+    formatAlertExplanationRuleLine,
     formatAlertResolutionReason,
     formatAlertResolutionSource,
     formatTimestamp,
     formatAlertExplanationDecision,
+    formatAlertExplanationDecisionLine,
     formatAlertWinnerTransitionLabel,
+    formatAlertWinnerTransitionReason,
     formatAlertWinnerTransitionSummary,
     showBanner,
 } from "./common.js";
@@ -1477,10 +1481,7 @@ function renderAlertWinnerTransitionTimelineRows(items) {
         <div class="alert-transition-timeline">
             ${items
                 .map((item) => {
-                    const transitionReason =
-                        item.transition_reason === "winner_rule_changed"
-                            ? "winner 변경"
-                            : item.transition_reason || "-";
+                    const transitionReason = formatAlertWinnerTransitionReason(item);
                     return `
                         <article class="alert-transition-row">
                             <p class="alert-transition-row-title">${escapeHtml(formatAlertWinnerTransitionLabel(item))}</p>
@@ -1545,9 +1546,9 @@ function renderAlerts(items) {
 
     alertsList.innerHTML = items
         .map((item) => {
-            const explanationRule = formatAlertExplanationRule(item);
-            const explanationReason = formatAlertExplanationReason(item);
-            const explanationDecision = formatAlertExplanationDecision(item);
+            const explanationRule = formatAlertExplanationRuleLine(item);
+            const explanationReason = formatAlertExplanationReasonLine(item);
+            const explanationDecision = formatAlertExplanationDecisionLine(item);
             return `
                 <article class="admin-item">
                     <div class="section-header">
@@ -1564,7 +1565,7 @@ function renderAlerts(items) {
                     </div>
                     <p class="admin-meta">object=${escapeHtml(item.monitored_object_id)} | binding=${escapeHtml(item.runtime_binding_key || "-")} | type=${escapeHtml(item.semantic_type_code || "-")}</p>
                     <p class="admin-meta">rule=${escapeHtml(item.source_rule_metric_key || item.alert_code)} | target=${escapeHtml(item.source_rule_target_label || "-")}</p>
-                    <p class="admin-meta">explanation ${escapeHtml(explanationRule)}</p>
+                    <p class="admin-meta">${escapeHtml(explanationRule)}</p>
                     <p class="admin-meta">반복 ${escapeHtml(item.repeat_count)}회 | 최근 ${escapeHtml(formatTimestamp(item.last_occurred_at))}</p>
                     <p class="admin-meta">${escapeHtml(explanationReason)}</p>
                     <p class="admin-meta">${escapeHtml(explanationDecision)}</p>
@@ -1598,9 +1599,9 @@ function renderAlertArchive(items) {
 
     alertArchiveList.innerHTML = items
         .map((item) => {
-            const explanationRule = formatAlertExplanationRule(item);
-            const explanationReason = formatAlertExplanationReason(item);
-            const explanationDecision = formatAlertExplanationDecision(item);
+            const explanationRule = formatAlertExplanationRuleLine(item);
+            const explanationReason = formatAlertExplanationReasonLine(item);
+            const explanationDecision = formatAlertExplanationDecisionLine(item);
             return `
                 <article class="admin-item compact-admin-item">
                     <div class="section-header">
@@ -1614,7 +1615,7 @@ function renderAlertArchive(items) {
                     <p class="admin-meta">opened=${escapeHtml(formatTimestamp(item.opened_at))} | resolved=${escapeHtml(formatTimestamp(item.resolved_at))}</p>
                     <p class="admin-meta">repeat ${escapeHtml(item.repeat_count)}회 | ack ${item.was_acknowledged ? "yes" : "no"}</p>
                     <p class="admin-meta">resolved by ${escapeHtml(item.resolved_by_username || "-")} | target ${escapeHtml(item.source_rule_target_label || item.semantic_type_code || "-")}</p>
-                    <p class="admin-meta">explanation ${escapeHtml(explanationRule)}</p>
+                    <p class="admin-meta">${escapeHtml(explanationRule)}</p>
                     <p class="admin-meta">${escapeHtml(explanationReason)}</p>
                     <p class="admin-meta">${escapeHtml(explanationDecision)}</p>
                     ${renderAlertWinnerTransitionSection(item, {
@@ -1622,7 +1623,7 @@ function renderAlertArchive(items) {
                         winnerLabel: "Final winner",
                         alertId: item.id,
                     })}
-                    <p class="admin-meta">${escapeHtml(formatAlertResolutionReason(item))}</p>
+                    <p class="admin-meta">Why it closed ${escapeHtml(formatAlertResolutionReason(item))}</p>
                 </article>
             `;
         })
@@ -3849,8 +3850,9 @@ function renderAlertRulePreviewSummaryBlock(summary, decisionSummary, rule, publ
 function renderAlertRulePreviewItem(item, rule) {
     const traceText = formatAlertRuleWinningConditionTrace(item.winning_condition_trace);
     const tone = getAlertRuleThresholdTone(item.threshold_level);
-    const explanationRule = formatAlertExplanationRule(item);
-    const explanationReason = formatAlertExplanationReason(item);
+    const explanationRule = formatAlertExplanationRuleLine(item);
+    const explanationReason = formatAlertExplanationReasonLine(item);
+    const explanationDecision = formatAlertExplanationDecisionLine(item);
     const metricValueLabel =
         item.current_metric_value === null || item.current_metric_value === undefined ? "-" : item.current_metric_value;
     const valueKey = getAlertRuleValueKeyValue(rule) || "-";
@@ -3896,7 +3898,7 @@ function renderAlertRulePreviewItem(item, rule) {
                 <section class="alert-rule-preview-item-block">
                     <h5>판정 결과</h5>
                     <p class="section-copy">${escapeHtml(resultMessage)}</p>
-                    <p class="admin-meta">explanation ${escapeHtml(explanationRule)}</p>
+                    <p class="admin-meta">${escapeHtml(explanationRule)}</p>
                     <p class="admin-meta">${escapeHtml(explanationReason)}</p>
                     ${
                         traceText
@@ -3906,6 +3908,7 @@ function renderAlertRulePreviewItem(item, rule) {
                     <p class="admin-meta">${escapeHtml(buildAlertRuleDecisionOutcomeMessage(item, rule))}</p>
                     <p class="admin-meta">${escapeHtml(buildAlertRuleWinnerLabel(item))}</p>
                     <p class="admin-meta">${escapeHtml(buildAlertRuleSuppressedLabel(item))}</p>
+                    <p class="admin-meta">${escapeHtml(explanationDecision)}</p>
                 </section>
                 <section class="alert-rule-preview-item-block">
                     <h5>실시간 상태</h5>

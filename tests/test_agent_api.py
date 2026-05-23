@@ -1098,21 +1098,21 @@ def test_agent_stale_threshold_rule_opens_without_new_ingest_and_resolves_on_fre
     assert warning_alert["repeat_count"] == 1
     assert warning_alert["identity_kind"] == "family"
     assert warning_alert["identity_key"] == "threshold:1303:agent:heartbeat_age_seconds:gte"
-    assert warning_alert["latest_message"] == "heartbeat_age_seconds=15.000 >= 10.000"
+    assert warning_alert["latest_message"] == "heartbeat_age_seconds=15.000 met warning threshold 10.000"
     assert warning_metadata["metric_key"] == "heartbeat_age_seconds"
     assert warning_metadata["metric_value"] == 15.0
     assert warning_metadata["explanation"]["threshold_level"] == "warning"
-    assert warning_metadata["explanation"]["reason"] == "heartbeat_age_seconds=15.000 >= 10.000"
+    assert warning_metadata["explanation"]["reason"] == "heartbeat_age_seconds=15.000 met warning threshold 10.000"
     assert third_result["processed_items"] == 0
     assert critical_alert["severity"] == "critical"
     assert critical_alert["status"] == "open"
     assert critical_alert["repeat_count"] == 1
     assert critical_alert["identity_kind"] == "family"
     assert critical_alert["identity_key"] == "threshold:1303:agent:heartbeat_age_seconds:gte"
-    assert critical_alert["latest_message"] == "heartbeat_age_seconds=35.000 >= 30.000"
+    assert critical_alert["latest_message"] == "heartbeat_age_seconds=35.000 met critical threshold 30.000"
     assert critical_metadata["metric_value"] == 35.0
     assert critical_metadata["explanation"]["threshold_level"] == "critical"
-    assert critical_metadata["explanation"]["reason"] == "heartbeat_age_seconds=35.000 >= 30.000"
+    assert critical_metadata["explanation"]["reason"] == "heartbeat_age_seconds=35.000 met critical threshold 30.000"
     assert fourth_result["processed_items"] == 1
     assert resolved_alert["status"] == "resolved"
     assert resolved_alert["resolved_at"] is not None
@@ -1292,22 +1292,22 @@ def test_process_no_data_threshold_rule_opens_without_new_ingest_and_resolves_on
     assert warning_alert["repeat_count"] == 1
     assert warning_alert["identity_kind"] == "family"
     assert warning_alert["identity_key"] == "threshold:1302:process:latest_state_age_seconds:gte"
-    assert warning_alert["latest_message"] == "latest_state_age_seconds=15.000 >= 10.000"
+    assert warning_alert["latest_message"] == "latest_state_age_seconds=15.000 met warning threshold 10.000"
     assert warning_metadata["metric_key"] == "latest_state_age_seconds"
     assert warning_metadata["metric_value"] == 15.0
     assert warning_metadata["explanation"]["threshold_level"] == "warning"
-    assert warning_metadata["explanation"]["reason"] == "latest_state_age_seconds=15.000 >= 10.000"
+    assert warning_metadata["explanation"]["reason"] == "latest_state_age_seconds=15.000 met warning threshold 10.000"
     assert third_result["processed_items"] == 0
     assert critical_alert["severity"] == "critical"
     assert critical_alert["status"] == "open"
     assert critical_alert["repeat_count"] == 1
     assert critical_alert["identity_kind"] == "family"
     assert critical_alert["identity_key"] == "threshold:1302:process:latest_state_age_seconds:gte"
-    assert critical_alert["latest_message"] == "latest_state_age_seconds=35.000 >= 30.000"
+    assert critical_alert["latest_message"] == "latest_state_age_seconds=35.000 met critical threshold 30.000"
     assert critical_metadata["metric_key"] == "latest_state_age_seconds"
     assert critical_metadata["metric_value"] == 35.0
     assert critical_metadata["explanation"]["threshold_level"] == "critical"
-    assert critical_metadata["explanation"]["reason"] == "latest_state_age_seconds=35.000 >= 30.000"
+    assert critical_metadata["explanation"]["reason"] == "latest_state_age_seconds=35.000 met critical threshold 30.000"
     assert fourth_result["processed_items"] == 1
     assert resolved_alert["status"] == "resolved"
     assert resolved_alert["resolved_at"] is not None
@@ -1899,11 +1899,11 @@ def test_grouped_event_rule_opens_from_repeat_count_and_resolves_after_window(se
     assert warning_alert["source_rule_id"] == 1903
     assert warning_alert["severity"] == "warning"
     assert warning_alert["status"] == "open"
-    assert warning_alert["latest_message"] == "process_restarted repeat_count=2 >= 2"
+    assert warning_alert["latest_message"] == "process_restarted repeat count 2 met warning threshold 2"
     assert warning_metadata["signal_type"] == "grouped_event_repeat"
     assert warning_metadata["signal_key"] == "process_restarted"
     assert warning_metadata["family_key"] == ["event", "process", "process_restarted", "gte"]
-    assert warning_metadata["explanation"]["reason"] == "process_restarted repeat_count=2 >= 2"
+    assert warning_metadata["explanation"]["reason"] == "process_restarted repeat count 2 met warning threshold 2"
     assert warning_metadata["explanation"]["winner_rule_key"] == "event.process.process_restarted.process-restart-burst"
     assert third_result["processed_items"] == 1
     assert critical_alert["id"] == warning_alert["id"]
@@ -1914,11 +1914,11 @@ def test_grouped_event_rule_opens_from_repeat_count_and_resolves_after_window(se
     assert critical_alert["identity_key"] == "event:1302:process:process_restarted:gte"
     assert critical_alert["winner_transition_count"] == 0
     assert critical_alert["last_winner_transition_at"] is None
-    assert critical_alert["latest_message"] == "process_restarted repeat_count=3 >= 3"
+    assert critical_alert["latest_message"] == "process_restarted repeat count 3 met critical threshold 3"
     assert critical_metadata["signal_type"] == "grouped_event_repeat"
     assert critical_metadata["winning_condition_trace"]["severity"] == "critical"
     assert critical_metadata["explanation"]["threshold_level"] == "critical"
-    assert critical_metadata["explanation"]["reason"] == "process_restarted repeat_count=3 >= 3"
+    assert critical_metadata["explanation"]["reason"] == "process_restarted repeat count 3 met critical threshold 3"
     assert transition_count_row["count"] == 0
     assert fourth_result["processed_items"] == 1
     assert resolved_alert["status"] == "resolved"
@@ -2109,7 +2109,7 @@ def test_specific_event_rule_reuses_same_family_row_by_precedence(seeded_app, se
     assert current_row["opening_rule_display_name_snapshot"] == "Process Restart General"
     assert current_row["winner_transition_count"] == 1
     assert current_row["last_winner_transition_at"] == third_time.isoformat()
-    assert "repeat_count=3" in current_row["latest_message"]
+    assert "repeat count 3" in current_row["latest_message"]
     assert transition_row["previous_rule_id"] == 1906
     assert transition_row["previous_rule_key"] == "event.process.process_restarted.process-restart-general"
     assert transition_row["previous_rule_display_name_snapshot"] == "Process Restart General"

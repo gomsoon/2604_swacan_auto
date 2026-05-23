@@ -30,14 +30,15 @@ def build_threshold_reason(rule: dict[str, Any], metric_value: float, level: str
         )
 
     threshold = rule["critical_threshold"] if level == "critical" else rule["warning_threshold"]
-    operator = ">=" if rule["comparison"] == "gte" else "<="
-    return f"{metric_label}={metric_value:.3f} {operator} {float(threshold):.3f}"
+    if rule["comparison"] == "lte":
+        return f"{metric_label}={metric_value:.3f} met {level} lower threshold {float(threshold):.3f}"
+    return f"{metric_label}={metric_value:.3f} met {level} threshold {float(threshold):.3f}"
 
 
 def build_event_reason(rule: dict[str, Any], repeat_count: float, level: str) -> str:
     threshold = rule["critical_threshold"] if level == "critical" else rule["warning_threshold"]
     signal_key = rule.get("signal_key") or "event"
-    return f"{signal_key} repeat_count={repeat_count:.0f} >= {float(threshold):.0f}"
+    return f"{signal_key} repeat count {repeat_count:.0f} met {level} threshold {float(threshold):.0f}"
 
 
 def build_alert_rule_reason(
