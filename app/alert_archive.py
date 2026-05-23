@@ -43,6 +43,38 @@ def _resolve_archive_rule_snapshot(db_conn, alert_row) -> tuple[str | None, str 
     return row["rule_key"], row["display_name"]
 
 
+def _resolve_archive_opening_rule_snapshot(
+    db_conn,
+    alert_row,
+    source_rule_key: str | None,
+    source_rule_display_name_snapshot: str | None,
+) -> tuple[int | None, str | None, str | None]:
+    row_keys = set(alert_row.keys()) if hasattr(alert_row, "keys") else set()
+    opening_rule_id = alert_row["opening_rule_id"] if "opening_rule_id" in row_keys else None
+    opening_rule_key = alert_row["opening_rule_key"] if "opening_rule_key" in row_keys else None
+    opening_rule_display_name_snapshot = (
+        alert_row["opening_rule_display_name_snapshot"]
+        if "opening_rule_display_name_snapshot" in row_keys
+        else None
+    )
+    if (opening_rule_key or opening_rule_display_name_snapshot) or opening_rule_id is None:
+        if opening_rule_id is None and "source_rule_id" in row_keys:
+            opening_rule_id = alert_row["source_rule_id"]
+        if opening_rule_key is None:
+            opening_rule_key = source_rule_key
+        if opening_rule_display_name_snapshot is None:
+            opening_rule_display_name_snapshot = source_rule_display_name_snapshot
+        return opening_rule_id, opening_rule_key, opening_rule_display_name_snapshot
+
+    row = db_conn.execute(
+        "SELECT rule_key, display_name FROM alert_rules WHERE id = ?",
+        (opening_rule_id,),
+    ).fetchone()
+    if row is None:
+        return opening_rule_id, source_rule_key, source_rule_display_name_snapshot
+    return opening_rule_id, row["rule_key"], row["display_name"]
+
+
 def _merge_archive_metadata_json(raw_metadata_json: str | None, resolution_note: str | None) -> str | None:
     if not resolution_note:
         return raw_metadata_json
@@ -73,6 +105,16 @@ def insert_alert_history_archive(
         raise ValueError("invalid resolution_source")
 
     source_rule_key, source_rule_display_name_snapshot = _resolve_archive_rule_snapshot(db_conn, alert_row)
+    (
+        opening_rule_id,
+        opening_rule_key,
+        opening_rule_display_name_snapshot,
+    ) = _resolve_archive_opening_rule_snapshot(
+        db_conn,
+        alert_row,
+        source_rule_key,
+        source_rule_display_name_snapshot,
+    )
     metadata_json = _merge_archive_metadata_json(alert_row["metadata_json"], resolution_note)
     row_keys = set(alert_row.keys()) if hasattr(alert_row, "keys") else set()
     identity_kind = (
@@ -86,6 +128,14 @@ def insert_alert_history_archive(
             alert_code=alert_row["alert_code"],
         )
     )
+    winner_transition_count = (
+        int(alert_row["winner_transition_count"])
+        if "winner_transition_count" in row_keys and alert_row["winner_transition_count"] is not None
+        else 0
+    )
+    last_winner_transition_at = (
+        alert_row["last_winner_transition_at"] if "last_winner_transition_at" in row_keys else None
+    )
 
     cursor = db_conn.execute(
         """
@@ -97,6 +147,11 @@ def insert_alert_history_archive(
             source_rule_display_name_snapshot,
             identity_kind,
             identity_key,
+            opening_rule_id,
+            opening_rule_key,
+            opening_rule_display_name_snapshot,
+            winner_transition_count,
+            last_winner_transition_at,
             opened_at,
             resolved_at,
             first_severity,
@@ -114,7 +169,7 @@ def insert_alert_history_archive(
             metadata_json,
             created_at,
             updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             alert_row["monitored_object_id"],
@@ -124,6 +179,11 @@ def insert_alert_history_archive(
             source_rule_display_name_snapshot,
             identity_kind,
             identity_key,
+            opening_rule_id,
+            opening_rule_key,
+            opening_rule_display_name_snapshot,
+            winner_transition_count,
+            last_winner_transition_at,
             alert_row["first_occurred_at"],
             resolved_at,
             alert_row["severity"],

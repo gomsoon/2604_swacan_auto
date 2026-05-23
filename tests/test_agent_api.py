@@ -1352,6 +1352,24 @@ def test_specific_threshold_rule_resolves_existing_general_alert_by_precedence(s
             }
         ],
     }
+    recover_batch = {
+        **general_batch,
+        "seq_start": 85,
+        "seq_end": 85,
+        "items": [
+            {
+                **general_batch["items"][0],
+                "seq": 85,
+                "occurred_at": "2026-04-10T11:12:10.100+09:00",
+                "payload": {
+                    "pid": 1234,
+                    "state": "running",
+                    "cpu_usage": 10.0,
+                    "memory_rss": 4096,
+                },
+            }
+        ],
+    }
 
     assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=general_batch).status_code == 202
 
@@ -1406,7 +1424,9 @@ def test_specific_threshold_rule_resolves_existing_general_alert_by_precedence(s
         db_conn = get_db()
         family_rows = db_conn.execute(
             """
-            SELECT id, alert_code, source_rule_id, identity_kind, identity_key, severity, status, repeat_count, resolved_at
+            SELECT id, alert_code, source_rule_id, identity_kind, identity_key, severity, status, repeat_count, resolved_at,
+                   opening_rule_id, opening_rule_key, opening_rule_display_name_snapshot,
+                   winner_transition_count, last_winner_transition_at
             FROM alert_instances
             WHERE monitored_object_id = 1302
               AND identity_kind = 'family'
@@ -1415,7 +1435,9 @@ def test_specific_threshold_rule_resolves_existing_general_alert_by_precedence(s
         ).fetchall()
         current_row = db_conn.execute(
             """
-            SELECT id, alert_code, source_rule_id, identity_kind, identity_key, severity, status, repeat_count, latest_message
+            SELECT id, alert_code, source_rule_id, identity_kind, identity_key, severity, status, repeat_count, latest_message,
+                   opening_rule_id, opening_rule_key, opening_rule_display_name_snapshot,
+                   winner_transition_count, last_winner_transition_at
             FROM alert_instances
             WHERE monitored_object_id = 1302
               AND identity_kind = 'family'
@@ -1423,6 +1445,18 @@ def test_specific_threshold_rule_resolves_existing_general_alert_by_precedence(s
             ORDER BY id DESC
             LIMIT 1
             """
+        ).fetchone()
+        transition_row = db_conn.execute(
+            """
+            SELECT previous_rule_id, previous_rule_key, previous_rule_display_name_snapshot, previous_severity,
+                   new_rule_id, new_rule_key, new_rule_display_name_snapshot, new_severity,
+                   transition_reason, occurred_at
+            FROM alert_winner_transitions
+            WHERE alert_instance_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (current_row["id"],),
         ).fetchone()
         archive_row = db_conn.execute(
             """
@@ -1449,8 +1483,64 @@ def test_specific_threshold_rule_resolves_existing_general_alert_by_precedence(s
     assert current_row["severity"] == "warning"
     assert current_row["status"] == "open"
     assert current_row["repeat_count"] == 2
+    assert current_row["opening_rule_id"] == 1501
+    assert current_row["opening_rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
+    assert current_row["opening_rule_display_name_snapshot"] == "Process CPU High"
+    assert current_row["winner_transition_count"] == 1
+    assert current_row["last_winner_transition_at"] == "2026-04-10T11:12:05.100+09:00"
     assert "88.000" in current_row["latest_message"]
+    assert transition_row["previous_rule_id"] == 1501
+    assert transition_row["previous_rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
+    assert transition_row["previous_rule_display_name_snapshot"] == "Process CPU High"
+    assert transition_row["previous_severity"] == "warning"
+    assert transition_row["new_rule_id"] == 1901
+    assert transition_row["new_rule_key"] == "threshold.process.cpu_usage.app-process-cpu-override"
+    assert transition_row["new_rule_display_name_snapshot"] == "App Process CPU Override"
+    assert transition_row["new_severity"] == "warning"
+    assert transition_row["transition_reason"] == "winner_rule_changed"
+    assert transition_row["occurred_at"] == "2026-04-10T11:12:05.100+09:00"
     assert archive_row is None
+
+    assert seeded_client.post("/api/agents/ingest", headers=agent_headers(), json=recover_batch).status_code == 202
+
+    with seeded_app.app_context():
+        third_result = process_pending_ingest(limit=1)
+        db_conn = get_db()
+        resolved_row = db_conn.execute(
+            """
+            SELECT status, resolved_at
+            FROM alert_instances
+            WHERE id = ?
+            """,
+            (current_row["id"],),
+        ).fetchone()
+        resolved_archive = db_conn.execute(
+            """
+            SELECT source_rule_id, source_rule_key, source_rule_display_name_snapshot,
+                   opening_rule_id, opening_rule_key, opening_rule_display_name_snapshot,
+                   winner_transition_count, last_winner_transition_at,
+                   resolution_source, resolution_reason
+            FROM alert_history_archive
+            WHERE identity_kind = 'family'
+              AND identity_key = 'threshold:1302:process:cpu_usage:gte'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert third_result["processed_items"] == 1
+    assert resolved_row["status"] == "resolved"
+    assert resolved_row["resolved_at"] is not None
+    assert resolved_archive["source_rule_id"] == 1901
+    assert resolved_archive["source_rule_key"] == "threshold.process.cpu_usage.app-process-cpu-override"
+    assert resolved_archive["source_rule_display_name_snapshot"] == "App Process CPU Override"
+    assert resolved_archive["opening_rule_id"] == 1501
+    assert resolved_archive["opening_rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
+    assert resolved_archive["opening_rule_display_name_snapshot"] == "Process CPU High"
+    assert resolved_archive["winner_transition_count"] == 1
+    assert resolved_archive["last_winner_transition_at"] == "2026-04-10T11:12:05.100+09:00"
+    assert resolved_archive["resolution_source"] == "auto_recovery"
+    assert resolved_archive["resolution_reason"] == "threshold_cleared"
 
 
 def test_compound_threshold_rule_wins_at_runtime_and_resolves_on_recovery(seeded_app, seeded_client) -> None:
@@ -1746,7 +1836,8 @@ def test_grouped_event_rule_opens_from_repeat_count_and_resolves_after_window(se
         db_conn = get_db()
         critical_alert = db_conn.execute(
             """
-            SELECT id, severity, status, repeat_count, latest_message, metadata_json, identity_kind, identity_key
+            SELECT id, severity, status, repeat_count, latest_message, metadata_json, identity_kind, identity_key,
+                   winner_transition_count, last_winner_transition_at
             FROM alert_instances
             WHERE monitored_object_id = 1302
               AND source_rule_id = 1903
@@ -1756,6 +1847,14 @@ def test_grouped_event_rule_opens_from_repeat_count_and_resolves_after_window(se
             """
         ).fetchone()
         critical_metadata = json.loads(critical_alert["metadata_json"])
+        transition_count_row = db_conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM alert_winner_transitions
+            WHERE alert_instance_id = ?
+            """,
+            (critical_alert["id"],),
+        ).fetchone()
         db_conn.execute(
             """
             UPDATE grouped_events
@@ -1813,11 +1912,14 @@ def test_grouped_event_rule_opens_from_repeat_count_and_resolves_after_window(se
     assert critical_alert["repeat_count"] == 2
     assert critical_alert["identity_kind"] == "family"
     assert critical_alert["identity_key"] == "event:1302:process:process_restarted:gte"
+    assert critical_alert["winner_transition_count"] == 0
+    assert critical_alert["last_winner_transition_at"] is None
     assert critical_alert["latest_message"] == "process_restarted repeat_count=3 >= 3"
     assert critical_metadata["signal_type"] == "grouped_event_repeat"
     assert critical_metadata["winning_condition_trace"]["severity"] == "critical"
     assert critical_metadata["explanation"]["threshold_level"] == "critical"
     assert critical_metadata["explanation"]["reason"] == "process_restarted repeat_count=3 >= 3"
+    assert transition_count_row["count"] == 0
     assert fourth_result["processed_items"] == 1
     assert resolved_alert["status"] == "resolved"
     assert resolved_alert["resolved_at"] is not None
@@ -1899,7 +2001,9 @@ def test_specific_event_rule_reuses_same_family_row_by_precedence(seeded_app, se
         db_conn = get_db()
         initial_row = db_conn.execute(
             """
-            SELECT id, alert_code, source_rule_id, identity_kind, identity_key, status, repeat_count
+            SELECT id, alert_code, source_rule_id, identity_kind, identity_key, status, repeat_count,
+                   opening_rule_id, opening_rule_key, opening_rule_display_name_snapshot,
+                   winner_transition_count, last_winner_transition_at
             FROM alert_instances
             WHERE monitored_object_id = 1302
               AND identity_kind = 'family'
@@ -1947,7 +2051,9 @@ def test_specific_event_rule_reuses_same_family_row_by_precedence(seeded_app, se
         db_conn = get_db()
         current_row = db_conn.execute(
             """
-            SELECT id, alert_code, source_rule_id, identity_kind, identity_key, status, repeat_count, latest_message
+            SELECT id, alert_code, source_rule_id, identity_kind, identity_key, status, repeat_count, latest_message,
+                   opening_rule_id, opening_rule_key, opening_rule_display_name_snapshot,
+                   winner_transition_count, last_winner_transition_at
             FROM alert_instances
             WHERE monitored_object_id = 1302
               AND identity_kind = 'family'
@@ -1955,6 +2061,18 @@ def test_specific_event_rule_reuses_same_family_row_by_precedence(seeded_app, se
             ORDER BY id DESC
             LIMIT 1
             """
+        ).fetchone()
+        transition_row = db_conn.execute(
+            """
+            SELECT previous_rule_id, previous_rule_key, previous_rule_display_name_snapshot, previous_severity,
+                   new_rule_id, new_rule_key, new_rule_display_name_snapshot, new_severity,
+                   transition_reason, occurred_at
+            FROM alert_winner_transitions
+            WHERE alert_instance_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (current_row["id"],),
         ).fetchone()
         archive_row = db_conn.execute(
             """
@@ -1973,6 +2091,11 @@ def test_specific_event_rule_reuses_same_family_row_by_precedence(seeded_app, se
     assert initial_row["identity_kind"] == "family"
     assert initial_row["identity_key"] == "event:1302:process:process_restarted:gte"
     assert initial_row["repeat_count"] == 1
+    assert initial_row["opening_rule_id"] == 1906
+    assert initial_row["opening_rule_key"] == "event.process.process_restarted.process-restart-general"
+    assert initial_row["opening_rule_display_name_snapshot"] == "Process Restart General"
+    assert initial_row["winner_transition_count"] == 0
+    assert initial_row["last_winner_transition_at"] is None
     assert third_result["processed_items"] == 1
     assert current_row["id"] == initial_row["id"]
     assert current_row["alert_code"] == "rule.1907"
@@ -1981,7 +2104,22 @@ def test_specific_event_rule_reuses_same_family_row_by_precedence(seeded_app, se
     assert current_row["identity_key"] == "event:1302:process:process_restarted:gte"
     assert current_row["status"] == "open"
     assert current_row["repeat_count"] == 2
+    assert current_row["opening_rule_id"] == 1906
+    assert current_row["opening_rule_key"] == "event.process.process_restarted.process-restart-general"
+    assert current_row["opening_rule_display_name_snapshot"] == "Process Restart General"
+    assert current_row["winner_transition_count"] == 1
+    assert current_row["last_winner_transition_at"] == third_time.isoformat()
     assert "repeat_count=3" in current_row["latest_message"]
+    assert transition_row["previous_rule_id"] == 1906
+    assert transition_row["previous_rule_key"] == "event.process.process_restarted.process-restart-general"
+    assert transition_row["previous_rule_display_name_snapshot"] == "Process Restart General"
+    assert transition_row["previous_severity"] == "warning"
+    assert transition_row["new_rule_id"] == 1907
+    assert transition_row["new_rule_key"] == "event.process.process_restarted.process-restart-specific"
+    assert transition_row["new_rule_display_name_snapshot"] == "Process Restart Specific"
+    assert transition_row["new_severity"] == "warning"
+    assert transition_row["transition_reason"] == "winner_rule_changed"
+    assert transition_row["occurred_at"] == third_time.isoformat()
     assert archive_row is None
 
 

@@ -175,6 +175,9 @@ def create_alert_instance(
     source_rule_id: int | None = None,
     identity_kind: str | None = None,
     identity_key: str | None = None,
+    opening_rule_id: int | None = None,
+    opening_rule_key: str | None = None,
+    opening_rule_display_name_snapshot: str | None = None,
 ) -> None:
     db_conn = get_db()
     normalized_identity_kind = identity_kind or ALERT_IDENTITY_KIND_RULE
@@ -182,14 +185,28 @@ def create_alert_instance(
         source_rule_id=source_rule_id,
         alert_code=alert_code,
     )
+    normalized_opening_rule_id = opening_rule_id if opening_rule_id is not None else source_rule_id
+    normalized_opening_rule_key = opening_rule_key
+    normalized_opening_rule_display_name_snapshot = opening_rule_display_name_snapshot
+    if normalized_opening_rule_id is not None and (
+        normalized_opening_rule_key is None or normalized_opening_rule_display_name_snapshot is None
+    ):
+        rule_snapshot = load_rule_snapshot(normalized_opening_rule_id)
+        if rule_snapshot is not None:
+            if normalized_opening_rule_key is None:
+                normalized_opening_rule_key = rule_snapshot["rule_key"]
+            if normalized_opening_rule_display_name_snapshot is None:
+                normalized_opening_rule_display_name_snapshot = rule_snapshot["display_name"]
     cursor = db_conn.execute(
         """
         INSERT INTO alert_instances (
             monitored_object_id, alert_code, source_rule_id, identity_kind, identity_key, severity, status,
             status_updated_at, status_updated_by_user_id, status_note,
+            opening_rule_id, opening_rule_key, opening_rule_display_name_snapshot,
+            winner_transition_count, last_winner_transition_at,
             first_occurred_at, last_occurred_at, repeat_count,
             latest_message, metadata_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, NULL, NULL, ?, ?, 1, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, NULL, NULL, ?, ?, ?, 0, NULL, ?, ?, 1, ?, ?, ?, ?)
         """,
         (
             monitored_object_id,
@@ -199,6 +216,9 @@ def create_alert_instance(
             normalized_identity_key,
             severity,
             received_at,
+            normalized_opening_rule_id,
+            normalized_opening_rule_key,
+            normalized_opening_rule_display_name_snapshot,
             occurred_at,
             occurred_at,
             latest_message,
@@ -223,6 +243,263 @@ def create_alert_instance(
             "identity_kind": normalized_identity_kind,
             "identity_key": normalized_identity_key,
         },
+    )
+
+
+def load_rule_snapshot(rule_id: int | None) -> dict | None:
+    if not isinstance(rule_id, int):
+        return None
+    row = get_db().execute(
+        "SELECT id, rule_key, display_name FROM alert_rules WHERE id = ?",
+        (rule_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row["id"],
+        "rule_key": row["rule_key"],
+        "display_name": row["display_name"],
+    }
+
+
+def parse_alert_metadata_json(raw_metadata_json: str | None) -> dict | None:
+    if not raw_metadata_json:
+        return None
+    try:
+        payload = json.loads(raw_metadata_json)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def resolve_current_rule_snapshot_from_alert_row(alert_row) -> tuple[str | None, str | None]:
+    metadata = parse_alert_metadata_json(alert_row["metadata_json"] if "metadata_json" in alert_row.keys() else None)
+    if isinstance(metadata, dict):
+        winner_rule_key = metadata.get("winner_rule_key")
+        winner_display_name = metadata.get("winner_display_name")
+        if isinstance(winner_rule_key, str) or isinstance(winner_display_name, str):
+            return (
+                winner_rule_key if isinstance(winner_rule_key, str) else None,
+                winner_display_name if isinstance(winner_display_name, str) else None,
+            )
+        explanation = metadata.get("explanation")
+        if isinstance(explanation, dict):
+            winner_rule_key = explanation.get("winner_rule_key")
+            winner_display_name = explanation.get("winner_display_name")
+            if isinstance(winner_rule_key, str) or isinstance(winner_display_name, str):
+                return (
+                    winner_rule_key if isinstance(winner_rule_key, str) else None,
+                    winner_display_name if isinstance(winner_display_name, str) else None,
+                )
+
+    snapshot = load_rule_snapshot(alert_row["source_rule_id"] if "source_rule_id" in alert_row.keys() else None)
+    if snapshot is None:
+        return None, None
+    return snapshot["rule_key"], snapshot["display_name"]
+
+
+def insert_alert_winner_transition(
+    *,
+    alert_instance_id: int,
+    identity_kind: str,
+    identity_key: str,
+    monitored_object_id: int,
+    previous_rule_id: int | None,
+    previous_rule_key: str | None,
+    previous_rule_display_name_snapshot: str | None,
+    previous_severity: str | None,
+    new_rule_id: int | None,
+    new_rule_key: str | None,
+    new_rule_display_name_snapshot: str | None,
+    new_severity: str | None,
+    transition_reason: str,
+    occurred_at: str,
+    created_at: str,
+    metadata: dict | None = None,
+) -> None:
+    get_db().execute(
+        """
+        INSERT INTO alert_winner_transitions (
+            alert_instance_id,
+            identity_kind,
+            identity_key,
+            monitored_object_id,
+            previous_rule_id,
+            previous_rule_key,
+            previous_rule_display_name_snapshot,
+            previous_severity,
+            new_rule_id,
+            new_rule_key,
+            new_rule_display_name_snapshot,
+            new_severity,
+            transition_reason,
+            occurred_at,
+            created_at,
+            metadata_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            alert_instance_id,
+            identity_kind,
+            identity_key,
+            monitored_object_id,
+            previous_rule_id,
+            previous_rule_key,
+            previous_rule_display_name_snapshot,
+            previous_severity,
+            new_rule_id,
+            new_rule_key,
+            new_rule_display_name_snapshot,
+            new_severity,
+            transition_reason,
+            occurred_at,
+            created_at,
+            json.dumps(metadata, ensure_ascii=False) if metadata is not None else None,
+        ),
+    )
+
+
+def update_family_alert_instance(
+    *,
+    existing,
+    alert_code: str,
+    winner_rule_id: int,
+    winner_rule_key: str | None,
+    winner_display_name: str | None,
+    winner_level: str,
+    occurred_at: str,
+    received_at: str,
+    latest_message: str,
+    metadata_json: str,
+    increment_repeat_count: bool,
+    transition_metadata: dict | None = None,
+) -> None:
+    db_conn = get_db()
+    previous_rule_id = existing["source_rule_id"]
+    winner_changed = previous_rule_id != winner_rule_id
+    previous_rule_key, previous_rule_display_name = resolve_current_rule_snapshot_from_alert_row(existing)
+    opening_rule_id = existing["opening_rule_id"] if "opening_rule_id" in existing.keys() else None
+    opening_rule_key = existing["opening_rule_key"] if "opening_rule_key" in existing.keys() else None
+    opening_rule_display_name_snapshot = (
+        existing["opening_rule_display_name_snapshot"]
+        if "opening_rule_display_name_snapshot" in existing.keys()
+        else None
+    )
+    if opening_rule_id is None:
+        opening_rule_id = previous_rule_id
+    if opening_rule_key is None:
+        opening_rule_key = previous_rule_key
+    if opening_rule_display_name_snapshot is None:
+        opening_rule_display_name_snapshot = previous_rule_display_name
+
+    winner_transition_count = (
+        int(existing["winner_transition_count"])
+        if "winner_transition_count" in existing.keys() and existing["winner_transition_count"] is not None
+        else 0
+    )
+    last_winner_transition_at = (
+        existing["last_winner_transition_at"] if "last_winner_transition_at" in existing.keys() else None
+    )
+
+    if winner_changed:
+        insert_alert_winner_transition(
+            alert_instance_id=existing["id"],
+            identity_kind=existing["identity_kind"],
+            identity_key=existing["identity_key"],
+            monitored_object_id=existing["monitored_object_id"],
+            previous_rule_id=previous_rule_id,
+            previous_rule_key=previous_rule_key,
+            previous_rule_display_name_snapshot=previous_rule_display_name,
+            previous_severity=existing["severity"],
+            new_rule_id=winner_rule_id,
+            new_rule_key=winner_rule_key,
+            new_rule_display_name_snapshot=winner_display_name,
+            new_severity=winner_level,
+            transition_reason="winner_rule_changed",
+            occurred_at=occurred_at,
+            created_at=received_at,
+            metadata=transition_metadata,
+        )
+        winner_transition_count += 1
+        last_winner_transition_at = occurred_at
+
+    should_refresh_last_occurred = increment_repeat_count or winner_changed or (
+        existing["alert_code"] != alert_code
+        or existing["severity"] != winner_level
+        or existing["latest_message"] != latest_message
+        or existing["metadata_json"] != metadata_json
+    )
+    next_last_occurred_at = occurred_at if should_refresh_last_occurred else existing["last_occurred_at"]
+
+    if increment_repeat_count:
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET alert_code = ?,
+                source_rule_id = ?,
+                severity = ?,
+                opening_rule_id = ?,
+                opening_rule_key = ?,
+                opening_rule_display_name_snapshot = ?,
+                winner_transition_count = ?,
+                last_winner_transition_at = ?,
+                last_occurred_at = ?,
+                repeat_count = repeat_count + 1,
+                latest_message = ?,
+                metadata_json = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                alert_code,
+                winner_rule_id,
+                winner_level,
+                opening_rule_id,
+                opening_rule_key,
+                opening_rule_display_name_snapshot,
+                winner_transition_count,
+                last_winner_transition_at,
+                next_last_occurred_at,
+                latest_message,
+                metadata_json,
+                received_at,
+                existing["id"],
+            ),
+        )
+        return
+
+    db_conn.execute(
+        """
+        UPDATE alert_instances
+        SET alert_code = ?,
+            source_rule_id = ?,
+            severity = ?,
+            opening_rule_id = ?,
+            opening_rule_key = ?,
+            opening_rule_display_name_snapshot = ?,
+            winner_transition_count = ?,
+            last_winner_transition_at = ?,
+            last_occurred_at = ?,
+            latest_message = ?,
+            metadata_json = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            alert_code,
+            winner_rule_id,
+            winner_level,
+            opening_rule_id,
+            opening_rule_key,
+            opening_rule_display_name_snapshot,
+            winner_transition_count,
+            last_winner_transition_at,
+            next_last_occurred_at,
+            latest_message,
+            metadata_json,
+            received_at,
+            existing["id"],
+        ),
     )
 
 
@@ -447,6 +724,8 @@ def fetch_open_alert_rows_for_rule_ids(
         SELECT id, monitored_object_id, alert_code, source_rule_id, severity, status,
                identity_kind, identity_key,
                acknowledged_at, acknowledged_by_user_id,
+               opening_rule_id, opening_rule_key, opening_rule_display_name_snapshot,
+               winner_transition_count, last_winner_transition_at,
                first_occurred_at, last_occurred_at, repeat_count,
                latest_message, metadata_json
         FROM alert_instances
@@ -465,6 +744,8 @@ def fetch_open_alert_row_for_identity(*, monitored_object_id: int, identity_kind
         SELECT id, monitored_object_id, alert_code, source_rule_id, severity, status,
                identity_kind, identity_key,
                acknowledged_at, acknowledged_by_user_id,
+               opening_rule_id, opening_rule_key, opening_rule_display_name_snapshot,
+               winner_transition_count, last_winner_transition_at,
                first_occurred_at, last_occurred_at, repeat_count,
                latest_message, metadata_json
         FROM alert_instances
@@ -766,65 +1047,31 @@ def sync_threshold_alerts(
                 received_at=received_at,
                 latest_message=latest_message,
                 metadata_json=metadata_json,
+                opening_rule_id=winner_rule_id,
+                opening_rule_key=winner_rule.get("rule_key"),
+                opening_rule_display_name_snapshot=winner_rule.get("display_name"),
             )
             continue
 
-        if increment_repeat_count:
-            db_conn.execute(
-                """
-                UPDATE alert_instances
-                SET alert_code = ?,
-                    source_rule_id = ?,
-                    severity = ?,
-                    last_occurred_at = ?,
-                    repeat_count = repeat_count + 1,
-                    latest_message = ?,
-                    metadata_json = ?,
-                    updated_at = ?
-                WHERE id = ?
-                """,
-                (
-                    alert_code,
-                    winner_rule_id,
-                    winner_level,
-                    occurred_at,
-                    latest_message,
-                    metadata_json,
-                    received_at,
-                    existing["id"],
-                ),
-            )
-            continue
-
-        should_refresh_last_occurred = (
-            existing["alert_code"] != alert_code
-            or existing["source_rule_id"] != winner_rule_id
-            or existing["severity"] != winner_level
-            or existing["latest_message"] != latest_message
-            or existing["metadata_json"] != metadata_json
-        )
-        db_conn.execute(
-            """
-            UPDATE alert_instances
-            SET alert_code = ?,
-                source_rule_id = ?,
-                severity = ?,
-                last_occurred_at = ?,
-                latest_message = ?,
-                metadata_json = ?,
-                updated_at = ?
-            WHERE id = ?
-            """,
-            (
-                alert_code,
-                winner_rule_id,
-                winner_level,
-                occurred_at if should_refresh_last_occurred else existing["last_occurred_at"],
-                latest_message,
-                metadata_json,
-                received_at,
-                existing["id"],
-            ),
+        update_family_alert_instance(
+            existing=existing,
+            alert_code=alert_code,
+            winner_rule_id=winner_rule_id,
+            winner_rule_key=winner_rule.get("rule_key"),
+            winner_display_name=winner_rule.get("display_name"),
+            winner_level=winner_level,
+            occurred_at=occurred_at,
+            received_at=received_at,
+            latest_message=latest_message,
+            metadata_json=metadata_json,
+            increment_repeat_count=increment_repeat_count,
+            transition_metadata={
+                "source": "worker",
+                "family_key": list(family_key),
+                "signal_type": winner_rule.get("signal_type"),
+                "metric_key": winner_rule.get("metric_key"),
+                "comparison": winner_rule.get("comparison"),
+            },
         )
 
 
@@ -1027,32 +1274,31 @@ def sync_event_alerts(
                 received_at=received_at,
                 latest_message=latest_message,
                 metadata_json=metadata_json,
+                opening_rule_id=winner_rule_id,
+                opening_rule_key=winner_rule.get("rule_key"),
+                opening_rule_display_name_snapshot=winner_rule.get("display_name"),
             )
             continue
 
-        db_conn.execute(
-            """
-            UPDATE alert_instances
-            SET alert_code = ?,
-                source_rule_id = ?,
-                severity = ?,
-                last_occurred_at = ?,
-                repeat_count = repeat_count + 1,
-                latest_message = ?,
-                metadata_json = ?,
-                updated_at = ?
-            WHERE id = ?
-            """,
-            (
-                alert_code,
-                winner_rule_id,
-                winner_level,
-                occurred_at,
-                latest_message,
-                metadata_json,
-                received_at,
-                existing["id"],
-            ),
+        update_family_alert_instance(
+            existing=existing,
+            alert_code=alert_code,
+            winner_rule_id=winner_rule_id,
+            winner_rule_key=winner_rule.get("rule_key"),
+            winner_display_name=winner_rule.get("display_name"),
+            winner_level=winner_level,
+            occurred_at=occurred_at,
+            received_at=received_at,
+            latest_message=latest_message,
+            metadata_json=metadata_json,
+            increment_repeat_count=True,
+            transition_metadata={
+                "source": "worker",
+                "family_key": list(family_key),
+                "signal_type": winner_rule.get("signal_type"),
+                "signal_key": winner_rule.get("signal_key"),
+                "comparison": winner_rule.get("comparison"),
+            },
         )
 
 
