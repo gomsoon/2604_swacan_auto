@@ -4,8 +4,8 @@
 
 Current recommended alert-focused sequence:
 
-1. Preview/runtime explainability expansion
-2. Family-level alert identity review
+1. Winner transition timeline / archive analytics
+2. Preview/runtime explainability product follow-up
 3. Monitoring alert operations follow-up
 
 This sequence should be treated as the default follow-up order unless a new
@@ -43,16 +43,19 @@ Current implementation note for item 3:
 
 Current scope note for the next review step:
 
-- move current alert identity from rule-level to family-level for threshold-style families first
-- keep event families rule-based until the threshold migration is stable
+- keep family-level identity as the incident foundation
+- add opener snapshots, winner-transition summaries, and a dedicated transition
+  table next
 - treat winner changes as incident updates rather than close/open churn
 
 Current implementation note for the next review step:
 
 - threshold-style family-level identity is now implemented in runtime storage
-- phase 1 now persists durable `identity_kind + identity_key` fields for current/archive rows
-- threshold winner changes now preserve the same current row and therefore preserve ACK/in-progress state
-- event family identity is the next follow-up slice
+- event-family identity is now implemented for `grouped_event_repeat`
+- runtime/archive now persist durable `identity_kind + identity_key` fields
+- winner changes now preserve the same current row and therefore preserve
+  ACK/in-progress state
+- the next follow-up slice is opener snapshots plus winner-transition analytics
 
 ## Agent Addendum
 

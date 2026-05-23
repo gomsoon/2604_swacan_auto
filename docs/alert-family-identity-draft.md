@@ -1,7 +1,7 @@
 ﻿# Alert Family Identity Draft
 
 Version: Draft 0.2
-Updated: 2026-05-13
+Updated: 2026-05-23
 
 ## Goal
 
@@ -22,7 +22,10 @@ Phase 1 is now implemented for threshold-style runtime families.
 
 - current threshold incidents use `identity_kind = 'family'`
 - the same current row survives winner changes inside the same family
-- event rules still remain on rule-based identity for now
+- event-family identity is now implemented separately; see
+  [alert-event-family-identity-draft.md](C:/2604_swacan_auto/docs/alert-event-family-identity-draft.md)
+- the next shared follow-up is opener snapshots plus winner-transition
+  analytics
 
 ## Phase 1 Scope
 
@@ -42,7 +45,6 @@ Threshold-style families include:
 
 Out of scope for phase 1:
 
-- event family identity
 - winner transition timeline UI
 - opener-rule snapshot separate from final winner snapshot
 - suppressed current alert rows
@@ -130,7 +132,6 @@ Phase 1 does not yet add a separate opener snapshot or winner-transition count.
 
 ## Deferred Backlog
 
-- event family identity
 - family-level archive analytics
 - winner transition timeline / counts
 - opener rule snapshot separate from final winner snapshot

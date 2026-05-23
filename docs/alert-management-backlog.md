@@ -2,10 +2,10 @@
 
 ## Current Sequencing Note
 
-Current recommended order after compound publish enablement:
+Current recommended order after family-level alert identity:
 
-1. Preview/runtime explainability expansion
-2. Family-level alert identity review
+1. Winner transition timeline / archive analytics
+2. Preview/runtime explainability product follow-up
 3. Monitoring alert operations follow-up
 4. Lifecycle/archive product follow-up
 5. Full candidate/winner/suppressed decision UI
@@ -46,17 +46,22 @@ Current implementation note for item 3:
 
 Current scope note for item 4:
 
-- review family-level current alert identity after preview/runtime precedence is aligned
-- start with threshold-style families only
-- defer event-family identity and archive analytics until the threshold path is stable
+- family-level current alert identity is now enabled for threshold-style and
+  event families
+- the next review step is opener snapshots, winner transition summaries, and a
+  dedicated transition timeline
+- suppressed current rows remain deferred
 
 Current implementation note for item 4:
 
 - threshold-style current alerts now use family-level identity
-- winner changes inside the same threshold family now reuse the same current alert row
-- runtime/archive now persist `identity_kind + identity_key` for this path
-- event families are the next identity migration target and still remain rule-based for now
-- opener snapshots, winner transition timeline, and suppressed current rows remain deferred
+- `grouped_event_repeat` event families now also use family-level identity
+- winner changes inside the same family now reuse the same current alert row
+- runtime/archive now persist `identity_kind + identity_key` for both paths
+- the next follow-up is `opening_rule_*`, `winner_transition_count`,
+  `last_winner_transition_at`, and a dedicated `alert_winner_transitions`
+  timeline table
+- suppressed current rows remain deferred
 
 버전: Draft 0.3  
 작성일: 2026-04-18
