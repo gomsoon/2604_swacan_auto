@@ -31,13 +31,20 @@ Already implemented:
   - `source_rule_id`
   - `source_rule_key`
   - `source_rule_display_name_snapshot`
+- current and archive rows now preserve opener/final winner summary through:
+  - `opening_rule_*`
+  - `winner_transition_count`
+  - `last_winner_transition_at`
+- runtime worker now writes append-only `alert_winner_transitions` rows on
+  actual winner-rule changes
+- current/admin/monitor/archive serializers now expose
+  `winner_transition_summary`
 
 Still missing:
 
-- opener-rule snapshot separate from final winner snapshot
-- transition count summary
-- last winner-change timestamp
-- append-only winner transition timeline
+- dedicated API/detail view for `alert_winner_transitions`
+- winner-transition timeline UI
+- richer timeline analytics beyond opener/final winner summary
 
 ## Phase 1 Scope
 
@@ -207,6 +214,13 @@ timeline UI.
 1. expose summary columns on current alert payloads
 2. expose summary columns on archive payloads
 3. optionally add a detail endpoint for transition rows
+
+Status:
+
+- summary columns are now exposed on admin current-alert payloads
+- summary columns are now exposed on monitoring current-alert payloads
+- summary columns are now exposed on archive payloads
+- dedicated transition-row detail API remains deferred
 
 UI timeline rendering can remain a later slice.
 

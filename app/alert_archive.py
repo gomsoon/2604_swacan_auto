@@ -75,6 +75,45 @@ def _resolve_archive_opening_rule_snapshot(
     return opening_rule_id, row["rule_key"], row["display_name"]
 
 
+def _build_winner_transition_summary(
+    *,
+    opening_rule_id: int | None,
+    opening_rule_key: str | None,
+    opening_rule_display_name_snapshot: str | None,
+    winner_rule_id: int | None,
+    winner_rule_key: str | None,
+    winner_rule_display_name_snapshot: str | None,
+    winner_transition_count: int,
+    last_winner_transition_at: str | None,
+) -> dict[str, Any]:
+    normalized_opening_rule_id = opening_rule_id
+    normalized_opening_rule_key = opening_rule_key
+    normalized_opening_rule_display_name_snapshot = opening_rule_display_name_snapshot
+    if (
+        normalized_opening_rule_id is None
+        and normalized_opening_rule_key is None
+        and normalized_opening_rule_display_name_snapshot is None
+        and winner_transition_count == 0
+    ):
+        normalized_opening_rule_id = winner_rule_id
+        normalized_opening_rule_key = winner_rule_key
+        normalized_opening_rule_display_name_snapshot = winner_rule_display_name_snapshot
+    return {
+        "opening_rule": {
+            "id": normalized_opening_rule_id,
+            "rule_key": normalized_opening_rule_key,
+            "display_name": normalized_opening_rule_display_name_snapshot,
+        },
+        "winner_rule": {
+            "id": winner_rule_id,
+            "rule_key": winner_rule_key,
+            "display_name": winner_rule_display_name_snapshot,
+        },
+        "transition_count": winner_transition_count,
+        "last_transition_at": last_winner_transition_at,
+    }
+
+
 def _merge_archive_metadata_json(raw_metadata_json: str | None, resolution_note: str | None) -> str | None:
     if not resolution_note:
         return raw_metadata_json
@@ -254,6 +293,11 @@ def close_alert_instance_with_archive(
 
 
 def serialize_alert_archive_row(row) -> dict[str, Any]:
+    winner_transition_count = (
+        int(row["winner_transition_count"])
+        if "winner_transition_count" in row.keys() and row["winner_transition_count"] is not None
+        else 0
+    )
     payload = {
         "id": row["id"],
         "monitored_object_id": row["monitored_object_id"],
@@ -264,6 +308,17 @@ def serialize_alert_archive_row(row) -> dict[str, Any]:
         "source_rule_id": row["source_rule_id"],
         "source_rule_key": row["source_rule_key"],
         "source_rule_display_name_snapshot": row["source_rule_display_name_snapshot"],
+        "opening_rule_id": row["opening_rule_id"] if "opening_rule_id" in row.keys() else None,
+        "opening_rule_key": row["opening_rule_key"] if "opening_rule_key" in row.keys() else None,
+        "opening_rule_display_name_snapshot": (
+            row["opening_rule_display_name_snapshot"]
+            if "opening_rule_display_name_snapshot" in row.keys()
+            else None
+        ),
+        "winner_transition_count": winner_transition_count,
+        "last_winner_transition_at": (
+            row["last_winner_transition_at"] if "last_winner_transition_at" in row.keys() else None
+        ),
         "source_rule_metric_key": row["source_rule_metric_key"],
         "source_rule_scope_type": row["source_rule_scope_type"],
         "source_rule_target_label": row["source_rule_target_label"],
@@ -307,4 +362,21 @@ def serialize_alert_archive_row(row) -> dict[str, Any]:
     )
     if explanation is not None:
         payload["explanation"] = explanation
+    winner_rule_key = row["source_rule_key"]
+    winner_rule_display_name_snapshot = row["source_rule_display_name_snapshot"]
+    if explanation is not None:
+        winner_rule_key = winner_rule_key or explanation.get("winner_rule_key")
+        winner_rule_display_name_snapshot = (
+            winner_rule_display_name_snapshot or explanation.get("winner_display_name")
+        )
+    payload["winner_transition_summary"] = _build_winner_transition_summary(
+        opening_rule_id=payload["opening_rule_id"],
+        opening_rule_key=payload["opening_rule_key"],
+        opening_rule_display_name_snapshot=payload["opening_rule_display_name_snapshot"],
+        winner_rule_id=row["source_rule_id"],
+        winner_rule_key=winner_rule_key,
+        winner_rule_display_name_snapshot=winner_rule_display_name_snapshot,
+        winner_transition_count=winner_transition_count,
+        last_winner_transition_at=payload["last_winner_transition_at"],
+    )
     return payload

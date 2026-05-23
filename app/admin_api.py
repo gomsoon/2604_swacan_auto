@@ -292,6 +292,11 @@ def serialize_cleanup_run(row) -> dict[str, Any]:
 
 
 def serialize_alert_instance(row) -> dict[str, Any]:
+    winner_transition_count = (
+        int(row["winner_transition_count"])
+        if "winner_transition_count" in row.keys() and row["winner_transition_count"] is not None
+        else 0
+    )
     payload = {
         "id": row["id"],
         "monitored_object_id": row["monitored_object_id"],
@@ -300,6 +305,23 @@ def serialize_alert_instance(row) -> dict[str, Any]:
         "display_name": row["display_name"],
         "alert_code": row["alert_code"],
         "source_rule_id": row["source_rule_id"],
+        "source_rule_key": row["source_rule_key"] if "source_rule_key" in row.keys() else None,
+        "source_rule_display_name_snapshot": (
+            row["source_rule_display_name_snapshot"]
+            if "source_rule_display_name_snapshot" in row.keys()
+            else None
+        ),
+        "opening_rule_id": row["opening_rule_id"] if "opening_rule_id" in row.keys() else None,
+        "opening_rule_key": row["opening_rule_key"] if "opening_rule_key" in row.keys() else None,
+        "opening_rule_display_name_snapshot": (
+            row["opening_rule_display_name_snapshot"]
+            if "opening_rule_display_name_snapshot" in row.keys()
+            else None
+        ),
+        "winner_transition_count": winner_transition_count,
+        "last_winner_transition_at": (
+            row["last_winner_transition_at"] if "last_winner_transition_at" in row.keys() else None
+        ),
         "source_rule_metric_key": row["source_rule_metric_key"],
         "source_rule_scope_type": row["source_rule_scope_type"],
         "source_rule_target_label": row["source_rule_target_label"],
@@ -333,6 +355,42 @@ def serialize_alert_instance(row) -> dict[str, Any]:
     )
     if explanation is not None:
         payload["explanation"] = explanation
+    winner_rule_key = payload["source_rule_key"]
+    winner_rule_display_name_snapshot = payload["source_rule_display_name_snapshot"]
+    if explanation is not None:
+        winner_rule_key = winner_rule_key or explanation.get("winner_rule_key")
+        winner_rule_display_name_snapshot = (
+            winner_rule_display_name_snapshot or explanation.get("winner_display_name")
+        )
+    opening_rule_id = payload["opening_rule_id"]
+    opening_rule_key = payload["opening_rule_key"]
+    opening_rule_display_name_snapshot = payload["opening_rule_display_name_snapshot"]
+    if (
+        opening_rule_id is None
+        and opening_rule_key is None
+        and opening_rule_display_name_snapshot is None
+        and winner_transition_count == 0
+    ):
+        opening_rule_id = row["source_rule_id"]
+        opening_rule_key = winner_rule_key
+        opening_rule_display_name_snapshot = winner_rule_display_name_snapshot
+        payload["opening_rule_id"] = opening_rule_id
+        payload["opening_rule_key"] = opening_rule_key
+        payload["opening_rule_display_name_snapshot"] = opening_rule_display_name_snapshot
+    payload["winner_transition_summary"] = {
+        "opening_rule": {
+            "id": opening_rule_id,
+            "rule_key": opening_rule_key,
+            "display_name": opening_rule_display_name_snapshot,
+        },
+        "winner_rule": {
+            "id": row["source_rule_id"],
+            "rule_key": winner_rule_key,
+            "display_name": winner_rule_display_name_snapshot,
+        },
+        "transition_count": winner_transition_count,
+        "last_transition_at": payload["last_winner_transition_at"],
+    }
     return payload
 
 
@@ -362,6 +420,8 @@ def fetch_alert_archive_row(archive_id: int):
                mo.object_type AS semantic_type_code,
                archive.alert_code, archive.source_rule_id, archive.source_rule_key,
                archive.source_rule_display_name_snapshot,
+               archive.opening_rule_id, archive.opening_rule_key, archive.opening_rule_display_name_snapshot,
+               archive.winner_transition_count, archive.last_winner_transition_at,
                rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
                COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
                archive.opened_at, archive.resolved_at,
@@ -389,7 +449,10 @@ def fetch_alert_instance_row(alert_id: int):
         """
         SELECT alerts.id, alerts.monitored_object_id, mo.runtime_binding_key, mo.object_type AS semantic_type_code,
                mo.display_name, alerts.alert_code, alerts.severity, alerts.status,
-               alerts.source_rule_id, rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
+               alerts.source_rule_id, rules.rule_key AS source_rule_key, rules.display_name AS source_rule_display_name_snapshot,
+               alerts.opening_rule_id, alerts.opening_rule_key, alerts.opening_rule_display_name_snapshot,
+               alerts.winner_transition_count, alerts.last_winner_transition_at,
+               rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
                COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
                alerts.acknowledged_at, alerts.acknowledged_by_user_id, ack_user.username AS acknowledged_by_username,
                alerts.ack_note,
@@ -425,6 +488,8 @@ def resolve_alert_instance(
         """
         SELECT id, monitored_object_id, alert_code, source_rule_id, identity_kind, identity_key, severity, status,
                acknowledged_at, acknowledged_by_user_id,
+               opening_rule_id, opening_rule_key, opening_rule_display_name_snapshot,
+               winner_transition_count, last_winner_transition_at,
                first_occurred_at, last_occurred_at, repeat_count,
                latest_message, metadata_json
         FROM alert_instances
@@ -2115,7 +2180,10 @@ def list_alert_instances():
     sql = """
         SELECT alerts.id, alerts.monitored_object_id, mo.runtime_binding_key, mo.object_type AS semantic_type_code,
                mo.display_name, alerts.alert_code, alerts.severity, alerts.status,
-               alerts.source_rule_id, rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
+               alerts.source_rule_id, rules.rule_key AS source_rule_key, rules.display_name AS source_rule_display_name_snapshot,
+               alerts.opening_rule_id, alerts.opening_rule_key, alerts.opening_rule_display_name_snapshot,
+               alerts.winner_transition_count, alerts.last_winner_transition_at,
+               rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
                COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
                alerts.acknowledged_at, alerts.acknowledged_by_user_id, ack_user.username AS acknowledged_by_username,
                alerts.ack_note,
@@ -2211,6 +2279,8 @@ def list_alert_archive():
                mo.object_type AS semantic_type_code,
                archive.alert_code, archive.source_rule_id, archive.source_rule_key,
                archive.source_rule_display_name_snapshot,
+               archive.opening_rule_id, archive.opening_rule_key, archive.opening_rule_display_name_snapshot,
+               archive.winner_transition_count, archive.last_winner_transition_at,
                rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
                COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
                archive.opened_at, archive.resolved_at,

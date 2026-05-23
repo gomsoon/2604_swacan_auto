@@ -611,6 +611,22 @@ def test_admin_alerts_returns_open_alerts(seeded_app, seeded_client) -> None:
                 1303,
             ),
         )
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET opening_rule_id = ?, opening_rule_key = ?, opening_rule_display_name_snapshot = ?,
+                winner_transition_count = ?, last_winner_transition_at = ?
+            WHERE monitored_object_id = ?
+            """,
+            (
+                1502,
+                "threshold.agent.outbox_queue_depth.agent-queue-high",
+                "Agent Queue High",
+                2,
+                "2026-04-12T11:04:15.000+09:00",
+                1303,
+            ),
+        )
         db_conn.commit()
     login(seeded_client)
 
@@ -623,25 +639,33 @@ def test_admin_alerts_returns_open_alerts(seeded_app, seeded_client) -> None:
     assert payload["items"][0]["alert_code"] == "agent.warning"
     assert payload["items"][0]["runtime_binding_key"] == "agent_local"
     assert payload["items"][0]["source_rule_id"] == 1502
+    assert payload["items"][0]["source_rule_key"] == "threshold.agent.outbox_queue_depth.agent-queue-high"
+    assert payload["items"][0]["source_rule_display_name_snapshot"] == "Agent Queue High"
+    assert payload["items"][0]["opening_rule_id"] == 1502
+    assert payload["items"][0]["opening_rule_key"] == "threshold.agent.outbox_queue_depth.agent-queue-high"
+    assert payload["items"][0]["opening_rule_display_name_snapshot"] == "Agent Queue High"
+    assert payload["items"][0]["winner_transition_count"] == 2
+    assert payload["items"][0]["last_winner_transition_at"] == "2026-04-12T11:04:15.000+09:00"
     assert payload["items"][0]["source_rule_metric_key"] == "outbox_queue_depth"
     assert payload["items"][0]["source_rule_target_label"] == "MonitoringAgent"
     assert payload["items"][0]["is_acknowledged"] is True
     assert payload["items"][0]["ack_note"] == "operator ack note"
-    assert payload["items"][0]["explanation"] == {
-        "rule_key": None,
-        "display_name": None,
-        "signal_type": "latest_state_metric",
-        "value_key": None,
-        "threshold_level": None,
-        "reason": "heartbeat delayed",
-        "winning_condition_trace": None,
-        "family_key": None,
-        "winner_rule_key": None,
-        "winner_display_name": None,
-        "suppressed_rule_keys": [],
-        "suppressed_rule_display_names": [],
-        "resolution_reason": None,
+    assert payload["items"][0]["winner_transition_summary"] == {
+        "opening_rule": {
+            "id": 1502,
+            "rule_key": "threshold.agent.outbox_queue_depth.agent-queue-high",
+            "display_name": "Agent Queue High",
+        },
+        "winner_rule": {
+            "id": 1502,
+            "rule_key": "threshold.agent.outbox_queue_depth.agent-queue-high",
+            "display_name": "Agent Queue High",
+        },
+        "transition_count": 2,
+        "last_transition_at": "2026-04-12T11:04:15.000+09:00",
     }
+    assert payload["items"][0]["explanation"]["reason"] == "heartbeat delayed"
+    assert payload["items"][0]["explanation"]["suppressed_rule_display_names"] == []
 
 
 def test_admin_alerts_reject_invalid_status_filter(seeded_client) -> None:

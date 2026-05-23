@@ -490,6 +490,26 @@ def test_alerts_reject_out_of_range_limits(seeded_client) -> None:
 
 def test_runtime_object_slice_returns_current_view_runtime_summary(seeded_app, seeded_client) -> None:
     seed_monitoring_rows(seeded_app)
+    with seeded_app.app_context():
+        db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET source_rule_id = ?, opening_rule_id = ?, opening_rule_key = ?, opening_rule_display_name_snapshot = ?,
+                winner_transition_count = ?, last_winner_transition_at = ?
+            WHERE monitored_object_id = ?
+            """,
+            (
+                1501,
+                1501,
+                "threshold.process.cpu_usage.process-cpu-high",
+                "Process CPU High",
+                1,
+                "2026-04-10T10:21:40.000+09:00",
+                1302,
+            ),
+        )
+        db_conn.commit()
     login(seeded_client)
 
     response = seeded_client.get("/api/views/1/runtime-objects/1302/slice?limit=10")
@@ -502,6 +522,24 @@ def test_runtime_object_slice_returns_current_view_runtime_summary(seeded_app, s
     assert [item["target_id"] for item in payload["latest_states"]] == ["app_main"]
     assert payload["latest_states"][0]["state"]["pid"] == 1234
     assert [item["alert_code"] for item in payload["alerts"]] == ["process.down"]
+    assert payload["alerts"][0]["source_rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
+    assert payload["alerts"][0]["opening_rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
+    assert payload["alerts"][0]["winner_transition_count"] == 1
+    assert payload["alerts"][0]["last_winner_transition_at"] == "2026-04-10T10:21:40.000+09:00"
+    assert payload["alerts"][0]["winner_transition_summary"] == {
+        "opening_rule": {
+            "id": 1501,
+            "rule_key": "threshold.process.cpu_usage.process-cpu-high",
+            "display_name": "Process CPU High",
+        },
+        "winner_rule": {
+            "id": 1501,
+            "rule_key": "threshold.process.cpu_usage.process-cpu-high",
+            "display_name": "Process CPU High",
+        },
+        "transition_count": 1,
+        "last_transition_at": "2026-04-10T10:21:40.000+09:00",
+    }
     assert [item["event_type"] for item in payload["events"]] == ["process_stopped"]
     assert payload["history"]["summary"]["resolved_alert_count"] == 0
     assert payload["history"]["summary"]["raw_event_count"] == 1
@@ -512,9 +550,28 @@ def test_runtime_object_slice_returns_alert_history_archive_summary(seeded_app, 
     seed_monitoring_rows(seeded_app)
     with seeded_app.app_context():
         db_conn = get_db()
+        db_conn.execute(
+            """
+            UPDATE alert_instances
+            SET source_rule_id = ?, opening_rule_id = ?, opening_rule_key = ?, opening_rule_display_name_snapshot = ?,
+                winner_transition_count = ?, last_winner_transition_at = ?
+            WHERE monitored_object_id = ?
+            """,
+            (
+                1501,
+                1501,
+                "threshold.process.cpu_usage.process-cpu-high",
+                "Process CPU High",
+                1,
+                "2026-04-10T10:21:40.000+09:00",
+                1302,
+            ),
+        )
         alert_row = db_conn.execute(
             """
             SELECT monitored_object_id, alert_code, source_rule_id, severity,
+                   opening_rule_id, opening_rule_key, opening_rule_display_name_snapshot,
+                   winner_transition_count, last_winner_transition_at,
                    acknowledged_at, acknowledged_by_user_id,
                    first_occurred_at, last_occurred_at, repeat_count,
                    latest_message, metadata_json
@@ -544,8 +601,27 @@ def test_runtime_object_slice_returns_alert_history_archive_summary(seeded_app, 
     assert payload["history"]["alert_archive"][0]["resolution_source"] == "manual_operator"
     assert payload["history"]["alert_archive"][0]["resolution_reason"] == "manual_resolved"
     assert payload["history"]["alert_archive"][0]["resolution_note"] == "resolved from monitoring view test"
-    assert payload["history"]["alert_archive"][0]["source_rule_key"] is None
-    assert payload["history"]["alert_archive"][0]["source_rule_display_name_snapshot"] is None
+    assert payload["history"]["alert_archive"][0]["source_rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
+    assert payload["history"]["alert_archive"][0]["source_rule_display_name_snapshot"] == "Process CPU High"
+    assert payload["history"]["alert_archive"][0]["opening_rule_id"] == 1501
+    assert payload["history"]["alert_archive"][0]["opening_rule_key"] == "threshold.process.cpu_usage.process-cpu-high"
+    assert payload["history"]["alert_archive"][0]["opening_rule_display_name_snapshot"] == "Process CPU High"
+    assert payload["history"]["alert_archive"][0]["winner_transition_count"] == 1
+    assert payload["history"]["alert_archive"][0]["last_winner_transition_at"] == "2026-04-10T10:21:40.000+09:00"
+    assert payload["history"]["alert_archive"][0]["winner_transition_summary"] == {
+        "opening_rule": {
+            "id": 1501,
+            "rule_key": "threshold.process.cpu_usage.process-cpu-high",
+            "display_name": "Process CPU High",
+        },
+        "winner_rule": {
+            "id": 1501,
+            "rule_key": "threshold.process.cpu_usage.process-cpu-high",
+            "display_name": "Process CPU High",
+        },
+        "transition_count": 1,
+        "last_transition_at": "2026-04-10T10:21:40.000+09:00",
+    }
     assert payload["history"]["alert_archive"][0]["explanation"]["reason"] == "process not found"
     assert payload["history"]["alert_archive"][0]["explanation"]["suppressed_rule_display_names"] == []
     assert payload["history"]["alert_archive"][0]["explanation"]["resolution_reason"] == "manual_resolved"

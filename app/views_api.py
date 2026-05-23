@@ -136,11 +136,33 @@ def serialize_grouped_event(event_row) -> dict[str, Any]:
 
 
 def serialize_alert_instance(alert_row) -> dict[str, Any]:
+    winner_transition_count = (
+        int(alert_row["winner_transition_count"])
+        if "winner_transition_count" in alert_row.keys() and alert_row["winner_transition_count"] is not None
+        else 0
+    )
     payload = {
         "id": alert_row["id"],
         "monitored_object_id": alert_row["monitored_object_id"],
         "alert_code": alert_row["alert_code"],
         "source_rule_id": alert_row["source_rule_id"],
+        "source_rule_key": alert_row["source_rule_key"] if "source_rule_key" in alert_row.keys() else None,
+        "source_rule_display_name_snapshot": (
+            alert_row["source_rule_display_name_snapshot"]
+            if "source_rule_display_name_snapshot" in alert_row.keys()
+            else None
+        ),
+        "opening_rule_id": alert_row["opening_rule_id"] if "opening_rule_id" in alert_row.keys() else None,
+        "opening_rule_key": alert_row["opening_rule_key"] if "opening_rule_key" in alert_row.keys() else None,
+        "opening_rule_display_name_snapshot": (
+            alert_row["opening_rule_display_name_snapshot"]
+            if "opening_rule_display_name_snapshot" in alert_row.keys()
+            else None
+        ),
+        "winner_transition_count": winner_transition_count,
+        "last_winner_transition_at": (
+            alert_row["last_winner_transition_at"] if "last_winner_transition_at" in alert_row.keys() else None
+        ),
         "source_rule_metric_key": alert_row["source_rule_metric_key"],
         "source_rule_target_label": alert_row["source_rule_target_label"],
         "severity": alert_row["severity"],
@@ -170,6 +192,42 @@ def serialize_alert_instance(alert_row) -> dict[str, Any]:
     )
     if explanation is not None:
         payload["explanation"] = explanation
+    winner_rule_key = payload["source_rule_key"]
+    winner_rule_display_name_snapshot = payload["source_rule_display_name_snapshot"]
+    if explanation is not None:
+        winner_rule_key = winner_rule_key or explanation.get("winner_rule_key")
+        winner_rule_display_name_snapshot = (
+            winner_rule_display_name_snapshot or explanation.get("winner_display_name")
+        )
+    opening_rule_id = payload["opening_rule_id"]
+    opening_rule_key = payload["opening_rule_key"]
+    opening_rule_display_name_snapshot = payload["opening_rule_display_name_snapshot"]
+    if (
+        opening_rule_id is None
+        and opening_rule_key is None
+        and opening_rule_display_name_snapshot is None
+        and winner_transition_count == 0
+    ):
+        opening_rule_id = alert_row["source_rule_id"]
+        opening_rule_key = winner_rule_key
+        opening_rule_display_name_snapshot = winner_rule_display_name_snapshot
+        payload["opening_rule_id"] = opening_rule_id
+        payload["opening_rule_key"] = opening_rule_key
+        payload["opening_rule_display_name_snapshot"] = opening_rule_display_name_snapshot
+    payload["winner_transition_summary"] = {
+        "opening_rule": {
+            "id": opening_rule_id,
+            "rule_key": opening_rule_key,
+            "display_name": opening_rule_display_name_snapshot,
+        },
+        "winner_rule": {
+            "id": alert_row["source_rule_id"],
+            "rule_key": winner_rule_key,
+            "display_name": winner_rule_display_name_snapshot,
+        },
+        "transition_count": winner_transition_count,
+        "last_transition_at": payload["last_winner_transition_at"],
+    }
     return payload
 
 
@@ -371,6 +429,9 @@ def fetch_alert_rows_for_monitored_objects(monitored_object_ids: list[int], *, s
     return get_db().execute(
         f"""
         SELECT alerts.id, alerts.monitored_object_id, alerts.alert_code, alerts.source_rule_id,
+               rules.rule_key AS source_rule_key, rules.display_name AS source_rule_display_name_snapshot,
+               alerts.opening_rule_id, alerts.opening_rule_key, alerts.opening_rule_display_name_snapshot,
+               alerts.winner_transition_count, alerts.last_winner_transition_at,
                rules.metric_key AS source_rule_metric_key,
                COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
                alerts.severity, alerts.status, alerts.acknowledged_at,
@@ -405,6 +466,8 @@ def fetch_alert_archive_rows_for_monitored_object(monitored_object_id: int, *, l
                mo.object_type AS semantic_type_code,
                archive.alert_code, archive.source_rule_id, archive.source_rule_key,
                archive.source_rule_display_name_snapshot,
+               archive.opening_rule_id, archive.opening_rule_key, archive.opening_rule_display_name_snapshot,
+               archive.winner_transition_count, archive.last_winner_transition_at,
                rules.metric_key AS source_rule_metric_key, rules.scope_type AS source_rule_scope_type,
                COALESCE(rule_mo.display_name, rules.object_type) AS source_rule_target_label,
                archive.opened_at, archive.resolved_at,
