@@ -7,10 +7,10 @@
 목적: `draft / published / active / deprecated` 상태 모델을 데이터베이스 구조로 구체화하고, 이후 runtime identity 분리 계층과 어떻게 연결할지 정리한다.
 
 참고 문서:
-- [terminology-guidelines.md](C:/2604_swacan_auto/docs/terminology-guidelines.md)
-- [view-versioning-operational-publish-design-draft.md](C:/2604_swacan_auto/docs/view-versioning-operational-publish-design-draft.md)
-- [view-versioning-sqlite-draft.md](C:/2604_swacan_auto/docs/view-versioning-sqlite-draft.md)
-- [runtime-identity-binding-design-draft.md](C:/2604_swacan_auto/docs/runtime-identity-binding-design-draft.md)
+- [280-terminology-guidelines.md](C:/2604_swacan_auto/docs/280-terminology-guidelines.md)
+- [190-view-versioning-operational-publish-design-draft.md](C:/2604_swacan_auto/docs/190-view-versioning-operational-publish-design-draft.md)
+- [220-view-versioning-sqlite-draft.md](C:/2604_swacan_auto/docs/220-view-versioning-sqlite-draft.md)
+- [230-runtime-identity-binding-design-draft.md](C:/2604_swacan_auto/docs/230-runtime-identity-binding-design-draft.md)
 
 ## 1. 설계 목표
 

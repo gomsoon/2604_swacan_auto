@@ -2,7 +2,7 @@
 
 ## Agent Addendum
 
-- See [agent-current-state-backlog.md](C:/2604_swacan_auto/docs/agent-current-state-backlog.md).
+- See [370-agent-current-state-backlog.md](C:/2604_swacan_auto/docs/370-agent-current-state-backlog.md).
 - Agent is currently treated as a stable MVP baseline with a follow-up backlog.
 - The current roadmap should not pull the main implementation focus back to Agent before Alert condition and lifecycle design are clarified.
 - Agent follow-up work should be framed as productization, operational hardening, and data-model expansion.
@@ -15,12 +15,12 @@
 목적: `minimal-e2e-v1` 이후 현재 구현 상태를 기준으로, MVP 단계에서 어떤 축을 우선적으로 다룰지 다시 정리한다.
 
 참고 문서:
-- [minimal-e2e-signoff.md](C:/2604_swacan_auto/docs/minimal-e2e-signoff.md)
-- [metamodel-editor-backlog.md](C:/2604_swacan_auto/docs/metamodel-editor-backlog.md)
-- [architecture-editor-backlog.md](C:/2604_swacan_auto/docs/architecture-editor-backlog.md)
-- [monitoring-view-backlog.md](C:/2604_swacan_auto/docs/monitoring-view-backlog.md)
-- [alert-management-backlog.md](C:/2604_swacan_auto/docs/alert-management-backlog.md)
-- [alert-condition-flexibility-draft.md](C:/2604_swacan_auto/docs/alert-condition-flexibility-draft.md)
+- [140-minimal-e2e-signoff.md](C:/2604_swacan_auto/docs/140-minimal-e2e-signoff.md)
+- [290-metamodel-editor-backlog.md](C:/2604_swacan_auto/docs/290-metamodel-editor-backlog.md)
+- [320-architecture-editor-backlog.md](C:/2604_swacan_auto/docs/320-architecture-editor-backlog.md)
+- [330-monitoring-view-backlog.md](C:/2604_swacan_auto/docs/330-monitoring-view-backlog.md)
+- [240-alert-management-backlog.md](C:/2604_swacan_auto/docs/240-alert-management-backlog.md)
+- [350-alert-condition-flexibility-draft.md](C:/2604_swacan_auto/docs/350-alert-condition-flexibility-draft.md)
 
 ## 1. 현재 기준점
 
@@ -83,10 +83,10 @@
 
 ## 4. 관련 backlog 관리 방향
 
-- `Monitoring View` 후속 기능은 [monitoring-view-backlog.md](C:/2604_swacan_auto/docs/monitoring-view-backlog.md)에서 관리
-- `Architecture Editor` 후속 기능은 [architecture-editor-backlog.md](C:/2604_swacan_auto/docs/architecture-editor-backlog.md)에서 관리
-- `Metamodel Editor` 후속 기능은 [metamodel-editor-backlog.md](C:/2604_swacan_auto/docs/metamodel-editor-backlog.md)에서 관리
-- `Alert` 후속 기능은 [alert-management-backlog.md](C:/2604_swacan_auto/docs/alert-management-backlog.md)에서 관리
+- `Monitoring View` 후속 기능은 [330-monitoring-view-backlog.md](C:/2604_swacan_auto/docs/330-monitoring-view-backlog.md)에서 관리
+- `Architecture Editor` 후속 기능은 [320-architecture-editor-backlog.md](C:/2604_swacan_auto/docs/320-architecture-editor-backlog.md)에서 관리
+- `Metamodel Editor` 후속 기능은 [290-metamodel-editor-backlog.md](C:/2604_swacan_auto/docs/290-metamodel-editor-backlog.md)에서 관리
+- `Alert` 후속 기능은 [240-alert-management-backlog.md](C:/2604_swacan_auto/docs/240-alert-management-backlog.md)에서 관리
 
 ## 5. 현재 결론
 

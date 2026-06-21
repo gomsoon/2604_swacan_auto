@@ -7,11 +7,11 @@
 목적: MVP 단계에서 사용할 metamodel/notation registry의 데이터베이스 설계 방향을 정리한다. 이 설계의 목표는 backend가 메타모델 의미와 기본 시각 표현을 함께 관리하고, frontend는 이를 해석하는 SVG 렌더러로 동작하도록 만드는 것이다.
 
 참고 문서:
-- [mvp-transition-roadmap.md](C:/2604_swacan_auto/docs/mvp-transition-roadmap.md)
-- [terminology-guidelines.md](C:/2604_swacan_auto/docs/terminology-guidelines.md)
-- [backend-detailed-requirements.md](C:/2604_swacan_auto/docs/backend-detailed-requirements.md)
-- [frontend-detailed-requirements.md](C:/2604_swacan_auto/docs/frontend-detailed-requirements.md)
-- [software-architecture-runtime-monitoring-mvp-plan.md](C:/2604_swacan_auto/docs/software-architecture-runtime-monitoring-mvp-plan.md)
+- [150-mvp-transition-roadmap.md](C:/2604_swacan_auto/docs/150-mvp-transition-roadmap.md)
+- [280-terminology-guidelines.md](C:/2604_swacan_auto/docs/280-terminology-guidelines.md)
+- [020-backend-detailed-requirements.md](C:/2604_swacan_auto/docs/020-backend-detailed-requirements.md)
+- [040-frontend-detailed-requirements.md](C:/2604_swacan_auto/docs/040-frontend-detailed-requirements.md)
+- [001-software-architecture-runtime-monitoring-mvp-plan.md](C:/2604_swacan_auto/docs/001-software-architecture-runtime-monitoring-mvp-plan.md)
 
 ## 1. 설계 목표
 
@@ -78,7 +78,7 @@
 ### 3.1 Runtime Layer 보강 메모
 - 여러 active view가 동일한 runtime 대상을 동시에 표현할 수 있으므로, runtime layer는 장기적으로 `view node`가 아니라 별도의 `monitored object`를 기준으로 구성하는 편이 더 안정적이다.
 - 이 경우 view는 `node binding`을 통해 monitored object를 참조하고, latest state / raw event / alert는 monitored object에 1회 생성된 뒤 여러 view로 fan-out된다.
-- 관련 상세는 [runtime-identity-binding-design-draft.md](C:/2604_swacan_auto/docs/runtime-identity-binding-design-draft.md)에서 별도로 정리한다.
+- 관련 상세는 [230-runtime-identity-binding-design-draft.md](C:/2604_swacan_auto/docs/230-runtime-identity-binding-design-draft.md)에서 별도로 정리한다.
 
 ## 4. 핵심 테이블
 

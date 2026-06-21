@@ -67,7 +67,7 @@ Current implementation note for the next review step:
 
 ## Agent Addendum
 
-- See [agent-current-state-backlog.md](C:/2604_swacan_auto/docs/agent-current-state-backlog.md).
+- See [370-agent-current-state-backlog.md](C:/2604_swacan_auto/docs/370-agent-current-state-backlog.md).
 - Agent is currently a usable Linux baseline rather than the main architectural gap.
 - The existing baseline already includes selector-driven discovery, snapshot collection, SQLite outbox transport, backend ingest integration, and Monitoring View verification.
 - Agent should remain on a measured follow-up backlog while the main implementation focus returns to Alert condition flexibility and Alert lifecycle design.
@@ -78,13 +78,13 @@ Current implementation note for the next review step:
 목적: 현재 구현 상태를 기준으로, 다음 구현 축과 설계 검토 축을 다시 정리한다.
 
 참고 문서:
-- [mvp-transition-roadmap.md](C:/2604_swacan_auto/docs/mvp-transition-roadmap.md)
-- [metamodel-editor-backlog.md](C:/2604_swacan_auto/docs/metamodel-editor-backlog.md)
-- [architecture-editor-backlog.md](C:/2604_swacan_auto/docs/architecture-editor-backlog.md)
-- [monitoring-view-backlog.md](C:/2604_swacan_auto/docs/monitoring-view-backlog.md)
-- [alert-management-backlog.md](C:/2604_swacan_auto/docs/alert-management-backlog.md)
-- [alert-condition-flexibility-draft.md](C:/2604_swacan_auto/docs/alert-condition-flexibility-draft.md)
-- [testing-coverage-sprint-plan.md](C:/2604_swacan_auto/docs/testing-coverage-sprint-plan.md)
+- [150-mvp-transition-roadmap.md](C:/2604_swacan_auto/docs/150-mvp-transition-roadmap.md)
+- [290-metamodel-editor-backlog.md](C:/2604_swacan_auto/docs/290-metamodel-editor-backlog.md)
+- [320-architecture-editor-backlog.md](C:/2604_swacan_auto/docs/320-architecture-editor-backlog.md)
+- [330-monitoring-view-backlog.md](C:/2604_swacan_auto/docs/330-monitoring-view-backlog.md)
+- [240-alert-management-backlog.md](C:/2604_swacan_auto/docs/240-alert-management-backlog.md)
+- [350-alert-condition-flexibility-draft.md](C:/2604_swacan_auto/docs/350-alert-condition-flexibility-draft.md)
+- [360-testing-coverage-sprint-plan.md](C:/2604_swacan_auto/docs/360-testing-coverage-sprint-plan.md)
 
 ## 1. 현재 상태 요약
 
@@ -129,7 +129,7 @@ Current implementation note for the next review step:
 - runtime binding UX 후속 polish
 - 제약 기반 직접 편집 2차 고도화
 
-자세한 항목은 [architecture-editor-backlog.md](C:/2604_swacan_auto/docs/architecture-editor-backlog.md)를 따른다.
+자세한 항목은 [320-architecture-editor-backlog.md](C:/2604_swacan_auto/docs/320-architecture-editor-backlog.md)를 따른다.
 
 ### 3.2 Monitoring View backlog
 
@@ -139,7 +139,7 @@ Current implementation note for the next review step:
 - 상태 시각화 2차 고도화
 - 객체 이력 / 트렌드 확장
 
-자세한 항목은 [monitoring-view-backlog.md](C:/2604_swacan_auto/docs/monitoring-view-backlog.md)를 따른다.
+자세한 항목은 [330-monitoring-view-backlog.md](C:/2604_swacan_auto/docs/330-monitoring-view-backlog.md)를 따른다.
 
 ### 3.3 Metamodel / Architecture / Monitoring 후속 연동
 

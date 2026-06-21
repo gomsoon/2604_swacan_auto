@@ -4,10 +4,10 @@ Version: Draft 0.1
 Updated: 2026-05-06
 
 References:
-- [agent-detailed-requirements.md](C:/2604_swacan_auto/docs/agent-detailed-requirements.md)
-- [agent-linux-runbook.md](C:/2604_swacan_auto/docs/agent-linux-runbook.md)
-- [linux-agent-l01-evidence.md](C:/2604_swacan_auto/docs/linux-agent-l01-evidence.md)
-- [testing-coverage-sprint-plan.md](C:/2604_swacan_auto/docs/testing-coverage-sprint-plan.md)
+- [030-agent-detailed-requirements.md](C:/2604_swacan_auto/docs/030-agent-detailed-requirements.md)
+- [130-agent-linux-runbook.md](C:/2604_swacan_auto/docs/130-agent-linux-runbook.md)
+- [120-linux-agent-l01-evidence.md](C:/2604_swacan_auto/docs/120-linux-agent-l01-evidence.md)
+- [360-testing-coverage-sprint-plan.md](C:/2604_swacan_auto/docs/360-testing-coverage-sprint-plan.md)
 
 ## Current Baseline
 

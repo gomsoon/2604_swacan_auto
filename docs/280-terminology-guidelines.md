@@ -7,10 +7,10 @@
 목적: 화면, 데이터 모델, 편집 흐름에서 반복적으로 사용되는 핵심 용어를 일관되게 정의한다. 본 문서는 다른 설계 문서에서 공통으로 참조하는 기준 용어집이다.
 
 참고 문서:
-- [mvp-transition-roadmap.md](C:/2604_swacan_auto/docs/mvp-transition-roadmap.md)
-- [view-versioning-operational-publish-design-draft.md](C:/2604_swacan_auto/docs/view-versioning-operational-publish-design-draft.md)
-- [runtime-identity-binding-design-draft.md](C:/2604_swacan_auto/docs/runtime-identity-binding-design-draft.md)
-- [metamodel-notation-db-design-draft.md](C:/2604_swacan_auto/docs/metamodel-notation-db-design-draft.md)
+- [150-mvp-transition-roadmap.md](C:/2604_swacan_auto/docs/150-mvp-transition-roadmap.md)
+- [190-view-versioning-operational-publish-design-draft.md](C:/2604_swacan_auto/docs/190-view-versioning-operational-publish-design-draft.md)
+- [230-runtime-identity-binding-design-draft.md](C:/2604_swacan_auto/docs/230-runtime-identity-binding-design-draft.md)
+- [160-metamodel-notation-db-design-draft.md](C:/2604_swacan_auto/docs/160-metamodel-notation-db-design-draft.md)
 
 ## 1. 화면 용어
 

@@ -42,8 +42,8 @@ coverage 기준 메모:
 
 실제 Linux agent 서버 기반 검증은 다음 문서에 정리되어 있다.
 
-- [linux-agent-l01-evidence.md](C:/2604_swacan_auto/docs/linux-agent-l01-evidence.md)
-- [agent-linux-runbook.md](C:/2604_swacan_auto/docs/agent-linux-runbook.md)
+- [120-linux-agent-l01-evidence.md](C:/2604_swacan_auto/docs/120-linux-agent-l01-evidence.md)
+- [130-agent-linux-runbook.md](C:/2604_swacan_auto/docs/130-agent-linux-runbook.md)
 
 검증 요약:
 

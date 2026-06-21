@@ -8,9 +8,9 @@
 목적: `draft / published / active / deprecated` 상태 모델을 기준으로, view versioning 기능에 필요한 최소 API 집합을 정리한다. 이 문서는 이후 Flask endpoint 설계와 frontend 연동 기준으로 사용한다.
 
 참고 문서:
-- [view-versioning-operational-publish-design-draft.md](C:/2604_swacan_auto/docs/view-versioning-operational-publish-design-draft.md)
-- [view-versioning-erd-draft.md](C:/2604_swacan_auto/docs/view-versioning-erd-draft.md)
-- [minimal-api-draft.md](C:/2604_swacan_auto/docs/minimal-api-draft.md)
+- [190-view-versioning-operational-publish-design-draft.md](C:/2604_swacan_auto/docs/190-view-versioning-operational-publish-design-draft.md)
+- [210-view-versioning-erd-draft.md](C:/2604_swacan_auto/docs/210-view-versioning-erd-draft.md)
+- [070-minimal-api-draft.md](C:/2604_swacan_auto/docs/070-minimal-api-draft.md)
 
 ## 1. 설계 원칙
 

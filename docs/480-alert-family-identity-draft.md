@@ -23,7 +23,7 @@ Phase 1 is now implemented for threshold-style runtime families.
 - current threshold incidents use `identity_kind = 'family'`
 - the same current row survives winner changes inside the same family
 - event-family identity is now implemented separately; see
-  [alert-event-family-identity-draft.md](C:/2604_swacan_auto/docs/alert-event-family-identity-draft.md)
+  [490-alert-event-family-identity-draft.md](C:/2604_swacan_auto/docs/490-alert-event-family-identity-draft.md)
 - the next shared follow-up is opener snapshots plus winner-transition
   analytics
 

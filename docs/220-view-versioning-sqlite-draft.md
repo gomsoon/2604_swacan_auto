@@ -7,9 +7,9 @@
 목적: `draft / published / active / deprecated` 상태 모델과 이후 runtime identity 분리 계층을 SQLite 관점에서 어떻게 확장할지 정리한다.
 
 참고 문서:
-- [view-versioning-erd-draft.md](C:/2604_swacan_auto/docs/view-versioning-erd-draft.md)
-- [view-versioning-api-draft.md](C:/2604_swacan_auto/docs/view-versioning-api-draft.md)
-- [runtime-identity-binding-design-draft.md](C:/2604_swacan_auto/docs/runtime-identity-binding-design-draft.md)
+- [210-view-versioning-erd-draft.md](C:/2604_swacan_auto/docs/210-view-versioning-erd-draft.md)
+- [200-view-versioning-api-draft.md](C:/2604_swacan_auto/docs/200-view-versioning-api-draft.md)
+- [230-runtime-identity-binding-design-draft.md](C:/2604_swacan_auto/docs/230-runtime-identity-binding-design-draft.md)
 
 ## 1. 설계 목표
 

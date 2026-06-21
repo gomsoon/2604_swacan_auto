@@ -7,11 +7,11 @@
 목적: 여러 active view가 동일한 server, process, thread를 동시에 표현할 수 있는 구조에서, runtime state/event/alert를 어디에 귀속시키고 어떻게 fan-out할지 설계 방향을 정리한다.
 
 참고 문서:
-- [terminology-guidelines.md](C:/2604_swacan_auto/docs/terminology-guidelines.md)
-- [view-versioning-erd-draft.md](C:/2604_swacan_auto/docs/view-versioning-erd-draft.md)
-- [view-versioning-sqlite-draft.md](C:/2604_swacan_auto/docs/view-versioning-sqlite-draft.md)
-- [metamodel-notation-db-design-draft.md](C:/2604_swacan_auto/docs/metamodel-notation-db-design-draft.md)
-- [mvp-transition-roadmap.md](C:/2604_swacan_auto/docs/mvp-transition-roadmap.md)
+- [280-terminology-guidelines.md](C:/2604_swacan_auto/docs/280-terminology-guidelines.md)
+- [210-view-versioning-erd-draft.md](C:/2604_swacan_auto/docs/210-view-versioning-erd-draft.md)
+- [220-view-versioning-sqlite-draft.md](C:/2604_swacan_auto/docs/220-view-versioning-sqlite-draft.md)
+- [160-metamodel-notation-db-design-draft.md](C:/2604_swacan_auto/docs/160-metamodel-notation-db-design-draft.md)
+- [150-mvp-transition-roadmap.md](C:/2604_swacan_auto/docs/150-mvp-transition-roadmap.md)
 
 ## 1. 문제 정의
 

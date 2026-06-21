@@ -61,4 +61,4 @@
 - 제약 기반 직접 편집 2차 고도화
 - Monitoring View와의 반영 경계 안정화
 
-세부 후속 목록은 [architecture-editor-backlog.md](C:/2604_swacan_auto/docs/architecture-editor-backlog.md)에 정리한다.
+세부 후속 목록은 [320-architecture-editor-backlog.md](C:/2604_swacan_auto/docs/320-architecture-editor-backlog.md)에 정리한다.

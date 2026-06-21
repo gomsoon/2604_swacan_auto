@@ -28,4 +28,4 @@ This means stale alerting now works through ordinary published threshold rules.
 - This slice only enables stale reuse for `agent.heartbeat_age_seconds`.
 - It does not introduce a separate `stale` rule family.
 - `process/host` no-data reuse is described separately in
-  [no-data-threshold-reuse-draft.md](C:/2604_swacan_auto/docs/no-data-threshold-reuse-draft.md).
+  [470-no-data-threshold-reuse-draft.md](C:/2604_swacan_auto/docs/470-no-data-threshold-reuse-draft.md).

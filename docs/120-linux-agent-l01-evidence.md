@@ -87,7 +87,7 @@
 - SSH helper:
   - [linux_agent_ssh_support.py](C:/2604_swacan_auto/tests/linux_agent_ssh_support.py)
 - 실행 가이드:
-  - [agent-linux-runbook.md](C:/2604_swacan_auto/docs/agent-linux-runbook.md)
+  - [130-agent-linux-runbook.md](C:/2604_swacan_auto/docs/130-agent-linux-runbook.md)
 
 ## 9. 현재 결론
 

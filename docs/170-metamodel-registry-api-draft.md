@@ -7,9 +7,9 @@
 목적: MVP 단계에서 backend가 제공해야 하는 metamodel/notation registry API를 정리한다. 이 API의 목적은 frontend editor, monitoring, admin 화면이 같은 metamodel 정의를 공통으로 조회하도록 만드는 것이다.
 
 참고 문서:
-- [metamodel-notation-db-design-draft.md](C:/2604_swacan_auto/docs/metamodel-notation-db-design-draft.md)
-- [metamodel-registry-sqlite-draft.md](C:/2604_swacan_auto/docs/metamodel-registry-sqlite-draft.md)
-- [minimal-api-draft.md](C:/2604_swacan_auto/docs/minimal-api-draft.md)
+- [160-metamodel-notation-db-design-draft.md](C:/2604_swacan_auto/docs/160-metamodel-notation-db-design-draft.md)
+- [180-metamodel-registry-sqlite-draft.md](C:/2604_swacan_auto/docs/180-metamodel-registry-sqlite-draft.md)
+- [070-minimal-api-draft.md](C:/2604_swacan_auto/docs/070-minimal-api-draft.md)
 
 ## 1. 설계 원칙
 

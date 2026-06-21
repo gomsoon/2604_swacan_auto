@@ -4,13 +4,13 @@
 버전: Draft 0.1  
 작성일: 2026-04-15
 
-목적: 본 문서는 [metamodel-notation-db-design-draft.md](C:/2604_swacan_auto/docs/metamodel-notation-db-design-draft.md) 를 바탕으로, MVP 단계에서 추가될 메타모델 registry용 SQLite 테이블 구조를 초안 수준으로 정리한다.
+목적: 본 문서는 [160-metamodel-notation-db-design-draft.md](C:/2604_swacan_auto/docs/160-metamodel-notation-db-design-draft.md) 를 바탕으로, MVP 단계에서 추가될 메타모델 registry용 SQLite 테이블 구조를 초안 수준으로 정리한다.
 
 참고 문서:
 
-- [metamodel-notation-db-design-draft.md](C:/2604_swacan_auto/docs/metamodel-notation-db-design-draft.md)
-- [sqlite-create-table-draft.md](C:/2604_swacan_auto/docs/sqlite-create-table-draft.md)
-- [backend-detailed-requirements.md](C:/2604_swacan_auto/docs/backend-detailed-requirements.md)
+- [160-metamodel-notation-db-design-draft.md](C:/2604_swacan_auto/docs/160-metamodel-notation-db-design-draft.md)
+- [100-sqlite-create-table-draft.md](C:/2604_swacan_auto/docs/100-sqlite-create-table-draft.md)
+- [020-backend-detailed-requirements.md](C:/2604_swacan_auto/docs/020-backend-detailed-requirements.md)
 
 ## 1. 설계 범위
 

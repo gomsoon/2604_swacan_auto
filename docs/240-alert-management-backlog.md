@@ -112,7 +112,7 @@ Current implementation note for item 4:
 - rule preview / dry-run / validation 방향 정리
 
 참고 문서:
-- [alert-condition-flexibility-draft.md](C:/2604_swacan_auto/docs/alert-condition-flexibility-draft.md)
+- [350-alert-condition-flexibility-draft.md](C:/2604_swacan_auto/docs/350-alert-condition-flexibility-draft.md)
 
 ### 2.2 Alert lifecycle / archive 구조 정교화
 
